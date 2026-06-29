@@ -3,6 +3,7 @@ mod db;
 mod entries;
 mod images;
 mod models;
+mod phase6;
 mod search;
 mod security;
 mod settings;
@@ -10,18 +11,21 @@ mod stats;
 mod threads;
 
 use models::{
+    AiMetadataSuggestionRequest, AiMetadataSuggestionResponse, AiOverviewResponse,
     AnalyticsPeriodRequest, AnalyticsResponse, BackupCreateRequest, BackupCreateResponse,
     BackupListResponse, BackupRestorePreview, BackupRestorePreviewRequest, BackupRestoreRequest,
     BackupRestoreResponse, BulkThreadDetachRequest, BulkThreadLinkRequest, CapsuleConfigResponse,
     ConfigMutationResponse, CoverWallRequest, CoverWallResponse, DatabaseStatus, Entry,
     EntryCreate, EntryFilters, EntryHistoryResponse, EntryListResponse, EntryMutationResponse,
-    EntryUpdate, ExportEntriesRequest, ExportEntriesResponse, ImageAttachRequest,
-    ImageEntriesListResponse, ImageEntryListResponse, ImageMutationResponse, ImageUploadResponse,
-    ImageVariant, LibraryListResponse, LibraryPromptInput, LibraryPromptMutationResponse,
-    LibraryPromptUpdate, LibraryTemplateInput, LibraryTemplateMutationResponse,
-    LibraryTemplateUpdate, MoodCatalogResponse, MoodDeleteRequest, MoodMutationResponse,
-    MoodRenameRequest, RandomEntryFilters, SearchRequest, SearchResponse, TagCatalogResponse,
-    TagDeleteRequest, TagMergeRequest, TagMutationResponse, TagRenameRequest, ThreadListResponse,
+    EntryUpdate, ExportEntriesRequest, ExportEntriesResponse, GamificationOverviewResponse,
+    ImageAttachRequest, ImageEntriesListResponse, ImageEntryListResponse, ImageMutationResponse,
+    ImageUploadResponse, ImageVariant, LibraryListResponse, LibraryPromptInput,
+    LibraryPromptMutationResponse, LibraryPromptUpdate, LibraryTemplateInput,
+    LibraryTemplateMutationResponse, LibraryTemplateUpdate, MoodCatalogResponse, MoodDeleteRequest,
+    MoodMutationResponse, MoodRenameRequest, PluginMutationRequest, PluginMutationResponse,
+    PluginOverviewResponse, QuestClaimRequest, QuestClaimResponse, RandomEntryFilters,
+    SearchRequest, SearchResponse, SyncOverviewResponse, TagCatalogResponse, TagDeleteRequest,
+    TagMergeRequest, TagMutationResponse, TagRenameRequest, ThreadListResponse,
     ThreadMetadataUpdate, ThreadMutationResponse, WritingCalendarResponse,
 };
 
@@ -481,6 +485,66 @@ async fn export_entries(input: ExportEntriesRequest) -> Result<ExportEntriesResp
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn get_ai_overview() -> Result<AiOverviewResponse, String> {
+    tauri::async_runtime::spawn_blocking(phase6::get_ai_overview)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn suggest_ai_metadata(
+    input: AiMetadataSuggestionRequest,
+) -> Result<AiMetadataSuggestionResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || phase6::suggest_ai_metadata(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_sync_overview() -> Result<SyncOverviewResponse, String> {
+    tauri::async_runtime::spawn_blocking(phase6::get_sync_overview)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_plugin_overview() -> Result<PluginOverviewResponse, String> {
+    tauri::async_runtime::spawn_blocking(phase6::get_plugin_overview)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn set_plugin_enabled(
+    input: PluginMutationRequest,
+) -> Result<PluginMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || phase6::set_plugin_enabled(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_gamification_overview() -> Result<GamificationOverviewResponse, String> {
+    tauri::async_runtime::spawn_blocking(phase6::get_gamification_overview)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn claim_quest(input: QuestClaimRequest) -> Result<QuestClaimResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || phase6::claim_quest(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -537,7 +601,14 @@ pub fn run() {
             create_prompt,
             update_prompt,
             delete_prompt,
-            export_entries
+            export_entries,
+            get_ai_overview,
+            suggest_ai_metadata,
+            get_sync_overview,
+            get_plugin_overview,
+            set_plugin_enabled,
+            get_gamification_overview,
+            claim_quest
         ])
         .run(tauri::generate_context!())
         .expect("error while running Capsule Tauri app");

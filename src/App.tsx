@@ -3,6 +3,7 @@ import {
   Archive,
   BarChart3,
   BookOpen,
+  Bot,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -31,6 +32,7 @@ import {
   Paperclip,
   Pin,
   PinOff,
+  Plug,
   Plus,
   RefreshCw,
   Save,
@@ -41,6 +43,7 @@ import {
   Sparkles,
   Star,
   Tags,
+  Trophy,
   TriangleAlert,
   Trash2,
   Unlink2,
@@ -50,6 +53,7 @@ import {
 import {
   attachImage,
   bulkDetachThreads,
+  claimQuest,
   createPrompt,
   createEntry,
   createBackup,
@@ -62,12 +66,16 @@ import {
   disbandThread,
   exportEntries,
   getAnalytics,
+  getAiOverview,
   getCapsuleConfig,
   getCoverDataUrl,
   getDatabaseStatus,
+  getGamificationOverview,
   getEntry,
   getImageDataUrl,
+  getPluginOverview,
   getRandomEntry,
+  getSyncOverview,
   getWritingCalendar,
   hideEntry,
   listCoverWall,
@@ -90,7 +98,9 @@ import {
   restoreBackup,
   searchEntries,
   setCapsuleConfigValue,
+  setPluginEnabled,
   starEntry,
+  suggestAiMetadata,
   unhideEntry,
   unpinEntry,
   unstarEntry,
@@ -106,6 +116,8 @@ import type {
   BackupInfo,
   BackupRestorePreview,
   CapsuleConfigResponse,
+  AiMetadataSuggestionResponse,
+  AiOverviewResponse,
   AnalyticsPeriodRequest,
   AnalyticsResponse,
   CoverWallRequest,
@@ -120,14 +132,19 @@ import type {
   EntryUpdate,
   ExportFormat,
   EntryCover,
+  GamificationOverviewResponse,
+  GamificationQuest,
   ImageAttachment,
   ImageEntryListResponse,
   ImageMutationResponse,
   ImageVariant,
   LibraryListResponse,
   MoodCatalogResponse,
+  Phase6Capability,
+  PluginOverviewResponse,
   SearchRequest,
   SearchResponse,
+  SyncOverviewResponse,
   TagCatalogResponse,
   ThreadGroup,
   ThreadListResponse,
@@ -141,10 +158,14 @@ type ActiveView =
   | "entries"
   | "threads"
   | "search"
+  | "ai"
+  | "sync"
   | "images"
   | "analytics"
   | "calendar"
   | "covers"
+  | "plugins"
+  | "gamification"
   | "composer"
   | "writer"
   | "backups"
@@ -239,10 +260,14 @@ const navItems: Array<{ id: ActiveView; label: string; icon: ReactNode }> = [
   { id: "entries", label: "Entries", icon: <BookOpen size={18} /> },
   { id: "threads", label: "Threads", icon: <GitBranch size={18} /> },
   { id: "search", label: "Search", icon: <Search size={18} /> },
+  { id: "ai", label: "AI", icon: <Bot size={18} /> },
+  { id: "sync", label: "Sync", icon: <Cloud size={18} /> },
   { id: "images", label: "Images", icon: <Paperclip size={18} /> },
   { id: "analytics", label: "Analytics", icon: <BarChart3 size={18} /> },
   { id: "calendar", label: "Calendar", icon: <CalendarDays size={18} /> },
   { id: "covers", label: "Cover Wall", icon: <Images size={18} /> },
+  { id: "plugins", label: "Plugins", icon: <Plug size={18} /> },
+  { id: "gamification", label: "Profile", icon: <Trophy size={18} /> },
   { id: "composer", label: "New Entry", icon: <Plus size={18} /> },
   { id: "writer", label: "Writer", icon: <Sparkles size={18} /> },
   { id: "backups", label: "Backups", icon: <Archive size={18} /> },
@@ -329,6 +354,13 @@ function App() {
   const [searchForm, setSearchForm] = useState<SearchForm>(defaultSearchForm);
   const [searchLimit, setSearchLimit] = useState(40);
   const [searchResponse, setSearchResponse] = useState<SearchResponse | null>(null);
+  const [aiOverview, setAiOverview] = useState<AiOverviewResponse | null>(null);
+  const [aiSuggestion, setAiSuggestion] = useState<AiMetadataSuggestionResponse | null>(null);
+  const [aiSuggestionIdentifier, setAiSuggestionIdentifier] = useState("");
+  const [syncOverview, setSyncOverview] = useState<SyncOverviewResponse | null>(null);
+  const [pluginOverview, setPluginOverview] = useState<PluginOverviewResponse | null>(null);
+  const [gamificationOverview, setGamificationOverview] =
+    useState<GamificationOverviewResponse | null>(null);
   const [imageEntryResponse, setImageEntryResponse] = useState<EntryListResponse | null>(null);
   const [imageLimit, setImageLimit] = useState(40);
   const [selectedImageEntry, setSelectedImageEntry] = useState<Entry | null>(null);
@@ -371,6 +403,13 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [entriesLoading, setEntriesLoading] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiSuggesting, setAiSuggesting] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [pluginsLoading, setPluginsLoading] = useState(false);
+  const [pluginMutating, setPluginMutating] = useState(false);
+  const [gamificationLoading, setGamificationLoading] = useState(false);
+  const [questMutating, setQuestMutating] = useState(false);
   const [imagesLoading, setImagesLoading] = useState(false);
   const [imageDetailLoading, setImageDetailLoading] = useState(false);
   const [imageMutating, setImageMutating] = useState(false);
@@ -514,6 +553,79 @@ function App() {
       setSearchLoading(false);
     }
   }, [builtSearchRequest, status?.readable]);
+
+  const loadAiOverview = useCallback(async () => {
+    if (!status?.readable) {
+      setAiOverview(null);
+      setAiSuggestion(null);
+      return;
+    }
+
+    setAiLoading(true);
+    setError(null);
+    try {
+      setAiOverview(await getAiOverview());
+    } catch (aiError) {
+      setError(aiError instanceof Error ? aiError.message : "Unable to load AI overview");
+    } finally {
+      setAiLoading(false);
+    }
+  }, [status?.readable]);
+
+  const loadSyncOverview = useCallback(async () => {
+    if (!status?.readable) {
+      setSyncOverview(null);
+      return;
+    }
+
+    setSyncLoading(true);
+    setError(null);
+    try {
+      setSyncOverview(await getSyncOverview());
+    } catch (syncError) {
+      setError(syncError instanceof Error ? syncError.message : "Unable to load sync overview");
+    } finally {
+      setSyncLoading(false);
+    }
+  }, [status?.readable]);
+
+  const loadPluginOverview = useCallback(async () => {
+    if (!status?.readable) {
+      setPluginOverview(null);
+      return;
+    }
+
+    setPluginsLoading(true);
+    setError(null);
+    try {
+      setPluginOverview(await getPluginOverview());
+    } catch (pluginError) {
+      setError(
+        pluginError instanceof Error ? pluginError.message : "Unable to load plugin overview",
+      );
+    } finally {
+      setPluginsLoading(false);
+    }
+  }, [status?.readable]);
+
+  const loadGamificationOverview = useCallback(async () => {
+    if (!status?.readable) {
+      setGamificationOverview(null);
+      return;
+    }
+
+    setGamificationLoading(true);
+    setError(null);
+    try {
+      setGamificationOverview(await getGamificationOverview());
+    } catch (gameError) {
+      setError(
+        gameError instanceof Error ? gameError.message : "Unable to load gamification overview",
+      );
+    } finally {
+      setGamificationLoading(false);
+    }
+  }, [status?.readable]);
 
   const loadImageEntries = useCallback(async () => {
     if (!status?.readable) {
@@ -773,6 +885,30 @@ function App() {
   }, [activeView, loadSearchResults]);
 
   useEffect(() => {
+    if (activeView === "ai") {
+      void loadAiOverview();
+    }
+  }, [activeView, loadAiOverview]);
+
+  useEffect(() => {
+    if (activeView === "sync") {
+      void loadSyncOverview();
+    }
+  }, [activeView, loadSyncOverview]);
+
+  useEffect(() => {
+    if (activeView === "plugins") {
+      void loadPluginOverview();
+    }
+  }, [activeView, loadPluginOverview]);
+
+  useEffect(() => {
+    if (activeView === "gamification") {
+      void loadGamificationOverview();
+    }
+  }, [activeView, loadGamificationOverview]);
+
+  useEffect(() => {
     if (activeView === "images") {
       void loadImageEntries();
     }
@@ -1026,6 +1162,75 @@ function App() {
       loadWritingCalendar,
       refresh,
     ],
+  );
+
+  const handleSuggestAiMetadata = useCallback(async () => {
+    const identifier =
+      aiSuggestionIdentifier.trim() || selectedEntry?.uuid || recentEntries[0]?.uuid || "";
+    if (!identifier) {
+      setError("Choose an entry UUID or select an entry first.");
+      return;
+    }
+
+    setAiSuggesting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await suggestAiMetadata({ identifier });
+      setAiSuggestion(response);
+      setAiSuggestionIdentifier(response.entryUuid);
+    } catch (suggestError) {
+      setError(
+        suggestError instanceof Error ? suggestError.message : "Unable to suggest metadata",
+      );
+    } finally {
+      setAiSuggesting(false);
+    }
+  }, [aiSuggestionIdentifier, recentEntries, selectedEntry?.uuid]);
+
+  const handleSetPluginEnabled = useCallback(
+    async (pluginName: string, enabled: boolean) => {
+      setPluginMutating(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const response = await setPluginEnabled({ pluginName, enabled });
+        setPluginOverview((current) =>
+          current
+            ? { ...current, plugins: response.plugins }
+            : { plugins: response.plugins, capabilities: [], warnings: [] },
+        );
+        setNotice(
+          `${response.plugin.label} ${enabled ? "enabled" : "disabled"} with backup: ${response.audit.backupPath}`,
+        );
+        await refresh();
+      } catch (pluginError) {
+        setError(
+          pluginError instanceof Error ? pluginError.message : "Unable to update plugin state",
+        );
+      } finally {
+        setPluginMutating(false);
+      }
+    },
+    [refresh],
+  );
+
+  const handleClaimQuest = useCallback(
+    async (quest: GamificationQuest) => {
+      setQuestMutating(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const response = await claimQuest(quest.instanceId);
+        setNotice(`Claimed ${response.quest.title} with backup: ${response.audit.backupPath}`);
+        await Promise.all([loadGamificationOverview(), refresh()]);
+      } catch (questError) {
+        setError(questError instanceof Error ? questError.message : "Unable to claim quest");
+      } finally {
+        setQuestMutating(false);
+      }
+    },
+    [loadGamificationOverview, refresh],
   );
 
   const handleSaveEntry = useCallback(async () => {
@@ -1319,10 +1524,14 @@ function App() {
     entries: "Entries",
     threads: "Threads",
     search: "Search",
+    ai: "AI",
+    sync: "Sync",
     images: "Images",
     analytics: "Analytics",
     calendar: "Writing Calendar",
     covers: "Cover Wall",
+    plugins: "Plugins",
+    gamification: "Profile",
     composer: composerMode === "edit" ? "Edit Entry" : "New Entry",
     writer: "Writer Mode",
     backups: "Backups",
@@ -1390,7 +1599,7 @@ function App() {
       <main className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Phase 5</p>
+            <p className="eyebrow">Phase 6</p>
             <h2>{title}</h2>
           </div>
 
@@ -1533,6 +1742,29 @@ function App() {
           />
         )}
 
+        {activeView === "ai" && (
+          <AiView
+            loading={aiLoading}
+            onRefresh={loadAiOverview}
+            onSuggest={handleSuggestAiMetadata}
+            overview={aiOverview}
+            selectedIdentifier={aiSuggestionIdentifier || selectedEntry?.uuid || recentEntries[0]?.uuid || ""}
+            setSelectedIdentifier={setAiSuggestionIdentifier}
+            status={status}
+            suggesting={aiSuggesting}
+            suggestion={aiSuggestion}
+          />
+        )}
+
+        {activeView === "sync" && (
+          <SyncView
+            loading={syncLoading}
+            onRefresh={loadSyncOverview}
+            overview={syncOverview}
+            status={status}
+          />
+        )}
+
         {activeView === "images" && (
           <ImagesView
             detailLoading={imageDetailLoading}
@@ -1587,6 +1819,28 @@ function App() {
               setCoverLimit(60);
               setCoverFilters(next);
             }}
+            status={status}
+          />
+        )}
+
+        {activeView === "plugins" && (
+          <PluginsView
+            loading={pluginsLoading}
+            mutating={pluginMutating}
+            onRefresh={loadPluginOverview}
+            onToggle={handleSetPluginEnabled}
+            overview={pluginOverview}
+            status={status}
+          />
+        )}
+
+        {activeView === "gamification" && (
+          <GamificationView
+            loading={gamificationLoading}
+            mutating={questMutating}
+            onClaimQuest={handleClaimQuest}
+            onRefresh={loadGamificationOverview}
+            overview={gamificationOverview}
             status={status}
           />
         )}
@@ -3972,14 +4226,485 @@ function SettingsView({
   );
 }
 
+type AiViewProps = {
+  status: DatabaseStatus | null;
+  overview: AiOverviewResponse | null;
+  suggestion: AiMetadataSuggestionResponse | null;
+  selectedIdentifier: string;
+  setSelectedIdentifier: (value: string) => void;
+  loading: boolean;
+  suggesting: boolean;
+  onRefresh: () => void;
+  onSuggest: () => void;
+};
+
+function AiView({
+  status,
+  overview,
+  suggestion,
+  selectedIdentifier,
+  setSelectedIdentifier,
+  loading,
+  suggesting,
+  onRefresh,
+  onSuggest,
+}: AiViewProps) {
+  if (!status?.readable) {
+    return <UnavailableState icon={<Bot size={24} />} label="AI needs a readable database." status={status} />;
+  }
+
+  return (
+    <section className="phase6-workspace">
+      <div className="metric-strip">
+        <Metric label="Conversations" value={overview?.conversationCount ?? 0} />
+        <Metric label="Messages" value={overview?.messageCount ?? 0} />
+        <Metric label="Embedded Entries" value={overview?.embeddedEntryCount ?? 0} />
+        <Metric label="Time Capsules" value={overview?.timeCapsuleCount ?? 0} />
+      </div>
+
+      <div className="phase6-grid">
+        <Panel
+          icon={<Bot size={20} />}
+          title="AI Capability Layer"
+          action={
+            <button className="secondary-button secondary-button--small" onClick={onRefresh} type="button">
+              <RefreshCw size={15} />
+              {loading ? "Loading" : "Refresh"}
+            </button>
+          }
+        >
+          <dl className="detail-list">
+            <Detail label="Provider" value={overview?.provider ?? "Not configured"} />
+            <Detail label="Model" value={overview?.model ?? "Not configured"} />
+          </dl>
+          <CapabilityGrid capabilities={overview?.capabilities ?? []} />
+          <WarningList warnings={overview?.warnings ?? []} />
+        </Panel>
+
+        <Panel icon={<Sparkles size={20} />} title="Metadata Suggestions">
+          <div className="inline-form">
+            <label className="field">
+              <span>Entry UUID or ID</span>
+              <input
+                onChange={(event) => setSelectedIdentifier(event.target.value)}
+                placeholder="entry_..."
+                value={selectedIdentifier}
+              />
+            </label>
+            <button
+              className="primary-button"
+              disabled={suggesting || !selectedIdentifier.trim()}
+              onClick={onSuggest}
+              type="button"
+            >
+              <Sparkles size={17} />
+              {suggesting ? "Suggesting" : "Suggest"}
+            </button>
+          </div>
+          {suggestion ? (
+            <div className="suggestion-card">
+              <div className="metadata-heading-row">
+                <h4>{suggestion.suggestedTitle ?? "Untitled suggestion"}</h4>
+                <span className="status-pill status-pill--neutral">
+                  {Math.round(suggestion.confidence * 100)}%
+                </span>
+              </div>
+              <p>{suggestion.suggestedSummary ?? "No summary suggestion."}</p>
+              <div className="tag-row">
+                {suggestion.suggestedMood && <span className="mood-chip">{suggestion.suggestedMood}</span>}
+                {suggestion.suggestedTags.map((tag) => (
+                  <span className="tag-chip" key={tag}>
+                    {tag}
+                  </span>
+                ))}
+              </div>
+              <WarningList warnings={suggestion.warnings} />
+            </div>
+          ) : (
+            <p className="muted">Suggestions run locally unless an explicit provider bridge is later configured.</p>
+          )}
+        </Panel>
+      </div>
+
+      <div className="phase6-grid phase6-grid--three">
+        <Panel icon={<FileText size={20} />} title="Recent AI Chats">
+          <DataList
+            emptyText="No persisted AI conversations found."
+            items={(overview?.conversations ?? []).map((conversation) => ({
+              key: String(conversation.id),
+              title: conversation.title,
+              meta: `${conversation.cloudProvider} / ${conversation.scope} / ${conversation.messageCount} messages`,
+              body: conversation.preview || formatDateTime(conversation.lastMessageAt),
+            }))}
+          />
+        </Panel>
+
+        <Panel icon={<Clock3 size={20} />} title="Time Capsules">
+          <DataList
+            emptyText="No AI Time Capsules found."
+            items={(overview?.timeCapsules ?? []).map((capsule) => ({
+              key: String(capsule.id),
+              title: capsule.triggerLabel,
+              meta: `${capsule.status} / ${capsule.sourceEntryCount} entries`,
+              body: `${formatDateTime(capsule.dueDate)} / ${capsule.cloudProvider || "provider unknown"}`,
+            }))}
+          />
+        </Panel>
+
+        <Panel icon={<Database size={20} />} title="Embeddings">
+          <DataList
+            emptyText="No embedding models found."
+            items={(overview?.embeddingModels ?? []).map((model) => ({
+              key: String(model.id),
+              title: model.name,
+              meta: `${model.provider} / ${model.dimensions} dimensions`,
+              body: `${model.entryCount} embedded entries${model.isActive ? " / active" : ""}`,
+            }))}
+          />
+        </Panel>
+      </div>
+    </section>
+  );
+}
+
+type SyncViewProps = {
+  status: DatabaseStatus | null;
+  overview: SyncOverviewResponse | null;
+  loading: boolean;
+  onRefresh: () => void;
+};
+
+function SyncView({ status, overview, loading, onRefresh }: SyncViewProps) {
+  if (!status?.readable) {
+    return <UnavailableState icon={<Cloud size={24} />} label="Sync needs a readable database." status={status} />;
+  }
+
+  const syncStatus = overview?.status;
+  return (
+    <section className="phase6-workspace">
+      <div className="metric-strip">
+        <Metric label="Imported" value={syncStatus?.lastSyncImported ?? 0} />
+        <Metric label="Updated" value={syncStatus?.lastSyncUpdated ?? 0} />
+        <Metric label="Deleted" value={syncStatus?.lastSyncDeleted ?? 0} />
+        <Metric label="Conflicts" value={syncStatus?.lastConflictCount ?? 0} />
+      </div>
+
+      <div className="phase6-grid">
+        <Panel
+          icon={<Cloud size={20} />}
+          title="Sync Status"
+          action={
+            <button className="secondary-button secondary-button--small" onClick={onRefresh} type="button">
+              <RefreshCw size={15} />
+              {loading ? "Loading" : "Refresh"}
+            </button>
+          }
+        >
+          <dl className="detail-list">
+            <Detail label="Last success" value={formatDateTime(syncStatus?.lastSuccessfulSyncAt)} />
+            <Detail label="File" value={syncStatus?.lastSyncFilePath ?? "None"} />
+            <Detail label="Size" value={syncStatus?.lastSyncFileSizeBytes ? formatBytes(syncStatus.lastSyncFileSizeBytes) : "None"} />
+            <Detail label="Summary" value={syncStatus?.lastSyncSummary ?? syncStatus?.lastSyncError ?? "No sync status row."} />
+          </dl>
+          <CapabilityGrid capabilities={overview?.capabilities ?? []} />
+          <WarningList warnings={overview?.warnings ?? []} />
+        </Panel>
+
+        <Panel icon={<History size={20} />} title="Recent Sync History">
+          <DataList
+            emptyText="No sync history rows found."
+            items={(overview?.recentHistory ?? []).map((item) => ({
+              key: String(item.id),
+              title: `${item.status} / ${formatDateTime(item.timestamp)}`,
+              meta: `${item.importedCount} imported / ${item.updatedCount} updated / ${item.conflictCount} conflicts`,
+              body: item.summary ?? item.error ?? item.syncFilePath ?? "No details",
+            }))}
+          />
+        </Panel>
+      </div>
+
+      <Panel icon={<Trash2 size={20} />} title="Sync Tombstones">
+        <div className="catalog-cloud">
+          {(overview?.tombstones ?? []).map((item) => (
+            <span className="tag-chip" key={item.table}>
+              {item.table}: {item.count}
+            </span>
+          ))}
+          {(overview?.tombstones ?? []).length === 0 && <span className="muted">No tombstone tables found.</span>}
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
+type PluginsViewProps = {
+  status: DatabaseStatus | null;
+  overview: PluginOverviewResponse | null;
+  loading: boolean;
+  mutating: boolean;
+  onRefresh: () => void;
+  onToggle: (pluginName: string, enabled: boolean) => void;
+};
+
+function PluginsView({ status, overview, loading, mutating, onRefresh, onToggle }: PluginsViewProps) {
+  if (!status?.readable) {
+    return <UnavailableState icon={<Plug size={24} />} label="Plugins need a readable database." status={status} />;
+  }
+
+  return (
+    <section className="phase6-workspace">
+      <Panel
+        icon={<Plug size={20} />}
+        title="Plugin Registry"
+        action={
+          <button className="secondary-button secondary-button--small" onClick={onRefresh} type="button">
+            <RefreshCw size={15} />
+            {loading ? "Loading" : "Refresh"}
+          </button>
+        }
+      >
+        <CapabilityGrid capabilities={overview?.capabilities ?? []} />
+        <WarningList warnings={overview?.warnings ?? []} />
+      </Panel>
+
+      <div className="plugin-grid">
+        {(overview?.plugins ?? []).map((plugin) => (
+          <article className="data-row data-row--stacked plugin-card" key={plugin.key}>
+            <div className="metadata-heading-row">
+              <div>
+                <h4>{plugin.label}</h4>
+                <p>{plugin.tableName ?? "No module table"} / {plugin.source}</p>
+              </div>
+              <StatusPill tone={plugin.enabled ? "good" : "neutral"}>
+                {plugin.enabled ? "Enabled" : "Disabled"}
+              </StatusPill>
+            </div>
+            <dl className="detail-list detail-list--compact">
+              <Detail label="Rows" value={plugin.rowCount} />
+              <Detail label="Version" value={plugin.installedVersion ?? "None"} />
+              <Detail label="Updated" value={formatDateTime(plugin.updatedAt)} />
+              <Detail label="Screen" value={plugin.implemented ? "Implemented" : "State only"} />
+            </dl>
+            <button
+              className={plugin.enabled ? "secondary-button" : "primary-button"}
+              disabled={mutating}
+              onClick={() => onToggle(plugin.key, !plugin.enabled)}
+              type="button"
+            >
+              {plugin.enabled ? "Disable" : "Enable"}
+            </button>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+type GamificationViewProps = {
+  status: DatabaseStatus | null;
+  overview: GamificationOverviewResponse | null;
+  loading: boolean;
+  mutating: boolean;
+  onRefresh: () => void;
+  onClaimQuest: (quest: GamificationQuest) => void;
+};
+
+function GamificationView({
+  status,
+  overview,
+  loading,
+  mutating,
+  onRefresh,
+  onClaimQuest,
+}: GamificationViewProps) {
+  if (!status?.readable) {
+    return <UnavailableState icon={<Trophy size={24} />} label="Profile needs a readable database." status={status} />;
+  }
+
+  return (
+    <section className="phase6-workspace">
+      <div className="metric-strip">
+        <Metric label="Total XP" value={overview?.totalXp ?? 0} />
+        <Metric label="Level" value={overview?.level ?? 1} />
+        <Metric label="To Next" value={overview?.xpToNextLevel ?? 0} />
+        <Metric label="XP Events" value={overview?.eventCount ?? 0} />
+      </div>
+
+      <div className="phase6-grid">
+        <Panel
+          icon={<Trophy size={20} />}
+          title="Profile And Capabilities"
+          action={
+            <button className="secondary-button secondary-button--small" onClick={onRefresh} type="button">
+              <RefreshCw size={15} />
+              {loading ? "Loading" : "Refresh"}
+            </button>
+          }
+        >
+          <dl className="detail-list">
+            <Detail label="Hero" value={overview?.profile?.heroSpritePath ?? "Default"} />
+            <Detail label="Updated" value={formatDateTime(overview?.profile?.updatedAt)} />
+          </dl>
+          <CapabilityGrid capabilities={overview?.capabilities ?? []} />
+          <WarningList warnings={overview?.warnings ?? []} />
+        </Panel>
+
+        <Panel icon={<Star size={20} />} title="Quests">
+          <div className="quest-list">
+            {(overview?.quests ?? []).map((quest) => {
+              const complete = quest.progressValue >= quest.targetValue;
+              const claimed = Boolean(quest.claimedAt) || quest.status === "claimed";
+              return (
+                <article className="quest-card" key={quest.instanceId}>
+                  <div className="metadata-heading-row">
+                    <div>
+                      <h4>{quest.title}</h4>
+                      <p>{quest.description}</p>
+                    </div>
+                    <span className="status-pill status-pill--neutral">{quest.rewardXp} XP</span>
+                  </div>
+                  <div className="progress-track" title={`${quest.progressValue} / ${quest.targetValue}`}>
+                    <div style={{ width: `${Math.min(100, (quest.progressValue / Math.max(quest.targetValue, 1)) * 100)}%` }} />
+                  </div>
+                  <div className="quest-footer">
+                    <span>{quest.progressValue} / {quest.targetValue}</span>
+                    <button
+                      className="secondary-button secondary-button--small"
+                      disabled={mutating || !complete || claimed}
+                      onClick={() => onClaimQuest(quest)}
+                      type="button"
+                    >
+                      {claimed ? "Claimed" : "Claim"}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+            {(overview?.quests ?? []).length === 0 && <p className="muted">No quest rows found.</p>}
+          </div>
+        </Panel>
+      </div>
+
+      <div className="phase6-grid">
+        <Panel icon={<History size={20} />} title="Recent XP">
+          <DataList
+            emptyText="No XP events found."
+            items={(overview?.recentEvents ?? []).map((event) => ({
+              key: String(event.id),
+              title: `${event.amount} XP / ${event.reason}`,
+              meta: `${event.sourceType}:${event.sourceKey}`,
+              body: formatDateTime(event.createdAt),
+            }))}
+          />
+        </Panel>
+
+        <Panel icon={<ShieldCheck size={20} />} title="Badges">
+          <DataList
+            emptyText="No badges unlocked yet."
+            items={(overview?.badges ?? []).map((badge) => ({
+              key: badge.badgeKey,
+              title: badge.badgeKey.replace(/_/g, " "),
+              meta: formatDateTime(badge.unlockedAt),
+              body: `Updated ${formatDateTime(badge.updatedAt)}`,
+            }))}
+          />
+        </Panel>
+      </div>
+    </section>
+  );
+}
+
+function CapabilityGrid({ capabilities }: { capabilities: Phase6Capability[] }) {
+  if (capabilities.length === 0) {
+    return <p className="muted">No capability rows available.</p>;
+  }
+
+  return (
+    <div className="capability-grid">
+      {capabilities.map((capability) => (
+        <article className="capability-card" key={capability.key}>
+          <div className="metadata-heading-row">
+            <h4>{capability.label}</h4>
+            <StatusPill tone={capability.available && capability.configured ? "good" : "neutral"}>
+              {capability.available ? (capability.configured ? "Ready" : "Gated") : "Missing"}
+            </StatusPill>
+          </div>
+          <p>{capability.detail}</p>
+          <div className="tag-row">
+            {capability.requiresCloud && <span className="tag-chip">cloud</span>}
+            {capability.readOnly && <span className="tag-chip">read-only</span>}
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+type DataListItem = {
+  key: string;
+  title: string;
+  meta: string;
+  body: string;
+};
+
+function DataList({ items, emptyText }: { items: DataListItem[]; emptyText: string }) {
+  if (items.length === 0) {
+    return <p className="muted">{emptyText}</p>;
+  }
+
+  return (
+    <div className="data-list">
+      {items.map((item) => (
+        <article className="data-row data-row--stacked" key={item.key}>
+          <h4>{item.title}</h4>
+          <p>{item.meta}</p>
+          <p>{item.body}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function WarningList({ warnings }: { warnings: string[] }) {
+  if (warnings.length === 0) {
+    return null;
+  }
+
+  return (
+    <ul className="warning-list phase6-warning-list">
+      {warnings.map((warning) => (
+        <li key={warning}>{warning}</li>
+      ))}
+    </ul>
+  );
+}
+
+function UnavailableState({
+  icon,
+  label,
+  status,
+}: {
+  icon: ReactNode;
+  label: string;
+  status: DatabaseStatus | null;
+}) {
+  return (
+    <section className="state-panel">
+      {icon}
+      <h3>{label}</h3>
+      <p>{status?.dbPath ?? "No database path resolved."}</p>
+    </section>
+  );
+}
+
 function AboutView() {
   return (
     <section className="about-panel">
       <h3>Capsule Tauri</h3>
       <p>
-        Phase 5 adds local image attachment browsing, guarded image upload and
-        removal, location-aware filters, analytics, a writing calendar, and an
-        ignored local cover wall for visual browsing.
+        Phase 6 adds capability-gated AI, sync, plugin, and gamification
+        surfaces over the local Capsule database. Cloud and bridge-driven paths
+        stay explicit, and plugin/quest writes keep the backup guard.
       </p>
       <p>Hard delete remains reserved until the legacy resequencing behavior is fully matched and tested.</p>
     </section>

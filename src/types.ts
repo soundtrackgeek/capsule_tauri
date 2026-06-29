@@ -224,6 +224,213 @@ export type LibraryPromptMutationResponse = {
   audit: MutationAudit;
 };
 
+export type Phase6Capability = {
+  key: string;
+  label: string;
+  available: boolean;
+  configured: boolean;
+  requiresCloud: boolean;
+  readOnly: boolean;
+  detail: string;
+};
+
+export type AiConversationSummary = {
+  id: number;
+  uuid: string | null;
+  title: string;
+  preview: string;
+  cloudProvider: string;
+  scope: string;
+  messageCount: number;
+  lastMessageAt: string;
+  updatedAt: string;
+};
+
+export type AiTimeCapsuleSummary = {
+  id: number;
+  triggerLabel: string;
+  dueDate: string;
+  status: string;
+  sourceEntryCount: number;
+  cloudProvider: string;
+  llmModel: string;
+  readAt: string | null;
+  dismissedAt: string | null;
+  errorMessage: string | null;
+};
+
+export type EmbeddingModelSummary = {
+  id: number;
+  name: string;
+  dimensions: number;
+  provider: string;
+  isActive: boolean;
+  entryCount: number;
+};
+
+export type AiOverviewResponse = {
+  provider: string | null;
+  model: string | null;
+  capabilities: Phase6Capability[];
+  conversations: AiConversationSummary[];
+  timeCapsules: AiTimeCapsuleSummary[];
+  embeddingModels: EmbeddingModelSummary[];
+  conversationCount: number;
+  messageCount: number;
+  timeCapsuleCount: number;
+  embeddedEntryCount: number;
+  warnings: string[];
+};
+
+export type AiMetadataSuggestionRequest = {
+  identifier: string;
+};
+
+export type AiMetadataSuggestionResponse = {
+  entryUuid: string;
+  source: string;
+  suggestedTitle: string | null;
+  suggestedSummary: string | null;
+  suggestedMood: string | null;
+  suggestedTags: string[];
+  confidence: number;
+  warnings: string[];
+};
+
+export type SyncStatusSummary = {
+  lastSuccessfulSyncAt: string | null;
+  lastSyncFilePath: string | null;
+  lastSyncFileSizeBytes: number | null;
+  lastSyncImported: number;
+  lastSyncUpdated: number;
+  lastSyncDeleted: number;
+  lastSyncTotal: number;
+  lastSyncSummary: string | null;
+  lastConflictCount: number;
+  lastConflictSummary: string | null;
+  lastSyncError: string | null;
+};
+
+export type SyncHistoryItem = {
+  id: number;
+  timestamp: string;
+  status: string;
+  syncFilePath: string | null;
+  importedCount: number;
+  updatedCount: number;
+  deletedCount: number;
+  exportedCount: number;
+  conflictCount: number;
+  summary: string | null;
+  error: string | null;
+};
+
+export type SyncTombstoneCount = {
+  table: string;
+  count: number;
+};
+
+export type SyncOverviewResponse = {
+  status: SyncStatusSummary | null;
+  recentHistory: SyncHistoryItem[];
+  tombstones: SyncTombstoneCount[];
+  capabilities: Phase6Capability[];
+  warnings: string[];
+};
+
+export type PluginInfo = {
+  key: string;
+  label: string;
+  enabled: boolean;
+  installedVersion: string | null;
+  source: string;
+  updatedAt: string | null;
+  implemented: boolean;
+  tableName: string | null;
+  rowCount: number;
+};
+
+export type PluginOverviewResponse = {
+  plugins: PluginInfo[];
+  capabilities: Phase6Capability[];
+  warnings: string[];
+};
+
+export type PluginMutationRequest = {
+  pluginName: string;
+  enabled: boolean;
+};
+
+export type PluginMutationResponse = {
+  plugin: PluginInfo;
+  plugins: PluginInfo[];
+  audit: MutationAudit;
+};
+
+export type GamificationProfileSummary = {
+  heroSpritePath: string | null;
+  updatedAt: string | null;
+};
+
+export type GamificationQuest = {
+  instanceId: string;
+  questKey: string;
+  kind: string;
+  title: string;
+  description: string;
+  enemySpritePath: string | null;
+  targetValue: number;
+  progressValue: number;
+  rewardXp: number;
+  status: string;
+  periodKey: string;
+  startsAt: string;
+  expiresAt: string | null;
+  completedAt: string | null;
+  claimedAt: string | null;
+  updatedAt: string;
+};
+
+export type GamificationXpEvent = {
+  id: number;
+  sourceType: string;
+  sourceKey: string;
+  amount: number;
+  reason: string;
+  createdAt: string;
+};
+
+export type GamificationBadge = {
+  badgeKey: string;
+  unlockedAt: string;
+  updatedAt: string;
+};
+
+export type GamificationOverviewResponse = {
+  profile: GamificationProfileSummary | null;
+  totalXp: number;
+  level: number;
+  xpToNextLevel: number;
+  eventCount: number;
+  recentEvents: GamificationXpEvent[];
+  quests: GamificationQuest[];
+  badges: GamificationBadge[];
+  capabilities: Phase6Capability[];
+  warnings: string[];
+};
+
+export type QuestClaimRequest = {
+  instanceId: string;
+};
+
+export type QuestClaimResponse = {
+  quest: GamificationQuest;
+  totalXp: number;
+  level: number;
+  xpToNextLevel: number;
+  audit: MutationAudit;
+};
+
 export type ExportFormat = "markdown" | "json";
 
 export type ExportEntriesRequest = {

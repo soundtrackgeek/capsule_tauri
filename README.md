@@ -3,8 +3,9 @@
 Capsule Tauri is a local-first desktop journal for Capsule built with Tauri 2,
 React, TypeScript, Vite, Rust, and SQLite.
 
-Phase 5 provides images, location-aware browsing, analytics, and a visual cover
-wall over the active Capsule database:
+Phase 6 provides images, location-aware browsing, analytics, a visual cover
+wall, and capability-gated AI/sync/plugin/gamification surfaces over the active
+Capsule database:
 
 - Tauri 2 desktop configuration.
 - React + TypeScript + Vite frontend.
@@ -56,10 +57,20 @@ wall over the active Capsule database:
 - Writing Calendar heatmap for active days, words, images, and mood metadata.
 - Cover Wall view backed by ignored local cover files under `local-assets/covers`
   with generated thumbnails under `local-assets/cover_thumbnails`.
+- AI overview for provider/model readiness, persisted conversations, AI Time
+  Capsules, embedding models, and local metadata suggestions that do not make
+  cloud requests.
+- Sync overview for shared-folder status, recent sync history, tombstone counts,
+  and GitHub Gist import readiness without running bridge actions implicitly.
+- Plugin registry screen for implemented plugin modules, row counts, and
+  backup-guarded enable/disable state changes in `plugin_state`.
+- Gamification profile screen with XP totals, derived level, recent XP events,
+  badges, quest progress, and backup-guarded quest claiming.
 - Rust tests for backup naming, database status inspection, read-only entry
   queries, backup-guarded mutations, entry history, search, thread operations,
   restore, tag/mood tools, library CRUD, export generation, image operations,
-  analytics, calendar aggregation, and cover indexing.
+  analytics, calendar aggregation, cover indexing, Phase 6 read models, plugin
+  toggles, and quest claiming.
 
 The database resolver checks an explicit `CAPSULE_DB_PATH` first. When that is
 not set, it prefers the MVP production database at
@@ -110,6 +121,11 @@ Restore is constrained to Capsule-compatible backup files in the active database
 backup directory. Before restore replaces the live database, the app creates and
 verifies a fresh safety backup of the current database.
 
-Hard delete is intentionally not exposed in Phase 5. Entries can be hidden and
+Hard delete is intentionally not exposed in Phase 6. Entries can be hidden and
 unhidden safely; true delete remains reserved until the legacy resequencing
 behavior is matched and tested.
+
+AI chat, semantic vector ranking, shared-folder sync execution, and GitHub Gist
+mobile import remain capability-gated. Tauri reads their existing state, but it
+does not send journal data to cloud providers or run bridge-driven workflows
+without explicit bridge configuration and user action.

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.0 - 2026-06-29
+
+### Added
+
+- Added Phase 6 backend read models for AI, sync, plugins, and gamification.
+- Added local AI metadata suggestions that do not make cloud provider requests.
+- Added AI overview for persisted conversations, AI Time Capsules, embedding
+  models, and bridge/provider capability status.
+- Added sync overview for shared-folder status, recent sync history, tombstone
+  counts, and GitHub Gist import readiness.
+- Added Plugins view with implemented plugin module counts and backup-guarded
+  enable/disable state changes.
+- Added Gamification/Profile view with XP totals, derived level, quests, badges,
+  recent XP events, and backup-guarded quest claiming.
+- Added Rust tests for Phase 6 read models, plugin toggles, and quest claiming.
+
+### Changed
+
+- Bumped the app version to 0.7.0.
+- Updated the app shell from Phase 5 images/location/analytics/covers to Phase 6
+  AI, sync, plugins, and gamification.
+
 ## 0.6.0 - 2026-06-29
 
 ### Added

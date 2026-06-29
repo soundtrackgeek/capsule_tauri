@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AiMetadataSuggestionRequest,
+  AiMetadataSuggestionResponse,
+  AiOverviewResponse,
   AnalyticsPeriodRequest,
   AnalyticsResponse,
   BackupCreateRequest,
@@ -23,6 +26,9 @@ import type {
   EntryUpdate,
   ExportEntriesRequest,
   ExportEntriesResponse,
+  GamificationOverviewResponse,
+  GamificationQuest,
+  QuestClaimResponse,
   ImageAttachRequest,
   ImageAttachment,
   ImageEntriesListResponse,
@@ -41,9 +47,13 @@ import type {
   MoodDeleteRequest,
   MoodMutationResponse,
   MoodRenameRequest,
+  PluginMutationRequest,
+  PluginMutationResponse,
+  PluginOverviewResponse,
   RandomEntryFilters,
   SearchRequest,
   SearchResponse,
+  SyncOverviewResponse,
   TagCatalogResponse,
   TagDeleteRequest,
   TagMergeRequest,
@@ -168,6 +178,161 @@ let mockLibrary: LibraryListResponse = {
   ],
   warnings: [],
 };
+
+const phase6Capabilities = {
+  ai: [
+    {
+      key: "metadata-suggestions",
+      label: "Metadata suggestions",
+      available: true,
+      configured: true,
+      requiresCloud: false,
+      readOnly: true,
+      detail: "Local suggestions are available without sending journal text to a provider.",
+    },
+    {
+      key: "ai-chat-bridge",
+      label: "AI chat bridge",
+      available: true,
+      configured: false,
+      requiresCloud: true,
+      readOnly: true,
+      detail: "Persisted chats are readable; live chat requires a configured Python bridge.",
+    },
+  ],
+  sync: [
+    {
+      key: "shared-folder-sync",
+      label: "Shared-folder sync",
+      available: true,
+      configured: false,
+      requiresCloud: false,
+      readOnly: true,
+      detail: "Status and history are visible; execution remains bridge-gated.",
+    },
+    {
+      key: "github-gist-import",
+      label: "GitHub Gist import",
+      available: true,
+      configured: false,
+      requiresCloud: true,
+      readOnly: true,
+      detail: "Mobile import needs the legacy bridge and explicit user action.",
+    },
+  ],
+  plugins: [
+    {
+      key: "plugin-state",
+      label: "Plugin state",
+      available: true,
+      configured: true,
+      requiresCloud: false,
+      readOnly: false,
+      detail: "Plugin activation is guarded by a verified backup.",
+    },
+  ],
+  gamification: [
+    {
+      key: "quest-claim",
+      label: "Quest claiming",
+      available: true,
+      configured: true,
+      requiresCloud: false,
+      readOnly: false,
+      detail: "Completed quests can be claimed with backup-guarded XP events.",
+    },
+  ],
+};
+
+let mockPluginOverview: PluginOverviewResponse = {
+  plugins: [
+    {
+      key: "coding_ideas",
+      label: "Coding Ideas",
+      enabled: true,
+      installedVersion: "1.6.0",
+      source: "catalog",
+      updatedAt: "2026-02-27 12:08",
+      implemented: true,
+      tableName: "plugin_coding_ideas",
+      rowCount: 12,
+    },
+    {
+      key: "dream_log",
+      label: "Dream Log",
+      enabled: false,
+      installedVersion: "2.1.0",
+      source: "catalog",
+      updatedAt: "2026-02-24 09:52",
+      implemented: true,
+      tableName: "plugin_dreams",
+      rowCount: 4,
+    },
+    {
+      key: "post_ideas",
+      label: "Post Ideas",
+      enabled: true,
+      installedVersion: "1.1.0",
+      source: "catalog",
+      updatedAt: "2026-04-10 14:17",
+      implemented: true,
+      tableName: "plugin_post_ideas",
+      rowCount: 8,
+    },
+    {
+      key: "writing_ideas",
+      label: "Writing Ideas",
+      enabled: false,
+      installedVersion: null,
+      source: "not-installed",
+      updatedAt: null,
+      implemented: true,
+      tableName: "plugin_writing_ideas",
+      rowCount: 0,
+    },
+  ],
+  capabilities: phase6Capabilities.plugins,
+  warnings: [],
+};
+
+let mockGamificationQuests: GamificationQuest[] = [
+  {
+    instanceId: "daily:word_surge:2026-06-29",
+    questKey: "word_surge",
+    kind: "daily",
+    title: "Word Surge",
+    description: "Write at least 150 words today.",
+    enemySpritePath: null,
+    targetValue: 150,
+    progressValue: 300,
+    rewardXp: 40,
+    status: "complete",
+    periodKey: "2026-06-29",
+    startsAt: "2026-06-29 00:00",
+    expiresAt: "2026-06-30 00:00",
+    completedAt: "2026-06-29 09:19",
+    claimedAt: null,
+    updatedAt: "2026-06-29 09:19",
+  },
+  {
+    instanceId: "weekly:storyteller:2026-W27",
+    questKey: "storyteller",
+    kind: "weekly",
+    title: "Storyteller",
+    description: "Write 750 words this week.",
+    enemySpritePath: null,
+    targetValue: 750,
+    progressValue: 420,
+    rewardXp: 120,
+    status: "active",
+    periodKey: "2026-W27",
+    startsAt: "2026-06-29 00:00",
+    expiresAt: "2026-07-06 00:00",
+    completedAt: null,
+    claimedAt: null,
+    updatedAt: "2026-06-29 09:20",
+  },
+];
 
 let mockEntries: Entry[] = [
   {
@@ -915,6 +1080,275 @@ export async function exportEntries(
       format: input.format,
       entryCount: entries.length,
       createdAt,
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function getAiOverview(): Promise<AiOverviewResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<AiOverviewResponse>("get_ai_overview");
+    }
+
+    await pause(160);
+    return {
+      provider: "local",
+      model: "mock-read-model",
+      capabilities: phase6Capabilities.ai,
+      conversations: [
+        {
+          id: 1,
+          uuid: "chat_mock",
+          title: "Search reflection",
+          preview: "A saved AI conversation over recent Capsule entries.",
+          cloudProvider: "gemini",
+          scope: "search",
+          messageCount: 4,
+          lastMessageAt: "2026-06-29 09:05",
+          updatedAt: "2026-06-29 09:05",
+        },
+      ],
+      timeCapsules: [
+        {
+          id: 1,
+          triggerLabel: "One year ago",
+          dueDate: "2026-06-29",
+          status: "ready",
+          sourceEntryCount: 6,
+          cloudProvider: "gemini",
+          llmModel: "capsule-legacy",
+          readAt: null,
+          dismissedAt: null,
+          errorMessage: null,
+        },
+      ],
+      embeddingModels: [
+        {
+          id: 1,
+          name: "text-embedding-mock",
+          dimensions: 768,
+          provider: "local",
+          isActive: true,
+          entryCount: 3,
+        },
+      ],
+      conversationCount: 1,
+      messageCount: 4,
+      timeCapsuleCount: 1,
+      embeddedEntryCount: 3,
+      warnings: [
+        "Mock mode does not call cloud providers; live AI chat remains bridge-gated.",
+      ],
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function suggestAiMetadata(
+  input: AiMetadataSuggestionRequest,
+): Promise<AiMetadataSuggestionResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<AiMetadataSuggestionResponse>("suggest_ai_metadata", { input });
+    }
+
+    await pause(180);
+    const entry = findMockEntry(input.identifier);
+    const words = entry.textPlain.split(/\s+/).filter(Boolean);
+    return {
+      entryUuid: entry.uuid,
+      source: "local-read-model",
+      suggestedTitle: entry.title ?? words.slice(0, 7).join(" "),
+      suggestedSummary: entry.summary ?? words.slice(0, 26).join(" "),
+      suggestedMood: entry.mood ?? "focused",
+      suggestedTags: ["capsule", "reflection"].filter(
+        (tag) => !entry.tags.some((entryTag) => entryTag.name === tag),
+      ),
+      confidence: words.length > 20 ? 0.62 : 0.42,
+      warnings: ["No cloud request was made in mock mode."],
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function getSyncOverview(): Promise<SyncOverviewResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<SyncOverviewResponse>("get_sync_overview");
+    }
+
+    await pause(140);
+    return {
+      status: {
+        lastSuccessfulSyncAt: "2026-06-29 09:00",
+        lastSyncFilePath: "C:\\Users\\jtill\\.capsule\\mobile_sync.json",
+        lastSyncFileSizeBytes: 42_000,
+        lastSyncImported: 1,
+        lastSyncUpdated: 2,
+        lastSyncDeleted: 0,
+        lastSyncTotal: 3,
+        lastSyncSummary: "Mock sync completed.",
+        lastConflictCount: 0,
+        lastConflictSummary: null,
+        lastSyncError: null,
+      },
+      recentHistory: [
+        {
+          id: 1,
+          timestamp: "2026-06-29 09:00",
+          status: "success",
+          syncFilePath: "mobile_sync.json",
+          importedCount: 1,
+          updatedCount: 2,
+          deletedCount: 0,
+          exportedCount: 3,
+          conflictCount: 0,
+          summary: "Imported mobile entries.",
+          error: null,
+        },
+      ],
+      tombstones: [
+        { table: "sync_tombstones", count: 2 },
+        { table: "sync_image_tombstones", count: 1 },
+      ],
+      capabilities: phase6Capabilities.sync,
+      warnings: ["Bridge execution is disabled in browser mock mode."],
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function getPluginOverview(): Promise<PluginOverviewResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<PluginOverviewResponse>("get_plugin_overview");
+    }
+
+    await pause(140);
+    return mockPluginOverview;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function setPluginEnabled(
+  input: PluginMutationRequest,
+): Promise<PluginMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<PluginMutationResponse>("set_plugin_enabled", { input });
+    }
+
+    await pause(220);
+    mockPluginOverview = {
+      ...mockPluginOverview,
+      plugins: mockPluginOverview.plugins.map((plugin) =>
+        plugin.key === input.pluginName
+          ? {
+              ...plugin,
+              enabled: input.enabled,
+              source: plugin.source === "not-installed" ? "tauri" : plugin.source,
+              updatedAt: new Date().toISOString(),
+            }
+          : plugin,
+      ),
+    };
+    const plugin = mockPluginOverview.plugins.find((item) => item.key === input.pluginName);
+    if (!plugin) {
+      throw new Error(`Plugin not found: ${input.pluginName}`);
+    }
+    return {
+      plugin,
+      plugins: mockPluginOverview.plugins,
+      audit: mockAudit(input.enabled ? "plugin.enable" : "plugin.disable"),
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function getGamificationOverview(): Promise<GamificationOverviewResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<GamificationOverviewResponse>("get_gamification_overview");
+    }
+
+    await pause(140);
+    const totalXp = 4720 + mockGamificationQuests
+      .filter((quest) => quest.claimedAt)
+      .reduce((sum, quest) => sum + quest.rewardXp, 0);
+    const level = Math.floor(totalXp / 500) + 1;
+    return {
+      profile: {
+        heroSpritePath: "local-assets/heroes/default.png",
+        updatedAt: "2026-06-29 09:00",
+      },
+      totalXp,
+      level,
+      xpToNextLevel: level * 500 - totalXp,
+      eventCount: 224,
+      recentEvents: [
+        {
+          id: 1,
+          sourceType: "entry",
+          sourceKey: "entry_ti99r1ya",
+          amount: 20,
+          reason: "Entry created",
+          createdAt: "2026-06-29 09:00",
+        },
+      ],
+      quests: mockGamificationQuests,
+      badges: [
+        {
+          badgeKey: "hundred_entries",
+          unlockedAt: "2026-03-13 08:17",
+          updatedAt: "2026-03-13 08:17",
+        },
+      ],
+      capabilities: phase6Capabilities.gamification,
+      warnings: [],
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function claimQuest(instanceId: string): Promise<QuestClaimResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<QuestClaimResponse>("claim_quest", { input: { instanceId } });
+    }
+
+    await pause(240);
+    const quest = mockGamificationQuests.find((item) => item.instanceId === instanceId);
+    if (!quest) {
+      throw new Error(`Quest not found: ${instanceId}`);
+    }
+    if (quest.claimedAt) {
+      throw new Error(`Quest already claimed: ${quest.title}`);
+    }
+    if (quest.progressValue < quest.targetValue) {
+      throw new Error(`Quest is not complete yet: ${quest.title}`);
+    }
+    const claimedAt = new Date().toISOString();
+    mockGamificationQuests = mockGamificationQuests.map((item) =>
+      item.instanceId === instanceId
+        ? { ...item, status: "claimed", claimedAt, completedAt: item.completedAt ?? claimedAt }
+        : item,
+    );
+    const updated = mockGamificationQuests.find((item) => item.instanceId === instanceId)!;
+    const overview = await getGamificationOverview();
+    return {
+      quest: updated,
+      totalXp: overview.totalXp,
+      level: overview.level,
+      xpToNextLevel: overview.xpToNextLevel,
+      audit: mockAudit("gamification.quest.claim"),
     };
   } catch (error) {
     throw normalizeError(error);

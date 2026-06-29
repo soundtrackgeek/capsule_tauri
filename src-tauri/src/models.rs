@@ -329,6 +329,257 @@ pub struct LibraryPromptMutationResponse {
     pub audit: MutationAudit,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Phase6Capability {
+    pub key: String,
+    pub label: String,
+    pub available: bool,
+    pub configured: bool,
+    pub requires_cloud: bool,
+    pub read_only: bool,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiConversationSummary {
+    pub id: i64,
+    pub uuid: Option<String>,
+    pub title: String,
+    pub preview: String,
+    pub cloud_provider: String,
+    pub scope: String,
+    pub message_count: i64,
+    pub last_message_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTimeCapsuleSummary {
+    pub id: i64,
+    pub trigger_label: String,
+    pub due_date: String,
+    pub status: String,
+    pub source_entry_count: i64,
+    pub cloud_provider: String,
+    pub llm_model: String,
+    pub read_at: Option<String>,
+    pub dismissed_at: Option<String>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddingModelSummary {
+    pub id: i64,
+    pub name: String,
+    pub dimensions: i64,
+    pub provider: String,
+    pub is_active: bool,
+    pub entry_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiOverviewResponse {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub capabilities: Vec<Phase6Capability>,
+    pub conversations: Vec<AiConversationSummary>,
+    pub time_capsules: Vec<AiTimeCapsuleSummary>,
+    pub embedding_models: Vec<EmbeddingModelSummary>,
+    pub conversation_count: i64,
+    pub message_count: i64,
+    pub time_capsule_count: i64,
+    pub embedded_entry_count: i64,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiMetadataSuggestionRequest {
+    pub identifier: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiMetadataSuggestionResponse {
+    pub entry_uuid: String,
+    pub source: String,
+    pub suggested_title: Option<String>,
+    pub suggested_summary: Option<String>,
+    pub suggested_mood: Option<String>,
+    pub suggested_tags: Vec<String>,
+    pub confidence: f64,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncStatusSummary {
+    pub last_successful_sync_at: Option<String>,
+    pub last_sync_file_path: Option<String>,
+    pub last_sync_file_size_bytes: Option<i64>,
+    pub last_sync_imported: i64,
+    pub last_sync_updated: i64,
+    pub last_sync_deleted: i64,
+    pub last_sync_total: i64,
+    pub last_sync_summary: Option<String>,
+    pub last_conflict_count: i64,
+    pub last_conflict_summary: Option<String>,
+    pub last_sync_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncHistoryItem {
+    pub id: i64,
+    pub timestamp: String,
+    pub status: String,
+    pub sync_file_path: Option<String>,
+    pub imported_count: i64,
+    pub updated_count: i64,
+    pub deleted_count: i64,
+    pub exported_count: i64,
+    pub conflict_count: i64,
+    pub summary: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncTombstoneCount {
+    pub table: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncOverviewResponse {
+    pub status: Option<SyncStatusSummary>,
+    pub recent_history: Vec<SyncHistoryItem>,
+    pub tombstones: Vec<SyncTombstoneCount>,
+    pub capabilities: Vec<Phase6Capability>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginInfo {
+    pub key: String,
+    pub label: String,
+    pub enabled: bool,
+    pub installed_version: Option<String>,
+    pub source: String,
+    pub updated_at: Option<String>,
+    pub implemented: bool,
+    pub table_name: Option<String>,
+    pub row_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginOverviewResponse {
+    pub plugins: Vec<PluginInfo>,
+    pub capabilities: Vec<Phase6Capability>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginMutationRequest {
+    pub plugin_name: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginMutationResponse {
+    pub plugin: PluginInfo,
+    pub plugins: Vec<PluginInfo>,
+    pub audit: MutationAudit,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GamificationProfileSummary {
+    pub hero_sprite_path: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GamificationQuest {
+    pub instance_id: String,
+    pub quest_key: String,
+    pub kind: String,
+    pub title: String,
+    pub description: String,
+    pub enemy_sprite_path: Option<String>,
+    pub target_value: i64,
+    pub progress_value: i64,
+    pub reward_xp: i64,
+    pub status: String,
+    pub period_key: String,
+    pub starts_at: String,
+    pub expires_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub claimed_at: Option<String>,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GamificationXpEvent {
+    pub id: i64,
+    pub source_type: String,
+    pub source_key: String,
+    pub amount: i64,
+    pub reason: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GamificationBadge {
+    pub badge_key: String,
+    pub unlocked_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GamificationOverviewResponse {
+    pub profile: Option<GamificationProfileSummary>,
+    pub total_xp: i64,
+    pub level: i64,
+    pub xp_to_next_level: i64,
+    pub event_count: i64,
+    pub recent_events: Vec<GamificationXpEvent>,
+    pub quests: Vec<GamificationQuest>,
+    pub badges: Vec<GamificationBadge>,
+    pub capabilities: Vec<Phase6Capability>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestClaimRequest {
+    pub instance_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestClaimResponse {
+    pub quest: GamificationQuest,
+    pub total_xp: i64,
+    pub level: i64,
+    pub xp_to_next_level: i64,
+    pub audit: MutationAudit,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ExportFormat {
