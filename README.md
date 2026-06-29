@@ -1,21 +1,27 @@
 # Capsule Tauri
 
-Capsule Tauri is a local-first desktop shell for Capsule built with Tauri 2,
+Capsule Tauri is a local-first desktop journal for Capsule built with Tauri 2,
 React, TypeScript, Vite, Rust, and SQLite.
 
-Phase 0 establishes the scaffold and safety baseline:
+Phase 1 provides a read-only journal surface over the active Capsule database:
 
 - Tauri 2 desktop configuration.
 - React + TypeScript + Vite frontend.
 - Browser-only mock backend for `npm run dev`.
 - Read-only database status for the active Capsule database.
+- Dashboard counts for total entries, total tags, current year, and current month.
+- Recent entries, pinned entries, and random entry panels.
+- Entries list with text, tag, mood, date, image, hidden, and sort filters.
+- Entry detail view with full text, tags, mood, location, attachment count, and
+  thread metadata when those tables are available.
 - Backup listing for Capsule-compatible backup files.
 - Manual SQLite backup creation using SQLite's backup API.
 - JSON manifests written next to generated backups.
-- Rust tests for backup naming and database status inspection.
+- Rust tests for backup naming, database status inspection, and read-only entry
+  queries.
 
-The Phase 0 database resolver checks an explicit `CAPSULE_DB_PATH` first. When
-that is not set, it prefers the MVP production database at
+The database resolver checks an explicit `CAPSULE_DB_PATH` first. When that is
+not set, it prefers the MVP production database at
 `C:\Users\jtill\.capsule\capsule.db`, then falls back to
 `%USERPROFILE%\.capsule\capsule.db` and finally `CAPSULE_HOME\capsule.db`.
 
@@ -38,8 +44,9 @@ cargo test
 
 ## Safety Baseline
 
-The Phase 0 app does not expose journal write operations. It only reads database
-status and creates manual backups on explicit user action.
+The Phase 1 app does not expose journal write operations. It reads database
+status and journal entries, and it creates manual backups only on explicit user
+action.
 
 Backups are named with the Capsule-compatible pattern:
 

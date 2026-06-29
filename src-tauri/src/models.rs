@@ -100,3 +100,107 @@ pub struct BackupManifest {
     pub db_size_bytes: u64,
     pub backup_path: String,
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagInfo {
+    pub id: i64,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoodInfo {
+    pub name: Option<String>,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocationInfo {
+    pub latitude: f64,
+    pub longitude: f64,
+    pub place_name: Option<String>,
+    pub weather_condition: Option<String>,
+    pub weather_temp_c: Option<f64>,
+    pub weather_temp_f: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryThreadInfo {
+    pub root_uuid: String,
+    pub parent_uuid: Option<String>,
+    pub title: Option<String>,
+    pub summary: Option<String>,
+    pub entry_count: usize,
+    pub is_root: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Entry {
+    pub id: i64,
+    pub uuid: String,
+    pub created_at: String,
+    pub updated_at: Option<String>,
+    pub text: String,
+    pub text_plain: String,
+    pub content_format: String,
+    pub title: Option<String>,
+    pub summary: Option<String>,
+    pub mood: Option<String>,
+    pub mood_info: MoodInfo,
+    pub tags: Vec<TagInfo>,
+    pub starred: bool,
+    pub pinned: bool,
+    pub hidden: bool,
+    pub location: Option<LocationInfo>,
+    pub thread: Option<EntryThreadInfo>,
+    pub attachment_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryListResponse {
+    pub entries: Vec<Entry>,
+    pub total: i64,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryFilters {
+    pub text: Option<String>,
+    pub location: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub exclude_tags: Option<Vec<String>>,
+    pub moods: Option<Vec<String>>,
+    pub exclude_moods: Option<Vec<String>>,
+    pub starred: Option<bool>,
+    pub pinned: Option<bool>,
+    pub hidden: Option<bool>,
+    pub include_hidden: Option<bool>,
+    pub has_images: Option<bool>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+    pub sort: Option<EntrySort>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum EntrySort {
+    Asc,
+    Desc,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RandomEntryFilters {
+    pub include_hidden: Option<bool>,
+    pub tags: Option<Vec<String>>,
+    pub moods: Option<Vec<String>>,
+}
