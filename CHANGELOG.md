@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.1 - 2026-06-29
+
+### Fixed
+
+- Fixed Entries, Search, and Cover Wall filter controls so they stay inside the
+  filter rail instead of overlapping adjacent result panels.
+
+### Changed
+
+- Bumped the app version to 0.7.1.
+
 ## 0.7.0 - 2026-06-29
 
 ### Added

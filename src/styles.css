@@ -666,7 +666,7 @@ button:active:not(:disabled) {
 
 .entries-workspace {
   display: grid;
-  grid-template-columns: 270px minmax(360px, 0.92fr) minmax(380px, 1.08fr);
+  grid-template-columns: minmax(320px, 0.8fr) minmax(0, 0.92fr) minmax(320px, 1.08fr);
   gap: 16px;
   align-items: start;
 }
@@ -698,7 +698,7 @@ button:active:not(:disabled) {
 
 .covers-workspace {
   display: grid;
-  grid-template-columns: 270px minmax(0, 1fr) minmax(320px, 0.36fr);
+  grid-template-columns: minmax(320px, 0.38fr) minmax(0, 1fr) minmax(320px, 0.36fr);
   gap: 16px;
   align-items: start;
 }
@@ -713,12 +713,14 @@ button:active:not(:disabled) {
 .filters-panel {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 
 .field,
 .field-grid {
   display: grid;
   gap: 7px;
+  min-width: 0;
 }
 
 .field-grid {
@@ -737,6 +739,8 @@ button:active:not(:disabled) {
 .field select,
 .field textarea {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 38px;
   border: 1px solid #cfd8d1;
   border-radius: 7px;
@@ -1652,7 +1656,7 @@ button:active:not(:disabled) {
 
 @media (max-width: 1260px) {
   .entries-workspace {
-    grid-template-columns: 250px minmax(0, 1fr);
+    grid-template-columns: minmax(320px, 0.38fr) minmax(0, 1fr);
   }
 
   .threads-workspace {
@@ -1660,7 +1664,7 @@ button:active:not(:disabled) {
   }
 
   .covers-workspace {
-    grid-template-columns: minmax(250px, 0.32fr) minmax(0, 0.68fr);
+    grid-template-columns: minmax(320px, 0.38fr) minmax(0, 1fr);
   }
 
   .cover-detail-panel {
