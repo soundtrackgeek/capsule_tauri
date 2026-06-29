@@ -17,7 +17,8 @@ Capsule database:
   filters.
 - Entry detail view with full text, tags, mood, location, attachment count, and
   thread metadata when those tables are available.
-- Backup-guarded entry creation and editing.
+- Backup-guarded entry creation and editing, with Capsule-compatible location
+  and weather auto-capture for new entries.
 - Backup-guarded star, unstar, pin, unpin, hide, and unhide entry actions.
 - Full-page markdown composer with metadata fields, continuation UUID support,
   writing stats, and local draft recovery.
@@ -82,6 +83,15 @@ Image storage resolves `CAPSULE_IMAGES_MEDIA_ROOT` first, then
 `C:\Users\jtill\OneDrive\_capsule\images`. Cover wall assets are local-only and
 ignored by Git under `local-assets/`; set `CAPSULE_COVERS_ROOT` to point at a
 different cover folder.
+
+Location auto-capture on entry creation uses the same Capsule configuration keys
+as the existing app: `location.auto_capture`, `location.auto_capture_method`,
+`location.use_default_location`, `location.default_location_name`,
+`location.weather_provider`, and `location.geocoding_cache_hours`. It reads
+`CAPSULE_CONFIG_PATH` first when set, otherwise `config.json` next to the active
+database. The built-in providers match Capsule's current defaults: IP lookup via
+`ip-api.com` with `ipinfo.io` fallback, geocoding via Nominatim, and weather via
+Open-Meteo or MET Norway.
 
 ## Commands
 

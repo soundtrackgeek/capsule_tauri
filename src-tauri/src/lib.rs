@@ -2,6 +2,7 @@ mod backup;
 mod db;
 mod entries;
 mod images;
+mod location;
 mod models;
 mod phase6;
 mod search;

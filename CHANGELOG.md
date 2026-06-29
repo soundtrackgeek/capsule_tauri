@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.2 - 2026-06-29
+
+### Added
+
+- Added Capsule-compatible location and weather auto-capture for newly created
+  Tauri entries, including default-location, IP lookup, Nominatim geocoding,
+  Open-Meteo, and MET Norway support.
+
+### Fixed
+
+- Fixed new entries returning location rows without weather by attaching weather
+  metadata during the native create-entry flow.
+
+### Changed
+
+- Bumped the app version to 0.7.2.
+
 ## 0.7.1 - 2026-06-29
 
 ### Fixed

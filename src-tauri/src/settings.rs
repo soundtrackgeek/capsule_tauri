@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
 };
 
@@ -380,6 +380,12 @@ fn mutate_capsule_config(
 }
 
 fn config_path_for_database(db_path: &Path) -> PathBuf {
+    if let Ok(path) = env::var("CAPSULE_CONFIG_PATH") {
+        let path = path.trim();
+        if !path.is_empty() {
+            return PathBuf::from(path);
+        }
+    }
     db::backup_directory_for_database(db_path).join("config.json")
 }
 

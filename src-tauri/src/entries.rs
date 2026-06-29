@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 
 use crate::{
-    backup, db,
+    backup, db, location,
     models::{
         Entry, EntryCreate, EntryFilters, EntryHistoryItem, EntryHistoryResponse,
         EntryListResponse, EntryMutationResponse, EntrySort, EntryThreadInfo, EntryUpdate,
@@ -439,6 +439,10 @@ fn create_entry_inner(db_path: &Path, input: EntryCreate) -> Result<Entry> {
     }
     refresh_fts_for_entry(&tx, entry_id, &text_plain)?;
     tx.commit()?;
+
+    if let Err(error) = location::auto_capture_location(db_path, &uuid) {
+        eprintln!("[Location] Auto-capture failed for {uuid}: {error}");
+    }
 
     get_entry_for_database(db_path, &uuid)
 }
@@ -1602,6 +1606,44 @@ mod tests {
     }
 
     #[test]
+    fn create_entry_auto_captures_location_and_weather() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_fixture_database(temp_dir.path());
+        std::fs::write(
+            temp_dir.path().join("config.json"),
+            r#"{"location.auto_capture": "true"}"#,
+        )
+        .expect("write config");
+        crate::location::set_test_auto_capture_fixture(Some(
+            crate::location::TestAutoCaptureFixture {
+                latitude: 69.65,
+                longitude: 18.96,
+                place_name: Some("Tromso, Norway".to_string()),
+                source: "default".to_string(),
+                weather_temp_c: Some(-2.0),
+                weather_condition: Some("Snow".to_string()),
+            },
+        ));
+
+        let response = create_entry_for_database(
+            &db_path,
+            EntryCreate {
+                text: "Weather capture entry".to_string(),
+                when: Some("2026-02-01T09:30".to_string()),
+                ..EntryCreate::default()
+            },
+        )
+        .expect("create entry");
+        crate::location::set_test_auto_capture_fixture(None);
+
+        let location = response.entry.location.expect("location");
+        assert_eq!(location.place_name.as_deref(), Some("Tromso, Norway"));
+        assert_eq!(location.weather_condition.as_deref(), Some("Snow"));
+        assert_eq!(location.weather_temp_c, Some(-2.0));
+        assert_eq!(location.weather_temp_f, Some(28.4));
+    }
+
+    #[test]
     fn update_entry_records_history_and_preserves_backup_audit() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let db_path = create_fixture_database(temp_dir.path());
@@ -1769,6 +1811,11 @@ mod tests {
             )
             .expect("fixture");
         drop(connection);
+        std::fs::write(
+            path.join("config.json"),
+            r#"{"location.auto_capture": "false"}"#,
+        )
+        .expect("config");
 
         db_path
     }
