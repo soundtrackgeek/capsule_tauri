@@ -102,6 +102,259 @@ pub struct BackupManifest {
     pub backup_path: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupRestorePreviewRequest {
+    pub backup_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupRestorePreview {
+    pub backup: BackupInfo,
+    pub db_size_bytes: u64,
+    pub db_modified_at: Option<String>,
+    pub schema_summary: SchemaSummary,
+    pub entry_count: Option<i64>,
+    pub tag_count: Option<i64>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupRestoreRequest {
+    pub backup_path: String,
+    pub confirmation: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupRestoreResponse {
+    pub restored_from: BackupInfo,
+    pub safety_backup: BackupInfo,
+    pub completed_at: String,
+    pub status: DatabaseStatus,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapsuleConfigValue {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapsuleConfigResponse {
+    pub config_path: String,
+    pub exists: bool,
+    pub values: Vec<CapsuleConfigValue>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigMutationResponse {
+    pub config: CapsuleConfigResponse,
+    pub backup_path: Option<String>,
+    pub operation: String,
+    pub completed_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagUsage {
+    pub id: i64,
+    pub name: String,
+    pub entry_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagCatalogResponse {
+    pub tags: Vec<TagUsage>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagRenameRequest {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagMergeRequest {
+    pub source: String,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagDeleteRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagMutationResponse {
+    pub tags: Vec<TagUsage>,
+    pub audit: MutationAudit,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoodUsage {
+    pub name: String,
+    pub label: String,
+    pub entry_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoodCatalogResponse {
+    pub moods: Vec<MoodUsage>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoodRenameRequest {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoodDeleteRequest {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoodMutationResponse {
+    pub moods: Vec<MoodUsage>,
+    pub audit: MutationAudit,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryTemplate {
+    pub id: i64,
+    pub slug: String,
+    pub name: String,
+    pub description: String,
+    pub intro_text: String,
+    pub sections: Vec<String>,
+    pub is_builtin: bool,
+    pub is_active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPrompt {
+    pub id: i64,
+    pub slug: String,
+    pub prompt_text: String,
+    pub category: String,
+    pub tags: Vec<String>,
+    pub is_builtin: bool,
+    pub is_active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryListResponse {
+    pub templates: Vec<LibraryTemplate>,
+    pub prompts: Vec<LibraryPrompt>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryTemplateInput {
+    pub slug: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub intro_text: Option<String>,
+    pub sections: Option<Vec<String>>,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryTemplateUpdate {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub intro_text: Option<String>,
+    pub sections: Option<Vec<String>>,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryTemplateMutationResponse {
+    pub template: Option<LibraryTemplate>,
+    pub audit: MutationAudit,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPromptInput {
+    pub slug: String,
+    pub prompt_text: String,
+    pub category: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPromptUpdate {
+    pub prompt_text: Option<String>,
+    pub category: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPromptMutationResponse {
+    pub prompt: Option<LibraryPrompt>,
+    pub audit: MutationAudit,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ExportFormat {
+    Markdown,
+    Json,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportEntriesRequest {
+    pub format: ExportFormat,
+    pub uuids: Option<Vec<String>>,
+    pub search: Option<SearchRequest>,
+    pub filters: Option<EntryFilters>,
+    pub file_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportEntriesResponse {
+    pub path: String,
+    pub format: ExportFormat,
+    pub entry_count: usize,
+    pub created_at: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TagInfo {

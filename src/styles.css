@@ -21,6 +21,82 @@ body {
     #f5f7f4;
 }
 
+:root[data-theme="dark"] {
+  color: #e9eee8;
+  background: #161b18;
+}
+
+:root[data-theme="dark"] body {
+  background: #161b18;
+}
+
+:root[data-theme="dark"] .sidebar {
+  border-color: #2a352f;
+  background: #1d2520;
+}
+
+:root[data-theme="dark"] .brand-mark,
+:root[data-theme="dark"] .nav-item--active {
+  background: #dcebe1;
+  color: #152019;
+}
+
+:root[data-theme="dark"] .brand p,
+:root[data-theme="dark"] .muted,
+:root[data-theme="dark"] .eyebrow,
+:root[data-theme="dark"] .entry-mini p,
+:root[data-theme="dark"] .entry-card p,
+:root[data-theme="dark"] .thread-card p,
+:root[data-theme="dark"] .thread-entry-row p,
+:root[data-theme="dark"] .backup-row p,
+:root[data-theme="dark"] .data-row p,
+:root[data-theme="dark"] .about-panel p,
+:root[data-theme="dark"] .metadata-block p,
+:root[data-theme="dark"] .detail-panel--empty p {
+  color: #aab8ae;
+}
+
+:root[data-theme="dark"] .panel,
+:root[data-theme="dark"] .about-panel,
+:root[data-theme="dark"] .backup-view,
+:root[data-theme="dark"] .filters-panel,
+:root[data-theme="dark"] .entry-list-panel,
+:root[data-theme="dark"] .detail-panel,
+:root[data-theme="dark"] .thread-list-panel,
+:root[data-theme="dark"] .thread-detail-panel,
+:root[data-theme="dark"] .state-panel,
+:root[data-theme="dark"] .entry-mini,
+:root[data-theme="dark"] .backup-row,
+:root[data-theme="dark"] .data-row,
+:root[data-theme="dark"] .entry-card,
+:root[data-theme="dark"] .thread-card,
+:root[data-theme="dark"] .thread-entry-row,
+:root[data-theme="dark"] .metric {
+  border-color: #2e3a33;
+  background: #1d2520;
+}
+
+:root[data-theme="dark"] .secondary-button,
+:root[data-theme="dark"] .icon-button,
+:root[data-theme="dark"] .field input,
+:root[data-theme="dark"] .field select,
+:root[data-theme="dark"] .field textarea {
+  border-color: #34433a;
+  background: #141a17;
+  color: #e9eee8;
+}
+
+:root[data-theme="dark"] .tag-chip,
+:root[data-theme="dark"] .icon-stat {
+  background: #29342d;
+  color: #dcebe1;
+}
+
+:root[data-theme="dark"] .mood-chip {
+  background: #3a3028;
+  color: #f4e0c5;
+}
+
 button,
 input,
 select,
@@ -43,6 +119,29 @@ button:active:not(:disabled) {
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
   min-height: 100dvh;
+}
+
+.app-shell--compact {
+  grid-template-columns: 76px minmax(0, 1fr);
+}
+
+.app-shell--compact .sidebar {
+  padding: 20px 12px;
+}
+
+.app-shell--compact .brand {
+  justify-content: center;
+}
+
+.app-shell--compact .brand h1,
+.app-shell--compact .brand p,
+.app-shell--compact .nav-item span {
+  display: none;
+}
+
+.app-shell--compact .nav-item {
+  justify-content: center;
+  padding: 0;
 }
 
 .sidebar {
@@ -430,7 +529,9 @@ button:active:not(:disabled) {
 
 .entry-stack,
 .backup-list,
+.config-list,
 .entry-list,
+.library-list,
 .thread-list,
 .thread-entry-list,
 .skeleton-list {
@@ -440,6 +541,7 @@ button:active:not(:disabled) {
 
 .entry-mini,
 .backup-row,
+.data-row,
 .entry-card,
 .thread-card,
 .thread-entry-row,
@@ -967,9 +1069,64 @@ button:active:not(:disabled) {
   gap: 16px;
 }
 
+.backup-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .backup-row h4 {
   font-size: 14px;
   overflow-wrap: anywhere;
+}
+
+.data-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.data-row--stacked {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.data-row h4 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.data-row p {
+  margin: 6px 0 0;
+  color: #66756d;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.settings-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 14px;
+}
+
+.settings-form-grid--delete {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.settings-form-grid .field--wide {
+  grid-column: 1 / -1;
+}
+
+.catalog-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
 }
 
 .empty-state {
@@ -1052,6 +1209,10 @@ button:active:not(:disabled) {
     grid-template-columns: 1fr;
   }
 
+  .app-shell--compact {
+    grid-template-columns: 1fr;
+  }
+
   .sidebar {
     border-right: 0;
     border-bottom: 1px solid #d7ded8;
@@ -1084,6 +1245,7 @@ button:active:not(:disabled) {
   .settings-grid,
   .entries-workspace,
   .threads-workspace,
+  .settings-form-grid,
   .composer-view {
     grid-template-columns: 1fr;
   }

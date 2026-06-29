@@ -3,7 +3,7 @@
 Capsule Tauri is a local-first desktop journal for Capsule built with Tauri 2,
 React, TypeScript, Vite, Rust, and SQLite.
 
-Phase 3 provides search, threads, and write-safe core journaling over the active
+Phase 4 provides backup restore, settings, and data tools over the active
 Capsule database:
 
 - Tauri 2 desktop configuration.
@@ -33,10 +33,21 @@ Capsule database:
   and thread disband actions with cycle prevention.
 - Backup listing for Capsule-compatible backup files.
 - Manual SQLite backup creation using SQLite's backup API.
+- Backup restore preview with schema, entry, tag, size, and timestamp checks.
+- Restore with a fresh safety backup before the live database is replaced.
+- Open-backup-folder command for the active database directory.
 - JSON manifests written next to generated backups.
+- Capsule `config.json` display plus file-backed set/delete actions that create
+  config backups before writing.
+- Local theme and sidebar-density settings stored outside the journal database.
+- Tag rename, merge, and delete tools guarded by verified database backups.
+- Mood rename and clear tools guarded by verified database backups.
+- Template and prompt library management for custom rows, with built-in rows
+  limited to enable/disable actions.
+- Markdown and JSON exports for selected entries and current search result sets.
 - Rust tests for backup naming, database status inspection, read-only entry
-  queries, backup-guarded mutations, entry history, search, and thread
-  operations.
+  queries, backup-guarded mutations, entry history, search, thread operations,
+  restore, tag/mood tools, library CRUD, and export generation.
 
 The database resolver checks an explicit `CAPSULE_DB_PATH` first. When that is
 not set, it prefers the MVP production database at
@@ -77,6 +88,10 @@ capsule_backup_YYYYMMDD_HHMMSS.json
 The backup command verifies that the generated database exists, is non-empty,
 and can be opened with SQLite before reporting success.
 
-Hard delete is intentionally not exposed in Phase 3. Entries can be hidden and
+Restore is constrained to Capsule-compatible backup files in the active database
+backup directory. Before restore replaces the live database, the app creates and
+verifies a fresh safety backup of the current database.
+
+Hard delete is intentionally not exposed in Phase 4. Entries can be hidden and
 unhidden safely; true delete remains reserved until the legacy resequencing
 behavior is matched and tested.

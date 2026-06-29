@@ -1,6 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    process::Command,
     time::Duration,
 };
 
@@ -12,7 +13,8 @@ use crate::{
     db,
     models::{
         BackupCreateRequest, BackupCreateResponse, BackupInfo, BackupListResponse, BackupManifest,
-        MutationAudit,
+        BackupRestorePreview, BackupRestorePreviewRequest, BackupRestoreRequest,
+        BackupRestoreResponse, MutationAudit,
     },
 };
 
@@ -102,6 +104,132 @@ pub fn create_backup_for_database(
     Ok(BackupCreateResponse {
         backup: backup_info,
     })
+}
+
+pub fn preview_restore_backup(input: BackupRestorePreviewRequest) -> Result<BackupRestorePreview> {
+    let db_path = db::resolve_database_path();
+    preview_restore_backup_for_database(&db_path, input)
+}
+
+pub(crate) fn preview_restore_backup_for_database(
+    db_path: &Path,
+    input: BackupRestorePreviewRequest,
+) -> Result<BackupRestorePreview> {
+    let backup_path = validate_restore_backup_path(db_path, &input.backup_path)?;
+    verify_backup(&backup_path)?;
+
+    let metadata = fs::metadata(&backup_path)
+        .with_context(|| format!("failed to inspect {}", backup_path.display()))?;
+    let db_modified_at = metadata.modified().ok().map(db::system_time_to_iso);
+    let connection = db::open_read_only_connection(&backup_path)?;
+    let schema_summary = db::inspect_schema(&connection)?;
+    let entry_count = if schema_summary.has_entries_table {
+        Some(count_table_rows(&connection, "entries")?)
+    } else {
+        None
+    };
+    let tag_count = if schema_summary.has_tags_table {
+        Some(count_table_rows(&connection, "tags")?)
+    } else {
+        None
+    };
+
+    let mut warnings = Vec::new();
+    if !schema_summary.missing_core_tables.is_empty() {
+        warnings.push(format!(
+            "Missing core tables: {}",
+            schema_summary.missing_core_tables.join(", ")
+        ));
+    }
+
+    Ok(BackupRestorePreview {
+        backup: backup_info_from_path(&backup_path)?,
+        db_size_bytes: metadata.len(),
+        db_modified_at,
+        schema_summary,
+        entry_count,
+        tag_count,
+        warnings,
+    })
+}
+
+pub fn restore_backup(input: BackupRestoreRequest) -> Result<BackupRestoreResponse> {
+    let db_path = db::resolve_database_path();
+    restore_backup_for_database(&db_path, input)
+}
+
+pub(crate) fn restore_backup_for_database(
+    db_path: &Path,
+    input: BackupRestoreRequest,
+) -> Result<BackupRestoreResponse> {
+    if input.confirmation.as_deref() != Some("RESTORE") {
+        return Err(anyhow!("Restore confirmation must be RESTORE."));
+    }
+
+    let backup_path = validate_restore_backup_path(db_path, &input.backup_path)?;
+    verify_backup(&backup_path)?;
+    let restored_from = backup_info_from_path(&backup_path)?;
+
+    let safety_backup = create_backup_for_database(
+        db_path,
+        BackupCreateRequest {
+            operation: Some("backup.restore.safety".to_string()),
+        },
+    )
+    .context("failed to create a safety backup before restore")?
+    .backup;
+
+    let backup_directory = db::backup_directory_for_database(db_path);
+    let temp_restore_path = backup_directory.join("capsule_restore_pending.db");
+    if temp_restore_path.exists() {
+        fs::remove_file(&temp_restore_path).with_context(|| {
+            format!(
+                "failed to remove stale restore file {}",
+                temp_restore_path.display()
+            )
+        })?;
+    }
+
+    fs::copy(&backup_path, &temp_restore_path).with_context(|| {
+        format!(
+            "failed to stage restore file {}",
+            temp_restore_path.display()
+        )
+    })?;
+    verify_backup(&temp_restore_path)?;
+
+    checkpoint_database(db_path);
+    remove_if_exists(&sidecar_path(db_path, "-wal"))?;
+    remove_if_exists(&sidecar_path(db_path, "-shm"))?;
+    remove_if_exists(db_path)?;
+    fs::rename(&temp_restore_path, db_path).with_context(|| {
+        format!(
+            "failed to replace {} with {}",
+            db_path.display(),
+            temp_restore_path.display()
+        )
+    })?;
+
+    verify_backup(db_path)?;
+    let status = db::database_status_for_path(db_path.to_path_buf())?;
+
+    Ok(BackupRestoreResponse {
+        restored_from,
+        safety_backup,
+        completed_at: Utc::now().to_rfc3339(),
+        status,
+    })
+}
+
+pub fn open_backup_folder() -> Result<()> {
+    let backup_directory = db::backup_directory_for_database(&db::resolve_database_path());
+    fs::create_dir_all(&backup_directory)
+        .with_context(|| format!("failed to create {}", backup_directory.display()))?;
+    Command::new("explorer.exe")
+        .arg(&backup_directory)
+        .spawn()
+        .with_context(|| format!("failed to open {}", backup_directory.display()))?;
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -229,6 +357,66 @@ fn parse_created_at_from_filename(path: &Path) -> Option<String> {
     Some(Utc.from_utc_datetime(&naive).to_rfc3339())
 }
 
+fn validate_restore_backup_path(db_path: &Path, backup_path: &str) -> Result<PathBuf> {
+    let backup_path = PathBuf::from(backup_path);
+    if !is_capsule_backup_db(&backup_path) {
+        return Err(anyhow!(
+            "Restore only accepts Capsule backup files named capsule_backup_YYYYMMDD_HHMMSS.db."
+        ));
+    }
+
+    let expected_directory = db::backup_directory_for_database(db_path)
+        .canonicalize()
+        .with_context(|| {
+            format!(
+                "failed to resolve backup directory for {}",
+                db_path.display()
+            )
+        })?;
+    let backup_path = backup_path
+        .canonicalize()
+        .with_context(|| format!("backup file does not exist: {}", backup_path.display()))?;
+    let backup_parent = backup_path
+        .parent()
+        .context("backup path does not have a parent directory")?
+        .canonicalize()?;
+
+    if backup_parent != expected_directory {
+        return Err(anyhow!(
+            "Restore only accepts backups from the active database backup directory."
+        ));
+    }
+
+    Ok(backup_path)
+}
+
+fn count_table_rows(connection: &Connection, table: &str) -> Result<i64> {
+    let table = match table {
+        "entries" => "entries",
+        "tags" => "tags",
+        other => return Err(anyhow!("unsupported table count: {other}")),
+    };
+    let sql = format!("SELECT COUNT(*) FROM {table}");
+    Ok(connection.query_row(&sql, [], |row| row.get::<_, i64>(0))?)
+}
+
+fn checkpoint_database(path: &Path) {
+    if let Ok(connection) = db::open_read_write_connection(path) {
+        let _ = connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+    }
+}
+
+fn sidecar_path(path: &Path, suffix: &str) -> PathBuf {
+    PathBuf::from(format!("{}{}", path.to_string_lossy(), suffix))
+}
+
+fn remove_if_exists(path: &Path) -> Result<()> {
+    if path.exists() {
+        fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,5 +511,60 @@ mod tests {
 
         assert!(result.is_err());
         assert!(!write_ran);
+    }
+
+    #[test]
+    fn restore_backup_replaces_database_after_safety_backup() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("capsule.db");
+        let active_connection = Connection::open(&db_path).expect("open active db");
+        active_connection
+            .execute_batch(
+                "
+                CREATE TABLE entries (id INTEGER PRIMARY KEY, text TEXT);
+                INSERT INTO entries (text) VALUES ('current');
+                ",
+            )
+            .expect("active fixture");
+        drop(active_connection);
+
+        let backup_path = temp_dir.path().join("capsule_backup_20260629_120000.db");
+        let backup_connection = Connection::open(&backup_path).expect("open backup db");
+        backup_connection
+            .execute_batch(
+                "
+                CREATE TABLE entries (id INTEGER PRIMARY KEY, text TEXT);
+                INSERT INTO entries (text) VALUES ('restored');
+                ",
+            )
+            .expect("backup fixture");
+        drop(backup_connection);
+
+        let preview = preview_restore_backup_for_database(
+            &db_path,
+            BackupRestorePreviewRequest {
+                backup_path: db::path_to_string(&backup_path),
+            },
+        )
+        .expect("preview");
+        assert_eq!(preview.entry_count, Some(1));
+
+        let response = restore_backup_for_database(
+            &db_path,
+            BackupRestoreRequest {
+                backup_path: db::path_to_string(&backup_path),
+                confirmation: Some("RESTORE".to_string()),
+            },
+        )
+        .expect("restore");
+
+        assert!(PathBuf::from(response.safety_backup.path).exists());
+        let restored_connection = Connection::open(&db_path).expect("open restored db");
+        let text = restored_connection
+            .query_row("SELECT text FROM entries", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .expect("restored text");
+        assert_eq!(text, "restored");
     }
 }

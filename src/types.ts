@@ -51,6 +51,196 @@ export type BackupCreateResponse = {
   backup: BackupInfo;
 };
 
+export type BackupRestorePreviewRequest = {
+  backupPath: string;
+};
+
+export type BackupRestorePreview = {
+  backup: BackupInfo;
+  dbSizeBytes: number;
+  dbModifiedAt: string | null;
+  schemaSummary: SchemaSummary;
+  entryCount: number | null;
+  tagCount: number | null;
+  warnings: string[];
+};
+
+export type BackupRestoreRequest = {
+  backupPath: string;
+  confirmation?: string | null;
+};
+
+export type BackupRestoreResponse = {
+  restoredFrom: BackupInfo;
+  safetyBackup: BackupInfo;
+  completedAt: string;
+  status: DatabaseStatus;
+};
+
+export type CapsuleConfigValue = {
+  key: string;
+  value: string;
+};
+
+export type CapsuleConfigResponse = {
+  configPath: string;
+  exists: boolean;
+  values: CapsuleConfigValue[];
+  warnings: string[];
+};
+
+export type ConfigMutationResponse = {
+  config: CapsuleConfigResponse;
+  backupPath: string | null;
+  operation: string;
+  completedAt: string;
+};
+
+export type TagUsage = {
+  id: number;
+  name: string;
+  entryCount: number;
+};
+
+export type TagCatalogResponse = {
+  tags: TagUsage[];
+  warnings: string[];
+};
+
+export type TagRenameRequest = {
+  from: string;
+  to: string;
+};
+
+export type TagMergeRequest = {
+  source: string;
+  target: string;
+};
+
+export type TagDeleteRequest = {
+  name: string;
+};
+
+export type TagMutationResponse = {
+  tags: TagUsage[];
+  audit: MutationAudit;
+};
+
+export type MoodUsage = {
+  name: string;
+  label: string;
+  entryCount: number;
+};
+
+export type MoodCatalogResponse = {
+  moods: MoodUsage[];
+  warnings: string[];
+};
+
+export type MoodRenameRequest = {
+  from: string;
+  to: string;
+};
+
+export type MoodDeleteRequest = {
+  name: string;
+};
+
+export type MoodMutationResponse = {
+  moods: MoodUsage[];
+  audit: MutationAudit;
+};
+
+export type LibraryTemplate = {
+  id: number;
+  slug: string;
+  name: string;
+  description: string;
+  introText: string;
+  sections: string[];
+  isBuiltin: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type LibraryPrompt = {
+  id: number;
+  slug: string;
+  promptText: string;
+  category: string;
+  tags: string[];
+  isBuiltin: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type LibraryListResponse = {
+  templates: LibraryTemplate[];
+  prompts: LibraryPrompt[];
+  warnings: string[];
+};
+
+export type LibraryTemplateInput = {
+  slug: string;
+  name: string;
+  description?: string | null;
+  introText?: string | null;
+  sections?: string[];
+  isActive?: boolean;
+};
+
+export type LibraryTemplateUpdate = {
+  name?: string;
+  description?: string;
+  introText?: string;
+  sections?: string[];
+  isActive?: boolean;
+};
+
+export type LibraryTemplateMutationResponse = {
+  template: LibraryTemplate | null;
+  audit: MutationAudit;
+};
+
+export type LibraryPromptInput = {
+  slug: string;
+  promptText: string;
+  category?: string | null;
+  tags?: string[];
+  isActive?: boolean;
+};
+
+export type LibraryPromptUpdate = {
+  promptText?: string;
+  category?: string;
+  tags?: string[];
+  isActive?: boolean;
+};
+
+export type LibraryPromptMutationResponse = {
+  prompt: LibraryPrompt | null;
+  audit: MutationAudit;
+};
+
+export type ExportFormat = "markdown" | "json";
+
+export type ExportEntriesRequest = {
+  format: ExportFormat;
+  uuids?: string[];
+  search?: SearchRequest;
+  filters?: EntryFilters;
+  fileName?: string | null;
+};
+
+export type ExportEntriesResponse = {
+  path: string;
+  format: ExportFormat;
+  entryCount: number;
+  createdAt: string;
+};
+
 export type TagInfo = {
   id: number;
   name: string;

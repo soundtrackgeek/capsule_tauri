@@ -3,6 +3,12 @@ import type {
   BackupCreateRequest,
   BackupCreateResponse,
   BackupListResponse,
+  BackupRestorePreview,
+  BackupRestorePreviewRequest,
+  BackupRestoreRequest,
+  BackupRestoreResponse,
+  CapsuleConfigResponse,
+  ConfigMutationResponse,
   DatabaseStatus,
   Entry,
   EntryCreate,
@@ -11,9 +17,27 @@ import type {
   EntryListResponse,
   EntryMutationResponse,
   EntryUpdate,
+  ExportEntriesRequest,
+  ExportEntriesResponse,
+  LibraryListResponse,
+  LibraryPromptInput,
+  LibraryPromptMutationResponse,
+  LibraryPromptUpdate,
+  LibraryTemplateInput,
+  LibraryTemplateMutationResponse,
+  LibraryTemplateUpdate,
+  MoodCatalogResponse,
+  MoodDeleteRequest,
+  MoodMutationResponse,
+  MoodRenameRequest,
   RandomEntryFilters,
   SearchRequest,
   SearchResponse,
+  TagCatalogResponse,
+  TagDeleteRequest,
+  TagMergeRequest,
+  TagMutationResponse,
+  TagRenameRequest,
   ThreadGroup,
   ThreadListResponse,
   ThreadMetadataUpdate,
@@ -68,6 +92,69 @@ const mockBackups: BackupListResponse = {
       verified: true,
     },
   ],
+};
+
+let mockConfig: CapsuleConfigResponse = {
+  configPath: "C:\\Users\\jtill\\.capsule\\config.json",
+  exists: true,
+  values: [
+    { key: "backup_count", value: "3" },
+    { key: "theme", value: "system" },
+  ],
+  warnings: [],
+};
+
+let mockTags: TagCatalogResponse = {
+  tags: [
+    { id: 1, name: "capsule", entryCount: 1 },
+    { id: 2, name: "tauri", entryCount: 1 },
+    { id: 3, name: "rust", entryCount: 2 },
+    { id: 4, name: "work", entryCount: 1 },
+    { id: 5, name: "codex", entryCount: 2 },
+    { id: 6, name: "art", entryCount: 1 },
+  ],
+  warnings: [],
+};
+
+let mockMoods: MoodCatalogResponse = {
+  moods: [
+    { name: "calm", label: "Calm", entryCount: 1 },
+    { name: "excited", label: "Excited", entryCount: 1 },
+    { name: "focused", label: "Focused", entryCount: 1 },
+    { name: "happy", label: "Happy", entryCount: 1 },
+  ],
+  warnings: [],
+};
+
+let mockLibrary: LibraryListResponse = {
+  templates: [
+    {
+      id: 1,
+      slug: "weekly-review",
+      name: "Weekly Review",
+      description: "End-of-week review with momentum planning.",
+      introText: "",
+      sections: ["## Highlights", "## Challenges", "## Lessons", "## Next week focus"],
+      isBuiltin: true,
+      isActive: true,
+      createdAt: "2026-06-29 12:00",
+      updatedAt: "2026-06-29 12:00",
+    },
+  ],
+  prompts: [
+    {
+      id: 1,
+      slug: "surprise_today",
+      promptText: "What's one thing that surprised you today?",
+      category: "reflection",
+      tags: ["daily", "reflection"],
+      isBuiltin: true,
+      isActive: true,
+      createdAt: "2026-06-29 12:00",
+      updatedAt: "2026-06-29 12:00",
+    },
+  ],
+  warnings: [],
 };
 
 let mockEntries: Entry[] = [
@@ -259,6 +346,491 @@ export async function createBackup(
         operation: input.operation ?? "manual",
         verified: true,
       },
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function previewRestoreBackup(
+  input: BackupRestorePreviewRequest,
+): Promise<BackupRestorePreview> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<BackupRestorePreview>("preview_restore_backup", { input });
+    }
+
+    await pause(180);
+    const backup = mockBackups.backups.find((item) => item.path === input.backupPath);
+    if (!backup) {
+      throw new Error(`Backup not found: ${input.backupPath}`);
+    }
+    return {
+      backup,
+      dbSizeBytes: backup.sizeBytes,
+      dbModifiedAt: backup.createdAt,
+      schemaSummary: mockStatus.schemaSummary,
+      entryCount: mockEntries.length,
+      tagCount: mockTags.tags.length,
+      warnings: [],
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function restoreBackup(
+  input: BackupRestoreRequest,
+): Promise<BackupRestoreResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<BackupRestoreResponse>("restore_backup", { input });
+    }
+
+    await pause(500);
+    if (input.confirmation !== "RESTORE") {
+      throw new Error("Restore confirmation must be RESTORE.");
+    }
+    const restoredFrom = mockBackups.backups.find((item) => item.path === input.backupPath);
+    if (!restoredFrom) {
+      throw new Error(`Backup not found: ${input.backupPath}`);
+    }
+    const safetyBackup = (await createBackup({ operation: "backup.restore.safety" })).backup;
+    return {
+      restoredFrom,
+      safetyBackup,
+      completedAt: new Date().toISOString(),
+      status: mockStatus,
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function openBackupFolder(): Promise<void> {
+  try {
+    if (runningInTauri()) {
+      await invoke<void>("open_backup_folder");
+      return;
+    }
+
+    await pause(100);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function getCapsuleConfig(): Promise<CapsuleConfigResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<CapsuleConfigResponse>("get_capsule_config");
+    }
+
+    await pause(120);
+    return mockConfig;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function setCapsuleConfigValue(
+  key: string,
+  value: string,
+): Promise<ConfigMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<ConfigMutationResponse>("set_capsule_config_value", { key, value });
+    }
+
+    await pause(180);
+    const nextValues = mockConfig.values.filter((item) => item.key !== key);
+    nextValues.push({ key, value });
+    mockConfig = { ...mockConfig, exists: true, values: nextValues.sort((a, b) => a.key.localeCompare(b.key)) };
+    return {
+      config: mockConfig,
+      backupPath: "C:\\Users\\jtill\\.capsule\\config_backup_20260629_120000.json",
+      operation: "config.set",
+      completedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function deleteCapsuleConfigValue(
+  key: string,
+): Promise<ConfigMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<ConfigMutationResponse>("delete_capsule_config_value", { key });
+    }
+
+    await pause(180);
+    mockConfig = { ...mockConfig, values: mockConfig.values.filter((item) => item.key !== key) };
+    return {
+      config: mockConfig,
+      backupPath: "C:\\Users\\jtill\\.capsule\\config_backup_20260629_120000.json",
+      operation: "config.delete",
+      completedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function listTags(): Promise<TagCatalogResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<TagCatalogResponse>("list_tags");
+    }
+
+    await pause(120);
+    return mockTags;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function renameTag(input: TagRenameRequest): Promise<TagMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<TagMutationResponse>("rename_tag", { input });
+    }
+
+    await pause(220);
+    const from = input.from.trim().toLowerCase();
+    const to = input.to.trim().toLowerCase();
+    if (!from || !to) {
+      throw new Error("Both tag names are required.");
+    }
+    if (mockTags.tags.some((tag) => tag.name === to)) {
+      throw new Error(`Tag '${to}' already exists. Use merge instead.`);
+    }
+    mockTags = {
+      ...mockTags,
+      tags: mockTags.tags
+        .map((tag) => (tag.name === from ? { ...tag, name: to } : tag))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    };
+    mockEntries = mockEntries.map((entry) => ({
+      ...entry,
+      tags: entry.tags.map((tag) => (tag.name === from ? { ...tag, name: to } : tag)),
+    }));
+    return { tags: mockTags.tags, audit: mockAudit("tag.rename") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function mergeTag(input: TagMergeRequest): Promise<TagMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<TagMutationResponse>("merge_tag", { input });
+    }
+
+    await pause(240);
+    const source = input.source.trim().toLowerCase();
+    const target = input.target.trim().toLowerCase();
+    if (!source || !target) {
+      throw new Error("Both tag names are required.");
+    }
+    const sourceTag = mockTags.tags.find((tag) => tag.name === source);
+    if (!sourceTag) {
+      throw new Error(`Tag not found: ${source}`);
+    }
+    const targetTag = mockTags.tags.find((tag) => tag.name === target) ?? {
+      id: Math.max(0, ...mockTags.tags.map((tag) => tag.id)) + 1,
+      name: target,
+      entryCount: 0,
+    };
+    mockEntries = mockEntries.map((entry) => {
+      const hasSource = entry.tags.some((tag) => tag.name === source);
+      if (!hasSource) {
+        return entry;
+      }
+      const tags = entry.tags.filter((tag) => tag.name !== source);
+      if (!tags.some((tag) => tag.name === target)) {
+        tags.push({ id: targetTag.id, name: target });
+      }
+      return { ...entry, tags };
+    });
+    mockTags = rebuildMockTagUsage(mockTags.tags.filter((tag) => tag.name !== source || tag.name === target));
+    return { tags: mockTags.tags, audit: mockAudit("tag.merge") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function deleteTag(input: TagDeleteRequest): Promise<TagMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<TagMutationResponse>("delete_tag", { input });
+    }
+
+    await pause(220);
+    const name = input.name.trim().toLowerCase();
+    mockEntries = mockEntries.map((entry) => ({
+      ...entry,
+      tags: entry.tags.filter((tag) => tag.name !== name),
+    }));
+    mockTags = rebuildMockTagUsage(mockTags.tags.filter((tag) => tag.name !== name));
+    return { tags: mockTags.tags, audit: mockAudit("tag.delete") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function listMoods(): Promise<MoodCatalogResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<MoodCatalogResponse>("list_moods");
+    }
+
+    await pause(120);
+    return mockMoods;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function renameMood(input: MoodRenameRequest): Promise<MoodMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<MoodMutationResponse>("rename_mood", { input });
+    }
+
+    await pause(220);
+    const from = input.from.trim().toLowerCase();
+    const to = input.to.trim().toLowerCase();
+    mockEntries = mockEntries.map((entry) =>
+      entry.mood?.toLowerCase() === from
+        ? { ...entry, mood: to, moodInfo: { name: to, label: labelize(to) } }
+        : entry,
+    );
+    mockMoods = rebuildMockMoodUsage();
+    return { moods: mockMoods.moods, audit: mockAudit("mood.rename") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function deleteMood(input: MoodDeleteRequest): Promise<MoodMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<MoodMutationResponse>("delete_mood", { input });
+    }
+
+    await pause(220);
+    const name = input.name.trim().toLowerCase();
+    mockEntries = mockEntries.map((entry) =>
+      entry.mood?.toLowerCase() === name
+        ? { ...entry, mood: null, moodInfo: { name: null, label: null } }
+        : entry,
+    );
+    mockMoods = rebuildMockMoodUsage();
+    return { moods: mockMoods.moods, audit: mockAudit("mood.delete") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function listLibraryItems(): Promise<LibraryListResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<LibraryListResponse>("list_library_items");
+    }
+
+    await pause(120);
+    return mockLibrary;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function createTemplate(
+  input: LibraryTemplateInput,
+): Promise<LibraryTemplateMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<LibraryTemplateMutationResponse>("create_template", { input });
+    }
+
+    await pause(260);
+    const now = new Date().toISOString();
+    const template = {
+      id: Math.max(0, ...mockLibrary.templates.map((item) => item.id)) + 1,
+      slug: slugify(input.slug),
+      name: input.name.trim(),
+      description: input.description?.trim() ?? "",
+      introText: input.introText ?? "",
+      sections: input.sections ?? [],
+      isBuiltin: false,
+      isActive: input.isActive ?? true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    mockLibrary = { ...mockLibrary, templates: [...mockLibrary.templates, template] };
+    return { template, audit: mockAudit("library.template.create") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function updateTemplate(
+  slug: string,
+  input: LibraryTemplateUpdate,
+): Promise<LibraryTemplateMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<LibraryTemplateMutationResponse>("update_template", { slug, input });
+    }
+
+    await pause(240);
+    let updated = null;
+    mockLibrary = {
+      ...mockLibrary,
+      templates: mockLibrary.templates.map((template) => {
+        if (template.slug !== slug) {
+          return template;
+        }
+        updated = {
+          ...template,
+          name: input.name ?? template.name,
+          description: input.description ?? template.description,
+          introText: input.introText ?? template.introText,
+          sections: input.sections ?? template.sections,
+          isActive: input.isActive ?? template.isActive,
+          updatedAt: new Date().toISOString(),
+        };
+        return updated;
+      }),
+    };
+    return { template: updated, audit: mockAudit("library.template.update") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function deleteTemplate(slug: string): Promise<LibraryTemplateMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<LibraryTemplateMutationResponse>("delete_template", { slug });
+    }
+
+    await pause(220);
+    mockLibrary = {
+      ...mockLibrary,
+      templates: mockLibrary.templates.filter((template) => template.slug !== slug),
+    };
+    return { template: null, audit: mockAudit("library.template.delete") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function createPrompt(
+  input: LibraryPromptInput,
+): Promise<LibraryPromptMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<LibraryPromptMutationResponse>("create_prompt", { input });
+    }
+
+    await pause(260);
+    const now = new Date().toISOString();
+    const prompt = {
+      id: Math.max(0, ...mockLibrary.prompts.map((item) => item.id)) + 1,
+      slug: slugify(input.slug),
+      promptText: input.promptText.trim(),
+      category: input.category?.trim() || "general",
+      tags: normalizeTags(input.tags),
+      isBuiltin: false,
+      isActive: input.isActive ?? true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    mockLibrary = { ...mockLibrary, prompts: [...mockLibrary.prompts, prompt] };
+    return { prompt, audit: mockAudit("library.prompt.create") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function updatePrompt(
+  slug: string,
+  input: LibraryPromptUpdate,
+): Promise<LibraryPromptMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<LibraryPromptMutationResponse>("update_prompt", { slug, input });
+    }
+
+    await pause(240);
+    let updated = null;
+    mockLibrary = {
+      ...mockLibrary,
+      prompts: mockLibrary.prompts.map((prompt) => {
+        if (prompt.slug !== slug) {
+          return prompt;
+        }
+        updated = {
+          ...prompt,
+          promptText: input.promptText ?? prompt.promptText,
+          category: input.category ?? prompt.category,
+          tags: input.tags ?? prompt.tags,
+          isActive: input.isActive ?? prompt.isActive,
+          updatedAt: new Date().toISOString(),
+        };
+        return updated;
+      }),
+    };
+    return { prompt: updated, audit: mockAudit("library.prompt.update") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function deletePrompt(slug: string): Promise<LibraryPromptMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<LibraryPromptMutationResponse>("delete_prompt", { slug });
+    }
+
+    await pause(220);
+    mockLibrary = {
+      ...mockLibrary,
+      prompts: mockLibrary.prompts.filter((prompt) => prompt.slug !== slug),
+    };
+    return { prompt: null, audit: mockAudit("library.prompt.delete") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function exportEntries(
+  input: ExportEntriesRequest,
+): Promise<ExportEntriesResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<ExportEntriesResponse>("export_entries", { input });
+    }
+
+    await pause(260);
+    const entries = input.uuids
+      ? mockEntries.filter((entry) => input.uuids?.includes(entry.uuid))
+      : input.search
+        ? applyMockFilters(mockEntries, parseMockSearch(input.search).filters)
+        : applyMockFilters(mockEntries, input.filters ?? {});
+    const createdAt = new Date().toISOString();
+    const stamp = createdAt
+      .replace(/[-:]/g, "")
+      .replace(/\.\d{3}Z$/, "")
+      .replace("T", "_");
+    return {
+      path: `C:\\Users\\jtill\\.capsule\\exports\\capsule_export_${stamp}.${input.format === "markdown" ? "md" : "json"}`,
+      format: input.format,
+      entryCount: entries.length,
+      createdAt,
     };
   } catch (error) {
     throw normalizeError(error);
@@ -848,6 +1420,39 @@ function syncMockThreadCounts() {
   });
 }
 
+function rebuildMockTagUsage(seedTags: TagCatalogResponse["tags"] = mockTags.tags) {
+  const tagsByName = new Map<string, TagCatalogResponse["tags"][number]>();
+  for (const tag of seedTags) {
+    tagsByName.set(tag.name, { ...tag, entryCount: 0 });
+  }
+  for (const entry of mockEntries) {
+    for (const tag of entry.tags) {
+      const current = tagsByName.get(tag.name) ?? { id: tag.id, name: tag.name, entryCount: 0 };
+      tagsByName.set(tag.name, { ...current, entryCount: current.entryCount + 1 });
+    }
+  }
+  return {
+    ...mockTags,
+    tags: [...tagsByName.values()].sort((left, right) => left.name.localeCompare(right.name)),
+  };
+}
+
+function rebuildMockMoodUsage(): MoodCatalogResponse {
+  const counts = new Map<string, number>();
+  for (const entry of mockEntries) {
+    if (!entry.mood) {
+      continue;
+    }
+    counts.set(entry.mood, (counts.get(entry.mood) ?? 0) + 1);
+  }
+  return {
+    ...mockMoods,
+    moods: [...counts.entries()]
+      .map(([name, entryCount]) => ({ name, label: labelize(name), entryCount }))
+      .sort((left, right) => left.name.localeCompare(right.name)),
+  };
+}
+
 function appendUnique(values: string[] | undefined, value: string) {
   const normalized = value.trim();
   if (!normalized) {
@@ -1019,4 +1624,14 @@ function labelize(value: string) {
     .filter(Boolean)
     .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
     .join(" ");
+}
+
+function slugify(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9_-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
 }

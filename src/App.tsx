@@ -5,12 +5,14 @@ import {
   CheckCircle2,
   Clock3,
   Database,
+  Download,
   Edit3,
   Eye,
   EyeOff,
   FileArchive,
   FileText,
   Filter,
+  FolderOpen,
   GitBranch,
   History,
   HardDrive,
@@ -32,14 +34,24 @@ import {
   Star,
   Tags,
   TriangleAlert,
+  Trash2,
   Unlink2,
   X,
 } from "lucide-react";
 import {
   bulkDetachThreads,
+  createPrompt,
   createEntry,
   createBackup,
+  createTemplate,
+  deleteCapsuleConfigValue,
+  deleteMood,
+  deletePrompt,
+  deleteTag,
+  deleteTemplate,
   disbandThread,
+  exportEntries,
+  getCapsuleConfig,
   getDatabaseStatus,
   getEntry,
   getRandomEntry,
@@ -47,20 +59,34 @@ import {
   listEntryHistory,
   listBackups,
   listEntries,
+  listLibraryItems,
+  listMoods,
+  listTags,
   listThreads,
+  mergeTag,
+  openBackupFolder,
+  previewRestoreBackup,
   pinEntry,
+  renameMood,
+  renameTag,
+  restoreBackup,
   searchEntries,
+  setCapsuleConfigValue,
   starEntry,
   unhideEntry,
   unpinEntry,
   unstarEntry,
   updateThreadMetadata,
   updateEntry,
+  updatePrompt,
+  updateTemplate,
 } from "./backend";
 import { StatusPill } from "./components/StatusPill";
 import { formatBytes, formatDateTime } from "./lib/format";
 import type {
   BackupInfo,
+  BackupRestorePreview,
+  CapsuleConfigResponse,
   DatabaseStatus,
   Entry,
   EntryCreate,
@@ -69,8 +95,12 @@ import type {
   EntryListResponse,
   EntryMutationResponse,
   EntryUpdate,
+  ExportFormat,
+  LibraryListResponse,
+  MoodCatalogResponse,
   SearchRequest,
   SearchResponse,
+  TagCatalogResponse,
   ThreadGroup,
   ThreadListResponse,
   ThreadMutationResponse,
@@ -145,6 +175,11 @@ type WriterSettings = {
   lineSpacing: number;
 };
 
+type UiSettings = {
+  theme: "system" | "light" | "dark";
+  sidebarMode: "comfortable" | "compact";
+};
+
 const navItems: Array<{ id: ActiveView; label: string; icon: ReactNode }> = [
   { id: "dashboard", label: "Dashboard", icon: <Database size={18} /> },
   { id: "entries", label: "Entries", icon: <BookOpen size={18} /> },
@@ -178,6 +213,12 @@ const defaultWriterSettings: WriterSettings = {
 };
 
 const draftStorageKey = "capsule-tauri-composer-draft-v1";
+const uiSettingsStorageKey = "capsule-tauri-ui-settings-v1";
+
+const defaultUiSettings: UiSettings = {
+  theme: "system",
+  sidebarMode: "comfortable",
+};
 
 const defaultEntryFilters: EntryFilterForm = {
   text: "",
@@ -236,7 +277,13 @@ function App() {
   const [composerDraft, setComposerDraft] = useState<ComposerDraft>(emptyComposerDraft);
   const [draftRecovered, setDraftRecovered] = useState(false);
   const [writerSettings, setWriterSettings] = useState<WriterSettings>(defaultWriterSettings);
+  const [uiSettings, setUiSettings] = useState<UiSettings>(defaultUiSettings);
   const [entryHistory, setEntryHistory] = useState<EntryHistoryResponse | null>(null);
+  const [restorePreview, setRestorePreview] = useState<BackupRestorePreview | null>(null);
+  const [capsuleConfig, setCapsuleConfig] = useState<CapsuleConfigResponse | null>(null);
+  const [tagCatalog, setTagCatalog] = useState<TagCatalogResponse | null>(null);
+  const [moodCatalog, setMoodCatalog] = useState<MoodCatalogResponse | null>(null);
+  const [library, setLibrary] = useState<LibraryListResponse | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [entriesLoading, setEntriesLoading] = useState(false);
@@ -244,6 +291,10 @@ function App() {
   const [threadsLoading, setThreadsLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [creatingBackup, setCreatingBackup] = useState(false);
+  const [restoringBackup, setRestoringBackup] = useState(false);
+  const [dataToolsLoading, setDataToolsLoading] = useState(false);
+  const [dataToolMutating, setDataToolMutating] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [savingEntry, setSavingEntry] = useState(false);
   const [savingThread, setSavingThread] = useState(false);
   const [mutatingEntryUuid, setMutatingEntryUuid] = useState<string | null>(null);
@@ -376,6 +427,26 @@ function App() {
     }
   }, [status?.readable]);
 
+  const loadDataTools = useCallback(async () => {
+    setDataToolsLoading(true);
+    try {
+      const [nextConfig, nextTags, nextMoods, nextLibrary] = await Promise.all([
+        getCapsuleConfig(),
+        status?.readable ? listTags() : Promise.resolve<TagCatalogResponse | null>(null),
+        status?.readable ? listMoods() : Promise.resolve<MoodCatalogResponse | null>(null),
+        status?.readable ? listLibraryItems() : Promise.resolve<LibraryListResponse | null>(null),
+      ]);
+      setCapsuleConfig(nextConfig);
+      setTagCatalog(nextTags);
+      setMoodCatalog(nextMoods);
+      setLibrary(nextLibrary);
+    } catch (toolError) {
+      setError(toolError instanceof Error ? toolError.message : "Unable to load settings tools");
+    } finally {
+      setDataToolsLoading(false);
+    }
+  }, [status?.readable]);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -452,6 +523,24 @@ function App() {
   }, [composerDraft, composerMode]);
 
   useEffect(() => {
+    const rawSettings = window.localStorage.getItem(uiSettingsStorageKey);
+    if (!rawSettings) {
+      return;
+    }
+
+    try {
+      setUiSettings({ ...defaultUiSettings, ...JSON.parse(rawSettings) });
+    } catch {
+      window.localStorage.removeItem(uiSettingsStorageKey);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(uiSettingsStorageKey, JSON.stringify(uiSettings));
+    document.documentElement.dataset.theme = uiSettings.theme;
+  }, [uiSettings]);
+
+  useEffect(() => {
     if (activeView === "entries") {
       void loadEntryList();
     }
@@ -468,6 +557,12 @@ function App() {
       void loadThreads();
     }
   }, [activeView, loadThreads]);
+
+  useEffect(() => {
+    if (activeView === "settings") {
+      void loadDataTools();
+    }
+  }, [activeView, loadDataTools]);
 
   useEffect(() => {
     setThreadDraft({
@@ -491,6 +586,114 @@ function App() {
       setCreatingBackup(false);
     }
   }, [refresh]);
+
+  const handlePreviewRestore = useCallback(async (backup: BackupInfo) => {
+    setError(null);
+    setNotice(null);
+    try {
+      setRestorePreview(await previewRestoreBackup({ backupPath: backup.path }));
+    } catch (previewError) {
+      setError(previewError instanceof Error ? previewError.message : "Unable to preview backup");
+    }
+  }, []);
+
+  const handleRestoreBackup = useCallback(
+    async (backup: BackupInfo) => {
+      if (
+        !window.confirm(
+          "Restore this backup into the live Capsule database? A fresh safety backup will be created first.",
+        )
+      ) {
+        return;
+      }
+
+      setRestoringBackup(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const response = await restoreBackup({
+          backupPath: backup.path,
+          confirmation: "RESTORE",
+        });
+        setStatus(response.status);
+        setNotice(`Restored backup. Safety backup: ${response.safetyBackup.path}`);
+        setRestorePreview(null);
+        await refresh();
+      } catch (restoreError) {
+        setError(restoreError instanceof Error ? restoreError.message : "Restore failed");
+      } finally {
+        setRestoringBackup(false);
+      }
+    },
+    [refresh],
+  );
+
+  const handleOpenBackupFolder = useCallback(async () => {
+    setError(null);
+    try {
+      await openBackupFolder();
+    } catch (folderError) {
+      setError(folderError instanceof Error ? folderError.message : "Unable to open backup folder");
+    }
+  }, []);
+
+  const handleExportEntry = useCallback(async (entry: Entry, format: ExportFormat) => {
+    setExporting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await exportEntries({
+        format,
+        uuids: [entry.uuid],
+        fileName: `${entry.uuid}.${format}`,
+      });
+      setNotice(`Exported ${response.entryCount} entry to ${response.path}`);
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
+  }, []);
+
+  const handleExportSearch = useCallback(
+    async (format: ExportFormat) => {
+      setExporting(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const response = await exportEntries({
+          format,
+          search: builtSearchRequest,
+          fileName: `search-results.${format}`,
+        });
+        setNotice(`Exported ${response.entryCount} search results to ${response.path}`);
+      } catch (exportError) {
+        setError(exportError instanceof Error ? exportError.message : "Export failed");
+      } finally {
+        setExporting(false);
+      }
+    },
+    [builtSearchRequest],
+  );
+
+  const runDataToolMutation = useCallback(
+    async (mutation: () => Promise<string>) => {
+      setDataToolMutating(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const message = await mutation();
+        setNotice(message);
+        await refresh();
+        await loadDataTools();
+      } catch (toolError) {
+        setError(toolError instanceof Error ? toolError.message : "Settings update failed");
+      } finally {
+        setDataToolMutating(false);
+      }
+    },
+    [loadDataTools, refresh],
+  );
 
   const handleSelectEntry = useCallback(async (entry: Entry) => {
     setSelectedEntry(entry);
@@ -794,7 +997,13 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div
+      className={
+        uiSettings.sidebarMode === "compact"
+          ? "app-shell app-shell--compact"
+          : "app-shell"
+      }
+    >
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark" aria-hidden="true">
@@ -830,7 +1039,7 @@ function App() {
       <main className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Phase 3</p>
+            <p className="eyebrow">Phase 4</p>
             <h2>{title}</h2>
           </div>
 
@@ -926,6 +1135,7 @@ function App() {
             onContinueEntry={openContinueEntry}
             onEditEntry={openEditEntry}
             onEntryAction={handleEntryAction}
+            onExportEntry={handleExportEntry}
             onLoadHistory={handleLoadHistory}
             onLoadMore={() => setEntryLimit((current) => current + 40)}
             onResetFilters={() => {
@@ -952,6 +1162,8 @@ function App() {
             onContinueEntry={openContinueEntry}
             onEditEntry={openEditEntry}
             onEntryAction={handleEntryAction}
+            onExportEntry={handleExportEntry}
+            onExportSearch={handleExportSearch}
             onLoadHistory={handleLoadHistory}
             onLoadMore={() => setSearchLimit((current) => current + 40)}
             onResetSearch={() => {
@@ -1008,7 +1220,12 @@ function App() {
             backupDirectory={backupDirectory}
             backups={backups}
             creatingBackup={creatingBackup}
+            onOpenFolder={handleOpenBackupFolder}
             onCreateBackup={handleCreateBackup}
+            onPreviewRestore={handlePreviewRestore}
+            onRestoreBackup={handleRestoreBackup}
+            restorePreview={restorePreview}
+            restoringBackup={restoringBackup}
             status={status}
           />
         )}
@@ -1016,8 +1233,18 @@ function App() {
         {activeView === "settings" && (
           <SettingsView
             backupDirectory={backupDirectory}
+            config={capsuleConfig}
+            dataToolMutating={dataToolMutating}
+            library={library}
+            loading={dataToolsLoading}
+            moodCatalog={moodCatalog}
+            onRefresh={loadDataTools}
+            onRunMutation={runDataToolMutation}
             status={status}
             statusTone={statusTone}
+            tagCatalog={tagCatalog}
+            uiSettings={uiSettings}
+            setUiSettings={setUiSettings}
           />
         )}
 
@@ -1145,6 +1372,7 @@ type EntriesViewProps = {
   onEditEntry: (entry: Entry) => void;
   onContinueEntry: (entry: Entry) => void;
   onEntryAction: (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => void;
+  onExportEntry: (entry: Entry, format: ExportFormat) => void;
   onLoadHistory: (entry: Entry) => void;
   onLoadMore: () => void;
   onResetFilters: () => void;
@@ -1165,6 +1393,7 @@ function EntriesView({
   onEditEntry,
   onContinueEntry,
   onEntryAction,
+  onExportEntry,
   onLoadHistory,
   onLoadMore,
   onResetFilters,
@@ -1318,6 +1547,7 @@ function EntriesView({
         onContinue={onContinueEntry}
         onEdit={onEditEntry}
         onEntryAction={onEntryAction}
+        onExport={onExportEntry}
         onLoadHistory={onLoadHistory}
       />
     </section>
@@ -1339,6 +1569,8 @@ type SearchViewProps = {
   onEditEntry: (entry: Entry) => void;
   onContinueEntry: (entry: Entry) => void;
   onEntryAction: (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => void;
+  onExportEntry: (entry: Entry, format: ExportFormat) => void;
+  onExportSearch: (format: ExportFormat) => void;
   onLoadHistory: (entry: Entry) => void;
   onLoadMore: () => void;
   onResetSearch: () => void;
@@ -1359,6 +1591,8 @@ function SearchView({
   onEditEntry,
   onContinueEntry,
   onEntryAction,
+  onExportEntry,
+  onExportSearch,
   onLoadHistory,
   onLoadMore,
   onResetSearch,
@@ -1508,9 +1742,28 @@ function SearchView({
             <p className="eyebrow">Results</p>
             <h3>{searchResponse ? `${searchResponse.total} entries` : "Loading search"}</h3>
           </div>
-          <StatusPill tone={searchResponse?.usedFts ? "good" : "neutral"}>
-            {searchResponse?.usedFts ? "FTS" : "Keyword"}
-          </StatusPill>
+          <div className="topbar-actions">
+            <button
+              className="icon-button icon-button--small"
+              disabled={!searchResponse || searchResponse.total === 0}
+              onClick={() => onExportSearch("markdown")}
+              title="Export search results as Markdown"
+              type="button"
+            >
+              <Download size={15} />
+            </button>
+            <button
+              className="secondary-button secondary-button--small"
+              disabled={!searchResponse || searchResponse.total === 0}
+              onClick={() => onExportSearch("json")}
+              type="button"
+            >
+              JSON
+            </button>
+            <StatusPill tone={searchResponse?.usedFts ? "good" : "neutral"}>
+              {searchResponse?.usedFts ? "FTS" : "Keyword"}
+            </StatusPill>
+          </div>
         </div>
 
         {searchResponse?.parsedTokens.length ? (
@@ -1566,6 +1819,7 @@ function SearchView({
         onContinue={onContinueEntry}
         onEdit={onEditEntry}
         onEntryAction={onEntryAction}
+        onExport={onExportEntry}
         onLoadHistory={onLoadHistory}
       />
     </section>
@@ -2079,7 +2333,12 @@ type BackupsViewProps = {
   backups: BackupInfo[];
   status: DatabaseStatus | null;
   creatingBackup: boolean;
+  restoringBackup: boolean;
+  restorePreview: BackupRestorePreview | null;
   onCreateBackup: () => void;
+  onOpenFolder: () => void;
+  onPreviewRestore: (backup: BackupInfo) => void;
+  onRestoreBackup: (backup: BackupInfo) => void;
 };
 
 function BackupsView({
@@ -2087,7 +2346,12 @@ function BackupsView({
   backups,
   status,
   creatingBackup,
+  restoringBackup,
+  restorePreview,
   onCreateBackup,
+  onOpenFolder,
+  onPreviewRestore,
+  onRestoreBackup,
 }: BackupsViewProps) {
   return (
     <section className="backup-view" aria-label="Backup list">
@@ -2096,16 +2360,45 @@ function BackupsView({
           <p className="eyebrow">Backup directory</p>
           <h3>{backupDirectory || "Not available"}</h3>
         </div>
-        <button
-          className="secondary-button"
-          disabled={creatingBackup || !status?.dbExists}
-          onClick={onCreateBackup}
-          type="button"
-        >
-          <FileArchive size={18} />
-          Create backup
-        </button>
+        <div className="topbar-actions">
+          <button className="secondary-button" onClick={onOpenFolder} type="button">
+            <FolderOpen size={18} />
+            Open folder
+          </button>
+          <button
+            className="secondary-button"
+            disabled={creatingBackup || !status?.dbExists}
+            onClick={onCreateBackup}
+            type="button"
+          >
+            <FileArchive size={18} />
+            {creatingBackup ? "Creating" : "Create backup"}
+          </button>
+        </div>
       </div>
+
+      {restorePreview && (
+        <Panel
+          action={<StatusPill tone={restorePreview.backup.verified ? "good" : "warn"}>{restorePreview.backup.verified ? "Verified" : "Check"}</StatusPill>}
+          icon={<ShieldCheck size={20} />}
+          title="Restore Preview"
+        >
+          <dl className="detail-list">
+            <Detail label="Backup" value={restorePreview.backup.path} />
+            <Detail label="Entries" value={restorePreview.entryCount ?? "Unknown"} />
+            <Detail label="Tags" value={restorePreview.tagCount ?? "Unknown"} />
+            <Detail label="Size" value={formatBytes(restorePreview.dbSizeBytes)} />
+            <Detail label="Modified" value={formatDateTime(restorePreview.dbModifiedAt)} />
+          </dl>
+          {restorePreview.warnings.length > 0 && (
+            <ul className="warning-list">
+              {restorePreview.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+      )}
 
       <div className="backup-list">
         {backups.length === 0 && <div className="empty-state">No Capsule backups found yet.</div>}
@@ -2118,9 +2411,26 @@ function BackupsView({
                 {backup.operation ?? "unknown operation"}
               </p>
             </div>
-            <StatusPill tone={backup.verified ? "good" : "warn"}>
-              {backup.verified ? "Verified" : "Needs check"}
-            </StatusPill>
+            <div className="backup-actions">
+              <button
+                className="secondary-button secondary-button--small"
+                onClick={() => onPreviewRestore(backup)}
+                type="button"
+              >
+                Preview
+              </button>
+              <button
+                className="secondary-button secondary-button--small"
+                disabled={restoringBackup || !backup.verified}
+                onClick={() => onRestoreBackup(backup)}
+                type="button"
+              >
+                Restore
+              </button>
+              <StatusPill tone={backup.verified ? "good" : "warn"}>
+                {backup.verified ? "Verified" : "Needs check"}
+              </StatusPill>
+            </div>
           </article>
         ))}
       </div>
@@ -2132,9 +2442,50 @@ type SettingsViewProps = {
   status: DatabaseStatus | null;
   backupDirectory: string;
   statusTone: "good" | "warn" | "neutral";
+  config: CapsuleConfigResponse | null;
+  tagCatalog: TagCatalogResponse | null;
+  moodCatalog: MoodCatalogResponse | null;
+  library: LibraryListResponse | null;
+  uiSettings: UiSettings;
+  setUiSettings: (next: UiSettings) => void;
+  loading: boolean;
+  dataToolMutating: boolean;
+  onRefresh: () => void;
+  onRunMutation: (mutation: () => Promise<string>) => Promise<void>;
 };
 
-function SettingsView({ status, backupDirectory, statusTone }: SettingsViewProps) {
+function SettingsView({
+  status,
+  backupDirectory,
+  statusTone,
+  config,
+  tagCatalog,
+  moodCatalog,
+  library,
+  uiSettings,
+  setUiSettings,
+  loading,
+  dataToolMutating,
+  onRefresh,
+  onRunMutation,
+}: SettingsViewProps) {
+  const [configDraft, setConfigDraft] = useState({ key: "", value: "" });
+  const [tagDraft, setTagDraft] = useState({ from: "", to: "", source: "", target: "", deleteName: "" });
+  const [moodDraft, setMoodDraft] = useState({ from: "", to: "", deleteName: "" });
+  const [templateDraft, setTemplateDraft] = useState({
+    slug: "",
+    name: "",
+    description: "",
+    introText: "",
+    sections: "",
+  });
+  const [promptDraft, setPromptDraft] = useState({
+    slug: "",
+    promptText: "",
+    category: "general",
+    tags: "",
+  });
+
   return (
     <section className="settings-grid" aria-label="Settings">
       <Panel action={<StatusPill tone={statusTone}>{status?.security.mode ?? "unknown"}</StatusPill>} icon={<Database size={20} />} title="Database">
@@ -2145,12 +2496,441 @@ function SettingsView({ status, backupDirectory, statusTone }: SettingsViewProps
           <Detail label="Backups" value={backupDirectory || "Not available"} />
         </dl>
       </Panel>
-      <Panel icon={<Info size={20} />} title="Application">
+
+      <Panel
+        action={
+          <button className="secondary-button secondary-button--small" disabled={loading} onClick={onRefresh} type="button">
+            <RefreshCw size={15} />
+            Refresh
+          </button>
+        }
+        icon={<Info size={20} />}
+        title="Application"
+      >
         <dl className="detail-list">
-          <Detail label="Version" value="0.4.0" />
-          <Detail label="Mode" value="Search and threads" />
+          <Detail label="Version" value="0.5.0" />
+          <Detail label="Mode" value="Backups and data tools" />
           <Detail label="Writes" value="Backup guarded" />
         </dl>
+      </Panel>
+
+      <Panel icon={<Settings size={20} />} title="Interface">
+        <div className="settings-form-grid">
+          <label className="field">
+            <span>Theme</span>
+            <select
+              onChange={(event) =>
+                setUiSettings({ ...uiSettings, theme: event.target.value as UiSettings["theme"] })
+              }
+              value={uiSettings.theme}
+            >
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Sidebar</span>
+            <select
+              onChange={(event) =>
+                setUiSettings({
+                  ...uiSettings,
+                  sidebarMode: event.target.value as UiSettings["sidebarMode"],
+                })
+              }
+              value={uiSettings.sidebarMode}
+            >
+              <option value="comfortable">Comfortable</option>
+              <option value="compact">Compact</option>
+            </select>
+          </label>
+        </div>
+      </Panel>
+
+      <Panel icon={<FileText size={20} />} title="Capsule Config">
+        <dl className="detail-list detail-list--compact">
+          <Detail label="Path" value={config?.configPath ?? "Loading"} />
+          <Detail label="Exists" value={config?.exists ? "Yes" : "No"} />
+        </dl>
+        {config?.warnings.map((warning) => (
+          <div className="inline-warning" key={warning}>
+            <TriangleAlert size={15} />
+            {warning}
+          </div>
+        ))}
+        <div className="config-list">
+          {(config?.values ?? []).slice(0, 12).map((item) => (
+            <div className="data-row" key={item.key}>
+              <div>
+                <h4>{item.key}</h4>
+                <p>{item.value}</p>
+              </div>
+              <button
+                className="icon-button icon-button--small"
+                disabled={dataToolMutating}
+                onClick={() =>
+                  onRunMutation(async () => {
+                    const response = await deleteCapsuleConfigValue(item.key);
+                    return `Deleted config value. Backup: ${response.backupPath ?? "new config"}`;
+                  })
+                }
+                title="Delete config value"
+                type="button"
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="settings-form-grid">
+          <label className="field">
+            <span>Key</span>
+            <input
+              onChange={(event) => setConfigDraft({ ...configDraft, key: event.target.value })}
+              value={configDraft.key}
+            />
+          </label>
+          <label className="field">
+            <span>Value</span>
+            <input
+              onChange={(event) => setConfigDraft({ ...configDraft, value: event.target.value })}
+              value={configDraft.value}
+            />
+          </label>
+          <button
+            className="primary-button"
+            disabled={dataToolMutating || !configDraft.key.trim()}
+            onClick={() =>
+              onRunMutation(async () => {
+                const response = await setCapsuleConfigValue(configDraft.key, configDraft.value);
+                setConfigDraft({ key: "", value: "" });
+                return `Saved config value. Backup: ${response.backupPath ?? "new config"}`;
+              })
+            }
+            type="button"
+          >
+            <Save size={17} />
+            Save
+          </button>
+        </div>
+      </Panel>
+
+      <Panel icon={<Tags size={20} />} title="Tags">
+        <div className="catalog-cloud">
+          {(tagCatalog?.tags ?? []).slice(0, 28).map((tag) => (
+            <span className="tag-chip" key={tag.id}>
+              {tag.name} ({tag.entryCount})
+            </span>
+          ))}
+        </div>
+        <div className="settings-form-grid">
+          <label className="field">
+            <span>Rename from</span>
+            <input onChange={(event) => setTagDraft({ ...tagDraft, from: event.target.value })} value={tagDraft.from} />
+          </label>
+          <label className="field">
+            <span>Rename to</span>
+            <input onChange={(event) => setTagDraft({ ...tagDraft, to: event.target.value })} value={tagDraft.to} />
+          </label>
+          <button
+            className="secondary-button"
+            disabled={dataToolMutating || !tagDraft.from.trim() || !tagDraft.to.trim()}
+            onClick={() =>
+              onRunMutation(async () => {
+                const response = await renameTag({ from: tagDraft.from, to: tagDraft.to });
+                setTagDraft({ ...tagDraft, from: "", to: "" });
+                return `Renamed tag with backup: ${response.audit.backupPath}`;
+              })
+            }
+            type="button"
+          >
+            Rename
+          </button>
+        </div>
+        <div className="settings-form-grid">
+          <label className="field">
+            <span>Merge source</span>
+            <input onChange={(event) => setTagDraft({ ...tagDraft, source: event.target.value })} value={tagDraft.source} />
+          </label>
+          <label className="field">
+            <span>Merge target</span>
+            <input onChange={(event) => setTagDraft({ ...tagDraft, target: event.target.value })} value={tagDraft.target} />
+          </label>
+          <button
+            className="secondary-button"
+            disabled={dataToolMutating || !tagDraft.source.trim() || !tagDraft.target.trim()}
+            onClick={() =>
+              onRunMutation(async () => {
+                const response = await mergeTag({ source: tagDraft.source, target: tagDraft.target });
+                setTagDraft({ ...tagDraft, source: "", target: "" });
+                return `Merged tag with backup: ${response.audit.backupPath}`;
+              })
+            }
+            type="button"
+          >
+            Merge
+          </button>
+        </div>
+        <div className="settings-form-grid settings-form-grid--delete">
+          <label className="field">
+            <span>Delete tag</span>
+            <input onChange={(event) => setTagDraft({ ...tagDraft, deleteName: event.target.value })} value={tagDraft.deleteName} />
+          </label>
+          <button
+            className="secondary-button"
+            disabled={dataToolMutating || !tagDraft.deleteName.trim()}
+            onClick={() =>
+              onRunMutation(async () => {
+                const response = await deleteTag({ name: tagDraft.deleteName });
+                setTagDraft({ ...tagDraft, deleteName: "" });
+                return `Deleted tag with backup: ${response.audit.backupPath}`;
+              })
+            }
+            type="button"
+          >
+            <Trash2 size={17} />
+            Delete
+          </button>
+        </div>
+      </Panel>
+
+      <Panel icon={<Sparkles size={20} />} title="Moods">
+        <div className="catalog-cloud">
+          {(moodCatalog?.moods ?? []).slice(0, 28).map((mood) => (
+            <span className="mood-chip" key={mood.name}>
+              {mood.label} ({mood.entryCount})
+            </span>
+          ))}
+        </div>
+        <div className="settings-form-grid">
+          <label className="field">
+            <span>Rename from</span>
+            <input onChange={(event) => setMoodDraft({ ...moodDraft, from: event.target.value })} value={moodDraft.from} />
+          </label>
+          <label className="field">
+            <span>Rename to</span>
+            <input onChange={(event) => setMoodDraft({ ...moodDraft, to: event.target.value })} value={moodDraft.to} />
+          </label>
+          <button
+            className="secondary-button"
+            disabled={dataToolMutating || !moodDraft.from.trim() || !moodDraft.to.trim()}
+            onClick={() =>
+              onRunMutation(async () => {
+                const response = await renameMood({ from: moodDraft.from, to: moodDraft.to });
+                setMoodDraft({ ...moodDraft, from: "", to: "" });
+                return `Renamed mood with backup: ${response.audit.backupPath}`;
+              })
+            }
+            type="button"
+          >
+            Rename
+          </button>
+        </div>
+        <div className="settings-form-grid settings-form-grid--delete">
+          <label className="field">
+            <span>Clear mood</span>
+            <input onChange={(event) => setMoodDraft({ ...moodDraft, deleteName: event.target.value })} value={moodDraft.deleteName} />
+          </label>
+          <button
+            className="secondary-button"
+            disabled={dataToolMutating || !moodDraft.deleteName.trim()}
+            onClick={() =>
+              onRunMutation(async () => {
+                const response = await deleteMood({ name: moodDraft.deleteName });
+                setMoodDraft({ ...moodDraft, deleteName: "" });
+                return `Cleared mood with backup: ${response.audit.backupPath}`;
+              })
+            }
+            type="button"
+          >
+            <Trash2 size={17} />
+            Clear
+          </button>
+        </div>
+      </Panel>
+
+      <Panel icon={<BookOpen size={20} />} title="Template Library">
+        <div className="library-list">
+          {(library?.templates ?? []).slice(0, 10).map((template) => (
+            <article className="data-row data-row--stacked" key={template.slug}>
+              <div>
+                <h4>{template.name}</h4>
+                <p>{template.slug} / {template.isBuiltin ? "built-in" : "custom"} / {template.isActive ? "active" : "inactive"}</p>
+              </div>
+              <div className="backup-actions">
+                <button
+                  className="secondary-button secondary-button--small"
+                  disabled={dataToolMutating}
+                  onClick={() =>
+                    onRunMutation(async () => {
+                      const response = await updateTemplate(template.slug, {
+                        isActive: !template.isActive,
+                      });
+                      return `Updated template with backup: ${response.audit.backupPath}`;
+                    })
+                  }
+                  type="button"
+                >
+                  {template.isActive ? "Disable" : "Enable"}
+                </button>
+                {!template.isBuiltin && (
+                  <button
+                    className="icon-button icon-button--small"
+                    disabled={dataToolMutating}
+                    onClick={() =>
+                      onRunMutation(async () => {
+                        const response = await deleteTemplate(template.slug);
+                        return `Deleted template with backup: ${response.audit.backupPath}`;
+                      })
+                    }
+                    title="Delete template"
+                    type="button"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+        <div className="settings-form-grid">
+          <label className="field">
+            <span>Slug</span>
+            <input onChange={(event) => setTemplateDraft({ ...templateDraft, slug: event.target.value })} value={templateDraft.slug} />
+          </label>
+          <label className="field">
+            <span>Name</span>
+            <input onChange={(event) => setTemplateDraft({ ...templateDraft, name: event.target.value })} value={templateDraft.name} />
+          </label>
+          <label className="field">
+            <span>Description</span>
+            <input onChange={(event) => setTemplateDraft({ ...templateDraft, description: event.target.value })} value={templateDraft.description} />
+          </label>
+          <label className="field">
+            <span>Intro</span>
+            <input onChange={(event) => setTemplateDraft({ ...templateDraft, introText: event.target.value })} value={templateDraft.introText} />
+          </label>
+          <label className="field field--wide">
+            <span>Sections</span>
+            <input onChange={(event) => setTemplateDraft({ ...templateDraft, sections: event.target.value })} placeholder="## Wins, ## Next" value={templateDraft.sections} />
+          </label>
+          <button
+            className="primary-button"
+            disabled={dataToolMutating || !templateDraft.slug.trim() || !templateDraft.name.trim()}
+            onClick={() =>
+              onRunMutation(async () => {
+                const response = await createTemplate({
+                  slug: templateDraft.slug,
+                  name: templateDraft.name,
+                  description: nullableFromText(templateDraft.description),
+                  introText: templateDraft.introText,
+                  sections: splitFilter(templateDraft.sections),
+                  isActive: true,
+                });
+                setTemplateDraft({ slug: "", name: "", description: "", introText: "", sections: "" });
+                return `Created template with backup: ${response.audit.backupPath}`;
+              })
+            }
+            type="button"
+          >
+            <Plus size={17} />
+            Add
+          </button>
+        </div>
+      </Panel>
+
+      <Panel icon={<FileText size={20} />} title="Prompt Library">
+        <div className="library-list">
+          {(library?.prompts ?? []).slice(0, 10).map((prompt) => (
+            <article className="data-row data-row--stacked" key={prompt.slug}>
+              <div>
+                <h4>{prompt.slug}</h4>
+                <p>{prompt.promptText}</p>
+                <div className="entry-meta">
+                  <span className="tag-chip">{prompt.category}</span>
+                  <span className="tag-chip">{prompt.isBuiltin ? "built-in" : "custom"}</span>
+                  <span className="tag-chip">{prompt.isActive ? "active" : "inactive"}</span>
+                </div>
+              </div>
+              <div className="backup-actions">
+                <button
+                  className="secondary-button secondary-button--small"
+                  disabled={dataToolMutating}
+                  onClick={() =>
+                    onRunMutation(async () => {
+                      const response = await updatePrompt(prompt.slug, {
+                        isActive: !prompt.isActive,
+                      });
+                      return `Updated prompt with backup: ${response.audit.backupPath}`;
+                    })
+                  }
+                  type="button"
+                >
+                  {prompt.isActive ? "Disable" : "Enable"}
+                </button>
+                {!prompt.isBuiltin && (
+                  <button
+                    className="icon-button icon-button--small"
+                    disabled={dataToolMutating}
+                    onClick={() =>
+                      onRunMutation(async () => {
+                        const response = await deletePrompt(prompt.slug);
+                        return `Deleted prompt with backup: ${response.audit.backupPath}`;
+                      })
+                    }
+                    title="Delete prompt"
+                    type="button"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+        <div className="settings-form-grid">
+          <label className="field">
+            <span>Slug</span>
+            <input onChange={(event) => setPromptDraft({ ...promptDraft, slug: event.target.value })} value={promptDraft.slug} />
+          </label>
+          <label className="field">
+            <span>Category</span>
+            <input onChange={(event) => setPromptDraft({ ...promptDraft, category: event.target.value })} value={promptDraft.category} />
+          </label>
+          <label className="field">
+            <span>Tags</span>
+            <input onChange={(event) => setPromptDraft({ ...promptDraft, tags: event.target.value })} value={promptDraft.tags} />
+          </label>
+          <label className="field field--wide">
+            <span>Prompt</span>
+            <textarea
+              className="compact-textarea"
+              onChange={(event) => setPromptDraft({ ...promptDraft, promptText: event.target.value })}
+              value={promptDraft.promptText}
+            />
+          </label>
+          <button
+            className="primary-button"
+            disabled={dataToolMutating || !promptDraft.slug.trim() || !promptDraft.promptText.trim()}
+            onClick={() =>
+              onRunMutation(async () => {
+                const response = await createPrompt({
+                  slug: promptDraft.slug,
+                  promptText: promptDraft.promptText,
+                  category: promptDraft.category,
+                  tags: splitFilter(promptDraft.tags),
+                  isActive: true,
+                });
+                setPromptDraft({ slug: "", promptText: "", category: "general", tags: "" });
+                return `Created prompt with backup: ${response.audit.backupPath}`;
+              })
+            }
+            type="button"
+          >
+            <Plus size={17} />
+            Add
+          </button>
+        </div>
       </Panel>
     </section>
   );
@@ -2161,9 +2941,9 @@ function AboutView() {
     <section className="about-panel">
       <h3>Capsule Tauri</h3>
       <p>
-        Phase 3 adds keyword search with structured query tokens and native thread
-        management for the active Capsule database, while keeping Phase 2's
-        backup-guarded journal writes.
+        Phase 4 adds restore previews, safety-backed restore, settings, tag and
+        mood tools, template and prompt library management, and Markdown/JSON
+        exports for the active Capsule database.
       </p>
       <p>Hard delete remains reserved until the legacy resequencing behavior is fully matched and tested.</p>
     </section>
@@ -2179,6 +2959,7 @@ type EntryDetailProps = {
   onEdit: (entry: Entry) => void;
   onContinue: (entry: Entry) => void;
   onEntryAction: (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => void;
+  onExport: (entry: Entry, format: ExportFormat) => void;
   onLoadHistory: (entry: Entry) => void;
 };
 
@@ -2191,6 +2972,7 @@ function EntryDetail({
   onEdit,
   onContinue,
   onEntryAction,
+  onExport,
   onLoadHistory,
 }: EntryDetailProps) {
   if (loading) {
@@ -2255,6 +3037,13 @@ function EntryDetail({
         <button className="secondary-button" onClick={() => onContinue(entry)} type="button">
           <FileText size={17} />
           Continue
+        </button>
+        <button className="secondary-button" onClick={() => onExport(entry, "markdown")} type="button">
+          <Download size={17} />
+          MD
+        </button>
+        <button className="secondary-button" onClick={() => onExport(entry, "json")} type="button">
+          JSON
         </button>
       </div>
 

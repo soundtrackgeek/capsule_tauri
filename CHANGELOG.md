@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.5.0 - 2026-06-29
+
+### Added
+
+- Added backup restore preview and restore commands, with restore constrained to
+  Capsule backup files in the active backup directory.
+- Added safety-backup creation before restore replaces the live database.
+- Added an open-backup-folder command and restore controls to the Backups view.
+- Added Capsule config display plus file-backed config set/delete actions with
+  config backups.
+- Added local theme and sidebar-density settings.
+- Added backup-guarded tag rename, merge, and delete tools.
+- Added backup-guarded mood rename and clear tools.
+- Added template and prompt library management for custom rows, with built-in
+  rows limited to enable/disable actions.
+- Added Markdown and JSON export for selected entries and search result sets.
+- Added Rust tests for restore, tag/mood tools, library CRUD, and export
+  generation.
+
+### Changed
+
+- Bumped the app version to 0.5.0.
+- Updated the app shell from Phase 3 search and threads to Phase 4 backups,
+  settings, and data tools.
+
 ## 0.4.0 - 2026-06-29
 
 ### Added
