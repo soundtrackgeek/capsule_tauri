@@ -5,8 +5,12 @@ import type {
   BackupListResponse,
   DatabaseStatus,
   Entry,
+  EntryCreate,
   EntryFilters,
+  EntryHistoryResponse,
   EntryListResponse,
+  EntryMutationResponse,
+  EntryUpdate,
   RandomEntryFilters,
 } from "./types";
 
@@ -60,7 +64,7 @@ const mockBackups: BackupListResponse = {
   ],
 };
 
-const mockEntries: Entry[] = [
+let mockEntries: Entry[] = [
   {
     id: 608,
     uuid: "entry_ti99r1ya",
@@ -302,6 +306,210 @@ export async function getRandomEntry(filters: RandomEntryFilters = {}): Promise<
   }
 }
 
+export async function createEntry(input: EntryCreate): Promise<EntryMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<EntryMutationResponse>("create_entry", { input });
+    }
+
+    await pause(320);
+    const createdAt = (input.when?.trim() || new Date().toISOString().slice(0, 16)).replace("T", " ");
+    const nextId = Math.max(0, ...mockEntries.map((entry) => entry.id)) + 1;
+    const entry: Entry = {
+      id: nextId,
+      uuid: `entry_mock${nextId.toString(36).padStart(4, "0")}`,
+      createdAt,
+      updatedAt: createdAt,
+      text: input.text,
+      textPlain: toTextPlain(input.text),
+      contentFormat: input.contentFormat ?? "markdown",
+      title: normalizeNullable(input.title),
+      summary: normalizeNullable(input.summary),
+      mood: normalizeNullable(input.mood),
+      moodInfo: {
+        name: normalizeNullable(input.mood),
+        label: normalizeNullable(input.mood) ? labelize(normalizeNullable(input.mood) ?? "") : null,
+      },
+      tags: normalizeTags(input.tags).map((name, index) => ({ id: 10_000 + nextId + index, name })),
+      starred: input.starred ?? false,
+      pinned: input.pinned ?? false,
+      hidden: false,
+      location: null,
+      thread: input.continueFromUuid
+        ? {
+            rootUuid: input.continueFromUuid,
+            parentUuid: input.continueFromUuid,
+            title: null,
+            summary: null,
+            entryCount: 2,
+            isRoot: false,
+          }
+        : null,
+      attachmentCount: 0,
+    };
+    mockEntries = [entry, ...mockEntries];
+    return { entry, audit: mockAudit("entry.create") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function updateEntry(
+  identifier: string,
+  input: EntryUpdate,
+): Promise<EntryMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<EntryMutationResponse>("update_entry", { identifier, input });
+    }
+
+    await pause(300);
+    const index = mockEntries.findIndex(
+      (entry) => entry.uuid === identifier || String(entry.id) === identifier,
+    );
+    if (index === -1) {
+      throw new Error(`Entry not found: ${identifier}`);
+    }
+    const current = mockEntries[index];
+    const nextMood = input.mood === undefined ? current.mood : normalizeNullable(input.mood);
+    const updated: Entry = {
+      ...current,
+      text: input.text ?? current.text,
+      textPlain: input.text === undefined ? current.textPlain : toTextPlain(input.text),
+      contentFormat: input.contentFormat ?? current.contentFormat,
+      title: input.title === undefined ? current.title : normalizeNullable(input.title),
+      summary: input.summary === undefined ? current.summary : normalizeNullable(input.summary),
+      mood: nextMood,
+      moodInfo: { name: nextMood, label: nextMood ? labelize(nextMood) : null },
+      tags:
+        input.tags === undefined
+          ? current.tags
+          : normalizeTags(input.tags).map((name, tagIndex) => ({
+              id: 20_000 + current.id + tagIndex,
+              name,
+            })),
+      starred: input.starred ?? current.starred,
+      pinned: input.pinned ?? current.pinned,
+      hidden: input.hidden ?? current.hidden,
+      updatedAt: new Date().toISOString(),
+      thread:
+        input.continueFromUuid === undefined
+          ? current.thread
+          : input.continueFromUuid
+            ? {
+                rootUuid: input.continueFromUuid,
+                parentUuid: input.continueFromUuid,
+                title: null,
+                summary: null,
+                entryCount: 2,
+                isRoot: false,
+              }
+            : null,
+    };
+    mockEntries = mockEntries.map((entry, entryIndex) => (entryIndex === index ? updated : entry));
+    return { entry: updated, audit: mockAudit("entry.update") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function starEntry(identifier: string): Promise<EntryMutationResponse> {
+  return setEntryFlag(identifier, "starred", true, "entry.star");
+}
+
+export async function unstarEntry(identifier: string): Promise<EntryMutationResponse> {
+  return setEntryFlag(identifier, "starred", false, "entry.unstar");
+}
+
+export async function pinEntry(identifier: string): Promise<EntryMutationResponse> {
+  return setEntryFlag(identifier, "pinned", true, "entry.pin");
+}
+
+export async function unpinEntry(identifier: string): Promise<EntryMutationResponse> {
+  return setEntryFlag(identifier, "pinned", false, "entry.unpin");
+}
+
+export async function hideEntry(identifier: string): Promise<EntryMutationResponse> {
+  return setEntryFlag(identifier, "hidden", true, "entry.hide");
+}
+
+export async function unhideEntry(identifier: string): Promise<EntryMutationResponse> {
+  return setEntryFlag(identifier, "hidden", false, "entry.unhide");
+}
+
+export async function listEntryHistory(identifier: string): Promise<EntryHistoryResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<EntryHistoryResponse>("list_entry_history", { identifier });
+    }
+
+    await pause(140);
+    const entry = mockEntries.find(
+      (item) => item.uuid === identifier || String(item.id) === identifier,
+    );
+    if (!entry) {
+      throw new Error(`Entry not found: ${identifier}`);
+    }
+    return {
+      entryId: entry.id,
+      current: {
+        id: entry.id,
+        uuid: entry.uuid,
+        text: entry.text,
+        title: entry.title,
+        summary: entry.summary,
+        mood: entry.mood,
+        tags: entry.tags.map((tag) => tag.name),
+      },
+      history: [],
+      count: 0,
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+async function setEntryFlag(
+  identifier: string,
+  flag: "starred" | "pinned" | "hidden",
+  value: boolean,
+  operation: string,
+): Promise<EntryMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<EntryMutationResponse>(operationToCommand(operation), { identifier });
+    }
+
+    await pause(180);
+    const index = mockEntries.findIndex(
+      (entry) => entry.uuid === identifier || String(entry.id) === identifier,
+    );
+    if (index === -1) {
+      throw new Error(`Entry not found: ${identifier}`);
+    }
+    const entry = {
+      ...mockEntries[index],
+      [flag]: value,
+      updatedAt: new Date().toISOString(),
+    };
+    mockEntries = mockEntries.map((item, itemIndex) => (itemIndex === index ? entry : item));
+    return { entry, audit: mockAudit(operation) };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+function operationToCommand(operation: string) {
+  return {
+    "entry.star": "star_entry",
+    "entry.unstar": "unstar_entry",
+    "entry.pin": "pin_entry",
+    "entry.unpin": "unpin_entry",
+    "entry.hide": "hide_entry",
+    "entry.unhide": "unhide_entry",
+  }[operation] ?? operation;
+}
+
 function applyMockFilters(entries: Entry[], filters: EntryFilters) {
   const text = filters.text?.trim().toLowerCase();
   const tagSet = new Set(filters.tags?.map((tag) => tag.trim().toLowerCase()).filter(Boolean));
@@ -357,4 +565,47 @@ function applyMockFilters(entries: Entry[], filters: EntryFilters) {
       const rightTime = new Date(right.createdAt).getTime();
       return filters.sort === "asc" ? leftTime - rightTime : rightTime - leftTime;
     });
+}
+
+function mockAudit(operation: string) {
+  const completedAt = new Date().toISOString();
+  const stamp = completedAt
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "")
+    .replace("T", "_");
+  return {
+    backupPath: `C:\\Users\\jtill\\.capsule\\capsule_backup_${stamp}.db`,
+    operation,
+    completedAt,
+  };
+}
+
+function toTextPlain(text: string) {
+  return text.split(/\s+/).filter(Boolean).join(" ");
+}
+
+function normalizeNullable(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeTags(tags: string[] | undefined) {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const tag of tags ?? []) {
+    const value = tag.trim().toLowerCase();
+    if (value && !seen.has(value)) {
+      seen.add(value);
+      normalized.push(value);
+    }
+  }
+  return normalized;
+}
+
+function labelize(value: string) {
+  return value
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
 }

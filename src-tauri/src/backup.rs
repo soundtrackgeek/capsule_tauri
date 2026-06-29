@@ -12,6 +12,7 @@ use crate::{
     db,
     models::{
         BackupCreateRequest, BackupCreateResponse, BackupInfo, BackupListResponse, BackupManifest,
+        MutationAudit,
     },
 };
 
@@ -100,6 +101,45 @@ pub fn create_backup_for_database(
 
     Ok(BackupCreateResponse {
         backup: backup_info,
+    })
+}
+
+#[derive(Debug, Clone)]
+pub struct GuardedWrite<T> {
+    pub value: T,
+    pub audit: MutationAudit,
+}
+
+pub fn with_database_backup<T>(
+    operation: &str,
+    write_fn: impl FnOnce(&Path) -> Result<T>,
+) -> Result<GuardedWrite<T>> {
+    let db_path = db::resolve_database_path();
+    with_database_backup_for_database(&db_path, operation, write_fn)
+}
+
+pub fn with_database_backup_for_database<T>(
+    db_path: &Path,
+    operation: &str,
+    write_fn: impl FnOnce(&Path) -> Result<T>,
+) -> Result<GuardedWrite<T>> {
+    let backup = create_backup_for_database(
+        db_path,
+        BackupCreateRequest {
+            operation: Some(operation.to_string()),
+        },
+    )
+    .with_context(|| format!("backup failed before {operation}"))?;
+    let backup_path = backup.backup.path;
+    let value = write_fn(db_path)?;
+
+    Ok(GuardedWrite {
+        value,
+        audit: MutationAudit {
+            backup_path,
+            operation: operation.to_string(),
+            completed_at: Utc::now().to_rfc3339(),
+        },
     })
 }
 
@@ -268,5 +308,20 @@ mod tests {
             })
             .expect("count backup entries");
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn write_guard_does_not_run_write_when_backup_fails() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let missing_db_path = temp_dir.path().join("missing.db");
+        let mut write_ran = false;
+
+        let result = with_database_backup_for_database(&missing_db_path, "entry.create", |_| {
+            write_ran = true;
+            Ok(())
+        });
+
+        assert!(result.is_err());
+        assert!(!write_ran);
     }
 }

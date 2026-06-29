@@ -3,28 +3,51 @@ import {
   Archive,
   BookOpen,
   CheckCircle2,
+  Clock3,
   Database,
+  Edit3,
+  Eye,
+  EyeOff,
   FileArchive,
+  FileText,
   Filter,
+  History,
   HardDrive,
   Image as ImageIcon,
   Info,
   MapPin,
+  Maximize2,
+  Pin,
+  PinOff,
+  Plus,
   RefreshCw,
+  Save,
   Search,
   Settings,
   ShieldCheck,
   Shuffle,
+  Sparkles,
+  Star,
   Tags,
   TriangleAlert,
+  X,
 } from "lucide-react";
 import {
+  createEntry,
   createBackup,
   getDatabaseStatus,
   getEntry,
   getRandomEntry,
+  hideEntry,
+  listEntryHistory,
   listBackups,
   listEntries,
+  pinEntry,
+  starEntry,
+  unhideEntry,
+  unpinEntry,
+  unstarEntry,
+  updateEntry,
 } from "./backend";
 import { StatusPill } from "./components/StatusPill";
 import { formatBytes, formatDateTime } from "./lib/format";
@@ -32,12 +55,16 @@ import type {
   BackupInfo,
   DatabaseStatus,
   Entry,
+  EntryCreate,
   EntryFilters,
+  EntryHistoryResponse,
   EntryListResponse,
+  EntryMutationResponse,
+  EntryUpdate,
 } from "./types";
 import "./styles.css";
 
-type ActiveView = "dashboard" | "entries" | "backups" | "settings" | "about";
+type ActiveView = "dashboard" | "entries" | "composer" | "writer" | "backups" | "settings" | "about";
 
 type EntryFilterForm = {
   text: string;
@@ -55,13 +82,59 @@ type DashboardCounts = {
   currentMonth: number | null;
 };
 
+type ComposerMode = "create" | "edit";
+
+type ComposerDraft = {
+  text: string;
+  title: string;
+  summary: string;
+  mood: string;
+  tags: string;
+  when: string;
+  starred: boolean;
+  pinned: boolean;
+  continueFromUuid: string;
+};
+
+type WriterSettings = {
+  background: string;
+  color: string;
+  fontFamily: string;
+  fontSize: number;
+  lineSpacing: number;
+};
+
 const navItems: Array<{ id: ActiveView; label: string; icon: ReactNode }> = [
   { id: "dashboard", label: "Dashboard", icon: <Database size={18} /> },
   { id: "entries", label: "Entries", icon: <BookOpen size={18} /> },
+  { id: "composer", label: "New Entry", icon: <Plus size={18} /> },
+  { id: "writer", label: "Writer", icon: <Sparkles size={18} /> },
   { id: "backups", label: "Backups", icon: <Archive size={18} /> },
   { id: "settings", label: "Settings", icon: <Settings size={18} /> },
   { id: "about", label: "About", icon: <Info size={18} /> },
 ];
+
+const emptyComposerDraft: ComposerDraft = {
+  text: "",
+  title: "",
+  summary: "",
+  mood: "",
+  tags: "",
+  when: "",
+  starred: false,
+  pinned: false,
+  continueFromUuid: "",
+};
+
+const defaultWriterSettings: WriterSettings = {
+  background: "#f7f6f0",
+  color: "#17201b",
+  fontFamily: "Georgia, ui-serif, serif",
+  fontSize: 21,
+  lineSpacing: 1.75,
+};
+
+const draftStorageKey = "capsule-tauri-composer-draft-v1";
 
 const defaultEntryFilters: EntryFilterForm = {
   text: "",
@@ -90,10 +163,19 @@ function App() {
   const [entryLimit, setEntryLimit] = useState(40);
   const [entryResponse, setEntryResponse] = useState<EntryListResponse | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null);
+  const [composerMode, setComposerMode] = useState<ComposerMode>("create");
+  const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
+  const [composerDraft, setComposerDraft] = useState<ComposerDraft>(emptyComposerDraft);
+  const [draftRecovered, setDraftRecovered] = useState(false);
+  const [writerSettings, setWriterSettings] = useState<WriterSettings>(defaultWriterSettings);
+  const [entryHistory, setEntryHistory] = useState<EntryHistoryResponse | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [entriesLoading, setEntriesLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [creatingBackup, setCreatingBackup] = useState(false);
+  const [savingEntry, setSavingEntry] = useState(false);
+  const [mutatingEntryUuid, setMutatingEntryUuid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -194,6 +276,35 @@ function App() {
   }, [refresh]);
 
   useEffect(() => {
+    const rawDraft = window.localStorage.getItem(draftStorageKey);
+    if (!rawDraft) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(rawDraft) as ComposerDraft;
+      if (draftHasContent(parsed)) {
+        setComposerDraft({ ...emptyComposerDraft, ...parsed });
+        setDraftRecovered(true);
+      }
+    } catch {
+      window.localStorage.removeItem(draftStorageKey);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (composerMode !== "create") {
+      return;
+    }
+
+    if (draftHasContent(composerDraft)) {
+      window.localStorage.setItem(draftStorageKey, JSON.stringify(composerDraft));
+    } else {
+      window.localStorage.removeItem(draftStorageKey);
+    }
+  }, [composerDraft, composerMode]);
+
+  useEffect(() => {
     if (activeView === "entries") {
       void loadEntryList();
     }
@@ -239,13 +350,192 @@ function App() {
     }
   }, []);
 
+  const openNewEntry = useCallback(() => {
+    setComposerMode("create");
+    setEditingEntry(null);
+    setComposerDraft((current) =>
+      composerMode === "create" && draftHasContent(current) ? current : emptyComposerDraft,
+    );
+    setActiveView("composer");
+  }, [composerMode]);
+
+  const openEditEntry = useCallback((entry: Entry) => {
+    setComposerMode("edit");
+    setEditingEntry(entry);
+    setComposerDraft(draftFromEntry(entry));
+    setDraftRecovered(false);
+    setActiveView("composer");
+  }, []);
+
+  const openContinueEntry = useCallback((entry: Entry) => {
+    setComposerMode("create");
+    setEditingEntry(null);
+    setComposerDraft({
+      ...emptyComposerDraft,
+      continueFromUuid: entry.uuid,
+      tags: entry.tags.map((tag) => tag.name).join(", "),
+      mood: entry.mood ?? "",
+    });
+    setDraftRecovered(false);
+    setActiveView("composer");
+  }, []);
+
+  const applyMutationResponse = useCallback(
+    async (response: EntryMutationResponse) => {
+      setNotice(`Saved with backup: ${response.audit.backupPath}`);
+      setSelectedEntry(response.entry);
+      setEntryHistory(null);
+      await refresh();
+      if (activeView === "entries") {
+        await loadEntryList();
+      }
+    },
+    [activeView, loadEntryList, refresh],
+  );
+
+  const handleSaveEntry = useCallback(async () => {
+    if (!composerDraft.text.trim()) {
+      setError("Entry text is required.");
+      return;
+    }
+
+    setSavingEntry(true);
+    setError(null);
+    setNotice(null);
+    try {
+      if (composerMode === "edit" && editingEntry) {
+        const input: EntryUpdate = {
+          text: composerDraft.text,
+          contentFormat: "markdown",
+          title: nullableFromText(composerDraft.title),
+          summary: nullableFromText(composerDraft.summary),
+          mood: nullableFromText(composerDraft.mood),
+          tags: splitFilter(composerDraft.tags),
+          starred: composerDraft.starred,
+          pinned: composerDraft.pinned,
+          continueFromUuid: nullableFromText(composerDraft.continueFromUuid),
+        };
+        const response = await updateEntry(editingEntry.uuid, input);
+        await applyMutationResponse(response);
+      } else {
+        const input: EntryCreate = {
+          text: composerDraft.text,
+          contentFormat: "markdown",
+          title: nullableFromText(composerDraft.title),
+          summary: nullableFromText(composerDraft.summary),
+          mood: nullableFromText(composerDraft.mood),
+          tags: splitFilter(composerDraft.tags),
+          when: nullableFromText(composerDraft.when),
+          starred: composerDraft.starred,
+          pinned: composerDraft.pinned,
+          continueFromUuid: nullableFromText(composerDraft.continueFromUuid),
+        };
+        const response = await createEntry(input);
+        window.localStorage.removeItem(draftStorageKey);
+        setComposerDraft(emptyComposerDraft);
+        setDraftRecovered(false);
+        await applyMutationResponse(response);
+      }
+      setActiveView("entries");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to save entry");
+    } finally {
+      setSavingEntry(false);
+    }
+  }, [applyMutationResponse, composerDraft, composerMode, editingEntry]);
+
+  const handleEntryAction = useCallback(
+    async (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => {
+      setMutatingEntryUuid(entry.uuid);
+      setError(null);
+      setNotice(null);
+      try {
+        const response =
+          action === "star"
+            ? entry.starred
+              ? await unstarEntry(entry.uuid)
+              : await starEntry(entry.uuid)
+            : action === "pin"
+              ? entry.pinned
+                ? await unpinEntry(entry.uuid)
+                : await pinEntry(entry.uuid)
+              : action === "hide"
+                ? await hideEntry(entry.uuid)
+                : await unhideEntry(entry.uuid);
+        await applyMutationResponse(response);
+      } catch (actionError) {
+        setError(actionError instanceof Error ? actionError.message : "Entry action failed");
+      } finally {
+        setMutatingEntryUuid(null);
+      }
+    },
+    [applyMutationResponse],
+  );
+
+  const handleLoadHistory = useCallback(async (entry: Entry) => {
+    setHistoryLoading(true);
+    setError(null);
+    try {
+      setEntryHistory(await listEntryHistory(entry.uuid));
+    } catch (historyError) {
+      setError(historyError instanceof Error ? historyError.message : "Unable to load entry history");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const savingShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s";
+      const writerShortcut =
+        (event.ctrlKey || event.metaKey) && event.shiftKey && event.key === ".";
+
+      if (savingShortcut && (activeView === "composer" || activeView === "writer")) {
+        event.preventDefault();
+        void handleSaveEntry();
+      }
+
+      if (writerShortcut && (activeView === "composer" || activeView === "writer")) {
+        event.preventDefault();
+        setActiveView((current) => (current === "writer" ? "composer" : "writer"));
+      }
+
+      if (event.key === "Escape" && activeView === "writer") {
+        event.preventDefault();
+        setActiveView("composer");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeView, handleSaveEntry]);
+
   const title = {
-    dashboard: "Read-Only Journal",
+    dashboard: "Write-Safe Journal",
     entries: "Entries",
+    composer: composerMode === "edit" ? "Edit Entry" : "New Entry",
+    writer: "Writer Mode",
     backups: "Backups",
     settings: "Settings",
     about: "About",
   }[activeView];
+
+  if (activeView === "writer") {
+    return (
+      <WriterModeView
+        draft={composerDraft}
+        error={error}
+        mode={composerMode}
+        notice={notice}
+        onChange={setComposerDraft}
+        onExit={() => setActiveView("composer")}
+        onSave={handleSaveEntry}
+        saving={savingEntry}
+        settings={writerSettings}
+        setSettings={setWriterSettings}
+      />
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -265,7 +555,13 @@ function App() {
             <button
               className={activeView === item.id ? "nav-item nav-item--active" : "nav-item"}
               key={item.id}
-              onClick={() => setActiveView(item.id)}
+              onClick={() => {
+                if (item.id === "composer") {
+                  openNewEntry();
+                } else {
+                  setActiveView(item.id);
+                }
+              }}
               type="button"
             >
               {item.icon}
@@ -278,7 +574,7 @@ function App() {
       <main className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Phase 1</p>
+            <p className="eyebrow">Phase 2</p>
             <h2>{title}</h2>
           </div>
 
@@ -297,6 +593,10 @@ function App() {
               type="button"
             >
               <RefreshCw size={18} />
+            </button>
+            <button className="secondary-button" onClick={openNewEntry} type="button">
+              <Plus size={18} />
+              New
             </button>
             <button
               className="primary-button"
@@ -325,6 +625,24 @@ function App() {
           </div>
         )}
 
+        {draftRecovered && activeView === "composer" && (
+          <div className="banner banner--neutral" role="status">
+            <Clock3 size={18} />
+            <span>Recovered an unsaved local draft.</span>
+            <button
+              className="text-button"
+              onClick={() => {
+                setComposerDraft(emptyComposerDraft);
+                setDraftRecovered(false);
+                window.localStorage.removeItem(draftStorageKey);
+              }}
+              type="button"
+            >
+              Discard
+            </button>
+          </div>
+        )}
+
         {activeView === "dashboard" && (
           <DashboardView
             backups={backups}
@@ -342,10 +660,17 @@ function App() {
 
         {activeView === "entries" && (
           <EntriesView
+            entryHistory={entryHistory}
             detailLoading={detailLoading}
             entryFilters={entryFilters}
             entryResponse={entryResponse}
+            historyLoading={historyLoading}
             loading={entriesLoading}
+            mutatingEntryUuid={mutatingEntryUuid}
+            onContinueEntry={openContinueEntry}
+            onEditEntry={openEditEntry}
+            onEntryAction={handleEntryAction}
+            onLoadHistory={handleLoadHistory}
             onLoadMore={() => setEntryLimit((current) => current + 40)}
             onResetFilters={() => {
               setEntryLimit(40);
@@ -357,6 +682,20 @@ function App() {
               setEntryLimit(40);
               setEntryFilters(next);
             }}
+            status={status}
+          />
+        )}
+
+        {activeView === "composer" && (
+          <ComposerView
+            draft={composerDraft}
+            editingEntry={editingEntry}
+            mode={composerMode}
+            onCancel={() => setActiveView("entries")}
+            onChange={setComposerDraft}
+            onOpenWriter={() => setActiveView("writer")}
+            onSave={handleSaveEntry}
+            saving={savingEntry}
             status={status}
           />
         )}
@@ -494,9 +833,16 @@ type EntriesViewProps = {
   setEntryFilters: (next: EntryFilterForm) => void;
   entryResponse: EntryListResponse | null;
   selectedEntry: Entry | null;
+  entryHistory: EntryHistoryResponse | null;
   loading: boolean;
   detailLoading: boolean;
+  historyLoading: boolean;
+  mutatingEntryUuid: string | null;
   onSelectEntry: (entry: Entry) => void;
+  onEditEntry: (entry: Entry) => void;
+  onContinueEntry: (entry: Entry) => void;
+  onEntryAction: (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => void;
+  onLoadHistory: (entry: Entry) => void;
   onLoadMore: () => void;
   onResetFilters: () => void;
 };
@@ -507,9 +853,16 @@ function EntriesView({
   setEntryFilters,
   entryResponse,
   selectedEntry,
+  entryHistory,
   loading,
   detailLoading,
+  historyLoading,
+  mutatingEntryUuid,
   onSelectEntry,
+  onEditEntry,
+  onContinueEntry,
+  onEntryAction,
+  onLoadHistory,
   onLoadMore,
   onResetFilters,
 }: EntriesViewProps) {
@@ -621,7 +974,7 @@ function EntriesView({
             <p className="eyebrow">Browse</p>
             <h3>{entryResponse ? `${entryResponse.total} entries` : "Loading entries"}</h3>
           </div>
-          <StatusPill tone="neutral">{loading ? "Loading" : "Read-only"}</StatusPill>
+          <StatusPill tone="neutral">{loading ? "Loading" : "Write-safe"}</StatusPill>
         </div>
 
         <div className="entry-list">
@@ -653,8 +1006,322 @@ function EntriesView({
         )}
       </div>
 
-      <EntryDetail entry={selectedEntry} loading={detailLoading} />
+      <EntryDetail
+        entry={selectedEntry}
+        entryHistory={entryHistory}
+        historyLoading={historyLoading}
+        loading={detailLoading}
+        mutating={Boolean(selectedEntry && mutatingEntryUuid === selectedEntry.uuid)}
+        onContinue={onContinueEntry}
+        onEdit={onEditEntry}
+        onEntryAction={onEntryAction}
+        onLoadHistory={onLoadHistory}
+      />
     </section>
+  );
+}
+
+type ComposerViewProps = {
+  status: DatabaseStatus | null;
+  mode: ComposerMode;
+  editingEntry: Entry | null;
+  draft: ComposerDraft;
+  onChange: (next: ComposerDraft) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  onOpenWriter: () => void;
+  saving: boolean;
+};
+
+function ComposerView({
+  status,
+  mode,
+  editingEntry,
+  draft,
+  onChange,
+  onSave,
+  onCancel,
+  onOpenWriter,
+  saving,
+}: ComposerViewProps) {
+  if (status && (!status.dbExists || !status.readable)) {
+    return (
+      <section className="state-panel">
+        <TriangleAlert size={22} />
+        <h3>Database is not writable</h3>
+        <p>{status.security.message ?? "Confirm the active database before writing."}</p>
+        <code>{status.dbPath}</code>
+      </section>
+    );
+  }
+
+  const stats = writingStats(draft.text);
+
+  return (
+    <section className="composer-view" aria-label={mode === "edit" ? "Edit entry" : "New entry"}>
+      <div className="composer-main">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">{mode === "edit" ? editingEntry?.uuid : "Markdown"}</p>
+            <h3>{mode === "edit" ? "Edit Entry" : "New Entry"}</h3>
+          </div>
+          <div className="topbar-actions">
+            <button className="secondary-button" onClick={onOpenWriter} type="button">
+              <Maximize2 size={17} />
+              Writer
+            </button>
+            <button className="secondary-button" onClick={onCancel} type="button">
+              <X size={17} />
+              Cancel
+            </button>
+            <button
+              className="primary-button"
+              disabled={saving || !draft.text.trim()}
+              onClick={onSave}
+              type="button"
+            >
+              <Save size={17} />
+              {saving ? "Saving" : "Save"}
+            </button>
+          </div>
+        </div>
+
+        <label className="field composer-title-field">
+          <span>Title</span>
+          <input
+            onChange={(event) => onChange({ ...draft, title: event.target.value })}
+            placeholder="Optional title"
+            type="text"
+            value={draft.title}
+          />
+        </label>
+
+        <label className="field composer-text-field">
+          <span>Entry</span>
+          <textarea
+            autoFocus
+            onChange={(event) => onChange({ ...draft, text: event.target.value })}
+            placeholder="Write the entry"
+            value={draft.text}
+          />
+        </label>
+      </div>
+
+      <aside className="composer-side">
+        <Panel icon={<FileText size={20} />} title="Metadata">
+          <div className="composer-meta-grid">
+            <label className="field">
+              <span>Summary</span>
+              <textarea
+                className="compact-textarea"
+                onChange={(event) => onChange({ ...draft, summary: event.target.value })}
+                placeholder="Optional summary"
+                value={draft.summary}
+              />
+            </label>
+            <label className="field">
+              <span>Mood</span>
+              <input
+                onChange={(event) => onChange({ ...draft, mood: event.target.value })}
+                placeholder="focused"
+                type="text"
+                value={draft.mood}
+              />
+            </label>
+            <label className="field">
+              <span>Tags</span>
+              <input
+                onChange={(event) => onChange({ ...draft, tags: event.target.value })}
+                placeholder="work, capsule"
+                type="text"
+                value={draft.tags}
+              />
+            </label>
+            {mode === "create" && (
+              <label className="field">
+                <span>When</span>
+                <input
+                  onChange={(event) => onChange({ ...draft, when: event.target.value })}
+                  type="datetime-local"
+                  value={draft.when}
+                />
+              </label>
+            )}
+            <label className="field">
+              <span>Continue from UUID</span>
+              <input
+                onChange={(event) => onChange({ ...draft, continueFromUuid: event.target.value })}
+                placeholder="entry_xxxxxxxx"
+                type="text"
+                value={draft.continueFromUuid}
+              />
+            </label>
+            <label className="check-row">
+              <input
+                checked={draft.starred}
+                onChange={(event) => onChange({ ...draft, starred: event.target.checked })}
+                type="checkbox"
+              />
+              <span>Starred</span>
+            </label>
+            <label className="check-row">
+              <input
+                checked={draft.pinned}
+                onChange={(event) => onChange({ ...draft, pinned: event.target.checked })}
+                type="checkbox"
+              />
+              <span>Pinned</span>
+            </label>
+          </div>
+        </Panel>
+
+        <Panel icon={<Clock3 size={20} />} title="Writing Stats">
+          <div className="mini-metrics">
+            <Metric label="Words" value={stats.words} />
+            <Metric label="Characters" value={stats.characters} />
+            <Metric label="Reading" value={`${stats.readingMinutes} min`} />
+          </div>
+        </Panel>
+      </aside>
+    </section>
+  );
+}
+
+type WriterModeViewProps = {
+  mode: ComposerMode;
+  draft: ComposerDraft;
+  onChange: (next: ComposerDraft) => void;
+  onSave: () => void;
+  onExit: () => void;
+  saving: boolean;
+  settings: WriterSettings;
+  setSettings: (next: WriterSettings) => void;
+  error: string | null;
+  notice: string | null;
+};
+
+function WriterModeView({
+  mode,
+  draft,
+  onChange,
+  onSave,
+  onExit,
+  saving,
+  settings,
+  setSettings,
+  error,
+  notice,
+}: WriterModeViewProps) {
+  const stats = writingStats(draft.text);
+  return (
+    <main
+      className="writer-mode"
+      style={{
+        background: settings.background,
+        color: settings.color,
+        fontFamily: settings.fontFamily,
+      }}
+    >
+      <div className="writer-toolbar">
+        <div>
+          <p className="eyebrow">{mode === "edit" ? "Edit" : "New"}</p>
+          <h1>{draft.title || "Untitled"}</h1>
+        </div>
+        <div className="writer-controls">
+          <label title="Background color">
+            <input
+              onChange={(event) => setSettings({ ...settings, background: event.target.value })}
+              type="color"
+              value={settings.background}
+            />
+          </label>
+          <label title="Text color">
+            <input
+              onChange={(event) => setSettings({ ...settings, color: event.target.value })}
+              type="color"
+              value={settings.color}
+            />
+          </label>
+          <select
+            onChange={(event) => setSettings({ ...settings, fontFamily: event.target.value })}
+            value={settings.fontFamily}
+          >
+            <option value="Georgia, ui-serif, serif">Serif</option>
+            <option value="Inter, Segoe UI, ui-sans-serif, sans-serif">Sans</option>
+            <option value="Cascadia Code, ui-monospace, monospace">Mono</option>
+          </select>
+          <input
+            max={28}
+            min={16}
+            onChange={(event) => setSettings({ ...settings, fontSize: Number(event.target.value) })}
+            title="Font size"
+            type="range"
+            value={settings.fontSize}
+          />
+          <input
+            max={2.2}
+            min={1.3}
+            onChange={(event) =>
+              setSettings({ ...settings, lineSpacing: Number(event.target.value) })
+            }
+            step={0.05}
+            title="Line spacing"
+            type="range"
+            value={settings.lineSpacing}
+          />
+          <button className="secondary-button" onClick={onExit} type="button">
+            <X size={17} />
+            Exit
+          </button>
+          <button className="primary-button" disabled={saving || !draft.text.trim()} onClick={onSave} type="button">
+            <Save size={17} />
+            {saving ? "Saving" : "Save"}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="writer-banner writer-banner--error">
+          <TriangleAlert size={18} />
+          {error}
+        </div>
+      )}
+      {notice && (
+        <div className="writer-banner writer-banner--success">
+          <CheckCircle2 size={18} />
+          {notice}
+        </div>
+      )}
+
+      <div className="writer-canvas">
+        <input
+          className="writer-title-input"
+          onChange={(event) => onChange({ ...draft, title: event.target.value })}
+          placeholder="Title"
+          style={{ color: settings.color }}
+          value={draft.title}
+        />
+        <textarea
+          autoFocus
+          className="writer-textarea"
+          onChange={(event) => onChange({ ...draft, text: event.target.value })}
+          placeholder="Write"
+          style={{
+            color: settings.color,
+            fontFamily: settings.fontFamily,
+            fontSize: settings.fontSize,
+            lineHeight: settings.lineSpacing,
+          }}
+          value={draft.text}
+        />
+      </div>
+
+      <div className="writer-footer">
+        <span>{stats.words} words</span>
+        <span>{stats.characters} characters</span>
+        <span>{stats.readingMinutes} min</span>
+      </div>
+    </main>
   );
 }
 
@@ -731,9 +1398,9 @@ function SettingsView({ status, backupDirectory, statusTone }: SettingsViewProps
       </Panel>
       <Panel icon={<Info size={20} />} title="Application">
         <dl className="detail-list">
-          <Detail label="Version" value="0.2.0" />
-          <Detail label="Mode" value="Read-only journal" />
-          <Detail label="Writes" value="Manual backup only" />
+          <Detail label="Version" value="0.3.0" />
+          <Detail label="Mode" value="Write-safe journal" />
+          <Detail label="Writes" value="Backup guarded" />
         </dl>
       </Panel>
     </section>
@@ -745,21 +1412,38 @@ function AboutView() {
     <section className="about-panel">
       <h3>Capsule Tauri</h3>
       <p>
-        Phase 1 adds read-only browsing for the active Capsule database: dashboard counts,
-        recent entries, pinned entries, random entry, filters, entry detail, tags, moods,
-        locations, attachment counts, and thread metadata.
+        Phase 2 adds backup-guarded core journaling for the active Capsule database:
+        create, edit, star, pin, hide, local draft recovery, Writer Mode, and entry
+        history review.
       </p>
-      <p>Journal mutations remain unavailable in this phase. Manual backup creation is still available.</p>
+      <p>Hard delete remains reserved until the legacy resequencing behavior is fully matched and tested.</p>
     </section>
   );
 }
 
 type EntryDetailProps = {
   entry: Entry | null;
+  entryHistory: EntryHistoryResponse | null;
+  historyLoading: boolean;
   loading: boolean;
+  mutating: boolean;
+  onEdit: (entry: Entry) => void;
+  onContinue: (entry: Entry) => void;
+  onEntryAction: (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => void;
+  onLoadHistory: (entry: Entry) => void;
 };
 
-function EntryDetail({ entry, loading }: EntryDetailProps) {
+function EntryDetail({
+  entry,
+  entryHistory,
+  historyLoading,
+  loading,
+  mutating,
+  onEdit,
+  onContinue,
+  onEntryAction,
+  onLoadHistory,
+}: EntryDetailProps) {
   if (loading) {
     return (
       <aside className="detail-panel">
@@ -775,7 +1459,7 @@ function EntryDetail({ entry, loading }: EntryDetailProps) {
       <aside className="detail-panel detail-panel--empty">
         <Search size={22} />
         <h3>No entry selected</h3>
-        <p>Select an entry to inspect its read-only details.</p>
+        <p>Select an entry to inspect it.</p>
       </aside>
     );
   }
@@ -785,6 +1469,44 @@ function EntryDetail({ entry, loading }: EntryDetailProps) {
       <div className="entry-detail-heading">
         <p className="eyebrow">{formatDateTime(entry.createdAt)}</p>
         <h3>{entry.title || entry.textPlain.slice(0, 72) || "Untitled entry"}</h3>
+      </div>
+
+      <div className="entry-action-bar">
+        <button
+          className={entry.starred ? "icon-button icon-button--active" : "icon-button"}
+          disabled={mutating}
+          onClick={() => onEntryAction(entry, "star")}
+          title={entry.starred ? "Unstar" : "Star"}
+          type="button"
+        >
+          <Star size={17} />
+        </button>
+        <button
+          className={entry.pinned ? "icon-button icon-button--active" : "icon-button"}
+          disabled={mutating}
+          onClick={() => onEntryAction(entry, "pin")}
+          title={entry.pinned ? "Unpin" : "Pin"}
+          type="button"
+        >
+          {entry.pinned ? <PinOff size={17} /> : <Pin size={17} />}
+        </button>
+        <button
+          className="icon-button"
+          disabled={mutating}
+          onClick={() => onEntryAction(entry, entry.hidden ? "unhide" : "hide")}
+          title={entry.hidden ? "Unhide" : "Hide"}
+          type="button"
+        >
+          {entry.hidden ? <Eye size={17} /> : <EyeOff size={17} />}
+        </button>
+        <button className="secondary-button" onClick={() => onEdit(entry)} type="button">
+          <Edit3 size={17} />
+          Edit
+        </button>
+        <button className="secondary-button" onClick={() => onContinue(entry)} type="button">
+          <FileText size={17} />
+          Continue
+        </button>
       </div>
 
       <div className="tag-row">
@@ -840,6 +1562,42 @@ function EntryDetail({ entry, loading }: EntryDetailProps) {
           </p>
         </div>
       )}
+
+      <div className="metadata-block">
+        <div className="metadata-heading-row">
+          <h4>
+            <History size={16} />
+            History
+          </h4>
+          <button
+            className="secondary-button secondary-button--small"
+            disabled={historyLoading}
+            onClick={() => onLoadHistory(entry)}
+            type="button"
+          >
+            {historyLoading ? "Loading" : "Load"}
+          </button>
+        </div>
+        {entryHistory?.entryId === entry.id ? (
+          entryHistory.history.length > 0 ? (
+            <div className="history-list">
+              {entryHistory.history.map((item) => (
+                <article className="history-row" key={item.id}>
+                  <div>
+                    <h5>{item.operationType.replace("EDIT_", "").toLowerCase()}</h5>
+                    <p>{formatDateTime(item.timestamp)}</p>
+                  </div>
+                  <span>{item.changedFields.join(", ") || "metadata"}</span>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p>No edit history for this entry.</p>
+          )
+        ) : (
+          <p>Version snapshots appear here after loading.</p>
+        )}
+      </div>
     </aside>
   );
 }
@@ -979,6 +1737,48 @@ function SkeletonList({ compact = false }: { compact?: boolean }) {
       ))}
     </div>
   );
+}
+
+function draftHasContent(draft: ComposerDraft) {
+  return Boolean(
+    draft.text.trim() ||
+      draft.title.trim() ||
+      draft.summary.trim() ||
+      draft.mood.trim() ||
+      draft.tags.trim() ||
+      draft.when.trim() ||
+      draft.continueFromUuid.trim() ||
+      draft.starred ||
+      draft.pinned,
+  );
+}
+
+function draftFromEntry(entry: Entry): ComposerDraft {
+  return {
+    text: entry.text,
+    title: entry.title ?? "",
+    summary: entry.summary ?? "",
+    mood: entry.mood ?? "",
+    tags: entry.tags.map((tag) => tag.name).join(", "),
+    when: "",
+    starred: entry.starred,
+    pinned: entry.pinned,
+    continueFromUuid: entry.thread?.parentUuid ?? "",
+  };
+}
+
+function nullableFromText(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function writingStats(text: string) {
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  return {
+    words,
+    characters: text.length,
+    readingMinutes: words === 0 ? 0 : Math.max(1, Math.ceil(words / 220)),
+  };
 }
 
 function splitFilter(value: string) {

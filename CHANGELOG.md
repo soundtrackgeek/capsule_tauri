@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.0 - 2026-06-29
+
+### Added
+
+- Added a reusable backup guard for database mutations.
+- Added backup-guarded entry creation and editing commands.
+- Added backup-guarded star, unstar, pin, unpin, hide, and unhide commands.
+- Added entry history retrieval for legacy edit snapshots.
+- Added a full-page markdown composer with metadata fields, continuation UUIDs,
+  writing stats, and local draft recovery.
+- Added Writer Mode with local display preferences.
+- Added frontend mutation actions that surface the returned backup path.
+- Added Rust tests for backup guard abort behavior, entry creation, entry
+  updates, history recording, and hide mutations.
+
+### Changed
+
+- Bumped the app version to 0.3.0.
+- Updated the app shell from Phase 1 read-only browsing to Phase 2 write-safe
+  journaling.
+
 ## 0.2.0 - 2026-06-29
 
 ### Added

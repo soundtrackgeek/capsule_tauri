@@ -185,6 +185,20 @@ pub fn open_read_only_connection(path: &Path) -> Result<Connection> {
     Ok(connection)
 }
 
+pub fn open_read_write_connection(path: &Path) -> Result<Connection> {
+    let connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .with_context(|| format!("failed to open {}", path.display()))?;
+    connection.busy_timeout(std::time::Duration::from_millis(15_000))?;
+    connection.pragma_update(None, "foreign_keys", "ON")?;
+    connection.pragma_update(None, "journal_mode", "WAL")?;
+    connection.pragma_update(None, "synchronous", "NORMAL")?;
+    connection.pragma_update(None, "temp_store", "MEMORY")?;
+    Ok(connection)
+}
+
 pub fn inspect_schema(connection: &Connection) -> Result<SchemaSummary> {
     let mut statement = connection.prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name COLLATE NOCASE",

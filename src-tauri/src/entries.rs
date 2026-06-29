@@ -4,13 +4,17 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use rusqlite::{params_from_iter, types::Value, Connection};
+use chrono::{Local, Utc};
+use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value as JsonValue};
 
 use crate::{
-    db,
+    backup, db,
     models::{
-        Entry, EntryFilters, EntryListResponse, EntrySort, EntryThreadInfo, LocationInfo, MoodInfo,
-        RandomEntryFilters, TagInfo,
+        Entry, EntryCreate, EntryFilters, EntryHistoryItem, EntryHistoryResponse,
+        EntryListResponse, EntryMutationResponse, EntrySort, EntryThreadInfo, EntryUpdate,
+        LocationInfo, MoodInfo, RandomEntryFilters, TagInfo,
     },
 };
 
@@ -29,6 +33,24 @@ struct RawEntry {
     title: Option<String>,
     summary: Option<String>,
     mood: Option<String>,
+    starred: bool,
+    pinned: bool,
+    hidden: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct EntrySnapshot {
+    id: i64,
+    uuid: String,
+    created_at: String,
+    updated_at: Option<String>,
+    text: String,
+    text_plain: String,
+    content_format: String,
+    title: Option<String>,
+    summary: Option<String>,
+    mood: Option<String>,
+    tags: Vec<String>,
     starred: bool,
     pinned: bool,
     hidden: bool,
@@ -179,6 +201,150 @@ pub fn get_random_entry_for_database(
         .map(|entry| build_entry(entry, &relations)))
 }
 
+pub fn create_entry(input: EntryCreate) -> Result<EntryMutationResponse> {
+    let guarded = backup::with_database_backup("entry.create", move |db_path| {
+        create_entry_inner(db_path, input)
+    })?;
+    Ok(EntryMutationResponse {
+        entry: guarded.value,
+        audit: guarded.audit,
+    })
+}
+
+#[cfg(test)]
+fn create_entry_for_database(db_path: &Path, input: EntryCreate) -> Result<EntryMutationResponse> {
+    let guarded =
+        backup::with_database_backup_for_database(db_path, "entry.create", move |path| {
+            create_entry_inner(path, input)
+        })?;
+    Ok(EntryMutationResponse {
+        entry: guarded.value,
+        audit: guarded.audit,
+    })
+}
+
+pub fn update_entry(identifier: String, input: EntryUpdate) -> Result<EntryMutationResponse> {
+    let guarded = backup::with_database_backup("entry.update", move |db_path| {
+        update_entry_inner(db_path, &identifier, input)
+    })?;
+    Ok(EntryMutationResponse {
+        entry: guarded.value,
+        audit: guarded.audit,
+    })
+}
+
+#[cfg(test)]
+fn update_entry_for_database(
+    db_path: &Path,
+    identifier: &str,
+    input: EntryUpdate,
+) -> Result<EntryMutationResponse> {
+    let guarded =
+        backup::with_database_backup_for_database(db_path, "entry.update", move |path| {
+            update_entry_inner(path, identifier, input)
+        })?;
+    Ok(EntryMutationResponse {
+        entry: guarded.value,
+        audit: guarded.audit,
+    })
+}
+
+pub fn star_entry(identifier: String) -> Result<EntryMutationResponse> {
+    set_entry_flag(identifier, "starred", true, "entry.star")
+}
+
+pub fn unstar_entry(identifier: String) -> Result<EntryMutationResponse> {
+    set_entry_flag(identifier, "starred", false, "entry.unstar")
+}
+
+pub fn pin_entry(identifier: String) -> Result<EntryMutationResponse> {
+    set_entry_flag(identifier, "pinned", true, "entry.pin")
+}
+
+pub fn unpin_entry(identifier: String) -> Result<EntryMutationResponse> {
+    set_entry_flag(identifier, "pinned", false, "entry.unpin")
+}
+
+pub fn hide_entry(identifier: String) -> Result<EntryMutationResponse> {
+    set_entry_flag(identifier, "hidden", true, "entry.hide")
+}
+
+pub fn unhide_entry(identifier: String) -> Result<EntryMutationResponse> {
+    set_entry_flag(identifier, "hidden", false, "entry.unhide")
+}
+
+pub fn list_entry_history(identifier: String) -> Result<EntryHistoryResponse> {
+    list_entry_history_for_database(&db::resolve_database_path(), &identifier)
+}
+
+pub fn list_entry_history_for_database(
+    db_path: &Path,
+    identifier: &str,
+) -> Result<EntryHistoryResponse> {
+    let connection = open_entries_connection(db_path)?;
+    let (entry_id, _) = resolve_entry_identity(&connection, identifier)?;
+    let current_snapshot = get_entry_snapshot(&connection, entry_id)?;
+    let current = serde_json::to_value(&current_snapshot)?;
+
+    if !table_exists(&connection, "history")? {
+        return Ok(EntryHistoryResponse {
+            entry_id,
+            current,
+            history: Vec::new(),
+            count: 0,
+        });
+    }
+
+    let mut statement = connection.prepare(
+        "SELECT id, timestamp, operation_type, old_data
+         FROM history
+         WHERE entry_id = ?1
+           AND operation_type IN ('EDIT_TEXT', 'EDIT_MOOD', 'EDIT_TAGS')
+         ORDER BY id ASC",
+    )?;
+    let rows = statement.query_map([entry_id], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+        ))
+    })?;
+
+    let snapshots = rows
+        .map(|row| {
+            let (id, timestamp, operation_type, old_data_json) = row?;
+            let old_data = old_data_json
+                .and_then(|value| serde_json::from_str::<JsonValue>(&value).ok())
+                .unwrap_or_else(|| json!({}));
+            Ok((id, timestamp, operation_type, old_data))
+        })
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let mut history = Vec::new();
+    for (index, (id, timestamp, operation_type, old_data)) in snapshots.iter().enumerate() {
+        let next_snapshot = snapshots
+            .get(index + 1)
+            .map(|item| &item.3)
+            .unwrap_or(&current);
+        history.push(EntryHistoryItem {
+            id: *id,
+            timestamp: timestamp.clone(),
+            operation_type: operation_type.clone(),
+            changed_fields: changed_fields(old_data, next_snapshot),
+            old_data: old_data.clone(),
+        });
+    }
+    history.reverse();
+
+    Ok(EntryHistoryResponse {
+        entry_id,
+        count: history.len(),
+        current,
+        history,
+    })
+}
+
 fn open_entries_connection(db_path: &Path) -> Result<Connection> {
     let connection = db::open_read_only_connection(db_path)?;
     let schema = db::inspect_schema(&connection)?;
@@ -189,6 +355,187 @@ fn open_entries_connection(db_path: &Path) -> Result<Connection> {
     }
 
     Ok(connection)
+}
+
+fn create_entry_inner(db_path: &Path, input: EntryCreate) -> Result<Entry> {
+    let text = normalize_required_text(&input.text)?;
+    let content_format = normalize_content_format(input.content_format.as_deref())?;
+    let text_plain = build_text_plain(&text);
+    let created_at = normalized_created_at(input.when.as_deref());
+    let updated_at = created_at.clone();
+    let title = normalize_optional_string(input.title);
+    let summary = normalize_optional_string(input.summary);
+    let mood = normalize_optional_string(input.mood);
+    let tags = normalize_tags(input.tags.as_deref());
+    let starred = input.starred.unwrap_or(false);
+    let pinned = input.pinned.unwrap_or(false);
+    let continue_from_uuid = normalize_optional_string(input.continue_from_uuid);
+
+    let mut connection = db::open_read_write_connection(db_path)?;
+    let schema = db::inspect_schema(&connection)?;
+    ensure_entries_table(&schema.detected_tables.into_iter().collect())?;
+
+    let tx = connection.transaction()?;
+    let uuid = generate_entry_uuid(&tx)?;
+    tx.execute(
+        "INSERT INTO entries
+            (uuid, created_at, updated_at, text, text_plain, content_format, title, summary, mood, starred, pinned, hidden)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0)",
+        params![
+            uuid,
+            created_at,
+            updated_at,
+            text,
+            text_plain,
+            content_format,
+            title,
+            summary,
+            mood,
+            bool_to_int(starred),
+            bool_to_int(pinned),
+        ],
+    )?;
+    let entry_id = tx.last_insert_rowid();
+    replace_entry_tags(&tx, entry_id, &tags)?;
+    if let Some(parent_uuid) = continue_from_uuid.as_deref() {
+        set_entry_continuation(&tx, &uuid, Some(parent_uuid))?;
+    }
+    refresh_fts_for_entry(&tx, entry_id, &text_plain)?;
+    tx.commit()?;
+
+    get_entry_for_database(db_path, &uuid)
+}
+
+fn update_entry_inner(db_path: &Path, identifier: &str, input: EntryUpdate) -> Result<Entry> {
+    let mut connection = db::open_read_write_connection(db_path)?;
+    let schema = db::inspect_schema(&connection)?;
+    ensure_entries_table(&schema.detected_tables.into_iter().collect())?;
+
+    let tx = connection.transaction()?;
+    let (entry_id, uuid) = resolve_entry_identity(&tx, identifier)?;
+
+    if input.text.is_some()
+        || input.content_format.is_some()
+        || input.title.is_present()
+        || input.summary.is_present()
+    {
+        let old_snapshot = get_entry_snapshot(&tx, entry_id)?;
+        record_history(&tx, "EDIT_TEXT", entry_id, &old_snapshot)?;
+        let text = match input.text.as_deref() {
+            Some(value) => normalize_required_text(value)?,
+            None => old_snapshot.text.clone(),
+        };
+        let content_format = normalize_content_format(Some(
+            input
+                .content_format
+                .as_deref()
+                .unwrap_or(&old_snapshot.content_format),
+        ))?;
+        let text_plain = build_text_plain(&text);
+        let title = normalize_optional_string(input.title.apply_to(old_snapshot.title.clone()));
+        let summary = normalize_optional_string(input.summary.apply_to(old_snapshot.summary));
+        tx.execute(
+            "UPDATE entries
+             SET text = ?1,
+                 text_plain = ?2,
+                 content_format = ?3,
+                 title = ?4,
+                 summary = ?5,
+                 updated_at = ?6
+             WHERE id = ?7",
+            params![
+                text,
+                text_plain,
+                content_format,
+                title,
+                summary,
+                current_updated_at(),
+                entry_id,
+            ],
+        )?;
+        refresh_fts_for_entry(&tx, entry_id, &text_plain)?;
+    }
+
+    if input.mood.is_present() {
+        let old_snapshot = get_entry_snapshot(&tx, entry_id)?;
+        record_history(&tx, "EDIT_MOOD", entry_id, &old_snapshot)?;
+        let mood = normalize_optional_string(input.mood.apply_to(old_snapshot.mood));
+        tx.execute(
+            "UPDATE entries SET mood = ?1, updated_at = ?2 WHERE id = ?3",
+            params![mood, current_updated_at(), entry_id],
+        )?;
+    }
+
+    if let Some(tags) = input.tags.as_deref() {
+        let old_snapshot = get_entry_snapshot(&tx, entry_id)?;
+        record_history(&tx, "EDIT_TAGS", entry_id, &old_snapshot)?;
+        replace_entry_tags(&tx, entry_id, &normalize_tags(Some(tags)))?;
+    }
+
+    if let Some(starred) = input.starred {
+        update_flag(&tx, entry_id, "starred", starred)?;
+    }
+    if let Some(pinned) = input.pinned {
+        update_flag(&tx, entry_id, "pinned", pinned)?;
+    }
+    if let Some(hidden) = input.hidden {
+        update_flag(&tx, entry_id, "hidden", hidden)?;
+    }
+    if let Some(parent_update) = input.continue_from_uuid.as_optional_value() {
+        set_entry_continuation(&tx, &uuid, parent_update.as_deref())?;
+    }
+
+    tx.commit()?;
+    get_entry_for_database(db_path, &uuid)
+}
+
+fn set_entry_flag(
+    identifier: String,
+    column: &'static str,
+    value: bool,
+    operation: &'static str,
+) -> Result<EntryMutationResponse> {
+    let guarded = backup::with_database_backup(operation, move |db_path| {
+        set_entry_flag_inner(db_path, &identifier, column, value)
+    })?;
+    Ok(EntryMutationResponse {
+        entry: guarded.value,
+        audit: guarded.audit,
+    })
+}
+
+fn set_entry_flag_inner(
+    db_path: &Path,
+    identifier: &str,
+    column: &'static str,
+    value: bool,
+) -> Result<Entry> {
+    let mut connection = db::open_read_write_connection(db_path)?;
+    let tx = connection.transaction()?;
+    let (entry_id, uuid) = resolve_entry_identity(&tx, identifier)?;
+    update_flag(&tx, entry_id, column, value)?;
+    tx.commit()?;
+    get_entry_for_database(db_path, &uuid)
+}
+
+fn update_flag(
+    connection: &Connection,
+    entry_id: i64,
+    column: &'static str,
+    value: bool,
+) -> Result<()> {
+    let column = match column {
+        "starred" => "starred",
+        "pinned" => "pinned",
+        "hidden" => "hidden",
+        _ => return Err(anyhow!("unsupported entry flag: {column}")),
+    };
+    let sql = format!("UPDATE entries SET {column} = ?1, updated_at = ?2 WHERE id = ?3");
+    connection.execute(
+        &sql,
+        params![bool_to_int(value), current_updated_at(), entry_id],
+    )?;
+    Ok(())
 }
 
 fn detected_tables(connection: &Connection) -> Result<HashSet<String>> {
@@ -678,6 +1025,339 @@ fn build_entry(raw: RawEntry, relations: &EntryRelations) -> Entry {
     }
 }
 
+fn resolve_entry_identity(connection: &Connection, identifier: &str) -> Result<(i64, String)> {
+    let identifier = identifier.trim();
+    if identifier.is_empty() {
+        return Err(anyhow!("Entry identifier is required."));
+    }
+
+    connection
+        .query_row(
+            "SELECT id, COALESCE(NULLIF(uuid, ''), 'entry_' || id) AS uuid
+             FROM entries
+             WHERE uuid = ?1 OR CAST(id AS TEXT) = ?1
+             LIMIT 1",
+            [identifier],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )
+        .with_context(|| format!("entry not found: {identifier}"))
+}
+
+fn get_entry_snapshot(connection: &Connection, entry_id: i64) -> Result<EntrySnapshot> {
+    let mut statement = connection.prepare(&format!("{} WHERE e.id = ?1", entry_select_sql()))?;
+    let raw_entry = statement
+        .query_row([entry_id], raw_entry_from_row)
+        .with_context(|| format!("entry not found: {entry_id}"))?;
+    let tags = load_tag_names(connection, entry_id)?;
+
+    Ok(EntrySnapshot {
+        id: raw_entry.id,
+        uuid: raw_entry.uuid,
+        created_at: raw_entry.created_at,
+        updated_at: raw_entry.updated_at,
+        text: raw_entry.text,
+        text_plain: raw_entry.text_plain,
+        content_format: raw_entry.content_format,
+        title: raw_entry.title,
+        summary: raw_entry.summary,
+        mood: raw_entry.mood,
+        tags,
+        starred: raw_entry.starred,
+        pinned: raw_entry.pinned,
+        hidden: raw_entry.hidden,
+    })
+}
+
+fn load_tag_names(connection: &Connection, entry_id: i64) -> Result<Vec<String>> {
+    if !table_exists(connection, "tags")? || !table_exists(connection, "entry_tags")? {
+        return Ok(Vec::new());
+    }
+
+    let mut statement = connection.prepare(
+        "SELECT t.name
+         FROM entry_tags et
+         JOIN tags t ON t.id = et.tag_id
+         WHERE et.entry_id = ?1
+         ORDER BY lower(t.name)",
+    )?;
+    let rows = statement.query_map([entry_id], |row| row.get::<_, String>(0))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn record_history(
+    connection: &Connection,
+    operation_type: &str,
+    entry_id: i64,
+    old_snapshot: &EntrySnapshot,
+) -> Result<()> {
+    if !table_exists(connection, "history")? {
+        return Ok(());
+    }
+
+    connection.execute("DELETE FROM history WHERE COALESCE(undone, 0) = 1", [])?;
+    connection.execute(
+        "INSERT INTO history (timestamp, operation_type, entry_id, old_data, additional_data, undone, redo_data)
+         VALUES (?1, ?2, ?3, ?4, NULL, 0, NULL)",
+        params![
+            current_history_timestamp(),
+            operation_type,
+            entry_id,
+            serde_json::to_string(old_snapshot)?,
+        ],
+    )?;
+    Ok(())
+}
+
+fn replace_entry_tags(connection: &Connection, entry_id: i64, tags: &[String]) -> Result<()> {
+    if tags.is_empty()
+        && (!table_exists(connection, "tags")? || !table_exists(connection, "entry_tags")?)
+    {
+        return Ok(());
+    }
+    if !table_exists(connection, "tags")? || !table_exists(connection, "entry_tags")? {
+        return Err(anyhow!(
+            "The active database does not contain tags and entry_tags tables."
+        ));
+    }
+
+    connection.execute("DELETE FROM entry_tags WHERE entry_id = ?1", [entry_id])?;
+    for tag in tags {
+        let tag_id = connection
+            .query_row(
+                "SELECT id FROM tags WHERE lower(name) = lower(?1) LIMIT 1",
+                [tag],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?;
+        let tag_id = match tag_id {
+            Some(id) => id,
+            None => {
+                connection.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", [tag])?;
+                connection.query_row("SELECT id FROM tags WHERE name = ?1", [tag], |row| {
+                    row.get::<_, i64>(0)
+                })?
+            }
+        };
+        connection.execute(
+            "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?1, ?2)",
+            params![entry_id, tag_id],
+        )?;
+    }
+    connection.execute(
+        "UPDATE entries SET updated_at = ?1 WHERE id = ?2",
+        params![current_updated_at(), entry_id],
+    )?;
+    Ok(())
+}
+
+fn set_entry_continuation(
+    connection: &Connection,
+    child_uuid: &str,
+    parent_identifier: Option<&str>,
+) -> Result<()> {
+    if !table_exists(connection, "entry_continuations")? {
+        if parent_identifier.is_none() {
+            return Ok(());
+        }
+        return Err(anyhow!(
+            "The active database does not contain an entry_continuations table."
+        ));
+    }
+
+    let child_uuid = child_uuid.trim();
+    if child_uuid.is_empty() {
+        return Err(anyhow!("Continuation child UUID is required."));
+    }
+
+    let parent_uuid = match parent_identifier.and_then(|value| normalized_string(Some(value))) {
+        Some(value) => resolve_entry_identity(connection, &value)?.1,
+        None => {
+            connection.execute(
+                "DELETE FROM entry_continuations WHERE child_entry_uuid = ?1",
+                [child_uuid],
+            )?;
+            return Ok(());
+        }
+    };
+
+    if parent_uuid == child_uuid {
+        return Err(anyhow!("An entry cannot continue itself."));
+    }
+    if continuation_would_cycle(connection, child_uuid, &parent_uuid)? {
+        return Err(anyhow!("Continuation would create a thread cycle."));
+    }
+
+    connection.execute(
+        "INSERT INTO entry_continuations (child_entry_uuid, parent_entry_uuid, updated_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(child_entry_uuid)
+         DO UPDATE SET parent_entry_uuid = excluded.parent_entry_uuid,
+                       updated_at = excluded.updated_at",
+        params![child_uuid, parent_uuid, current_history_timestamp()],
+    )?;
+    Ok(())
+}
+
+fn continuation_would_cycle(
+    connection: &Connection,
+    child_uuid: &str,
+    parent_uuid: &str,
+) -> Result<bool> {
+    let mut current = Some(parent_uuid.to_string());
+    let mut seen = HashSet::new();
+
+    while let Some(uuid) = current {
+        if uuid == child_uuid {
+            return Ok(true);
+        }
+        if !seen.insert(uuid.clone()) {
+            return Ok(false);
+        }
+        current = connection
+            .query_row(
+                "SELECT parent_entry_uuid
+                 FROM entry_continuations
+                 WHERE child_entry_uuid = ?1",
+                [uuid],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+    }
+
+    Ok(false)
+}
+
+fn refresh_fts_for_entry(connection: &Connection, entry_id: i64, text_plain: &str) -> Result<()> {
+    if !table_exists(connection, "entries_fts")? {
+        return Ok(());
+    }
+
+    connection.execute(
+        "INSERT OR REPLACE INTO entries_fts(rowid, text) VALUES (?1, ?2)",
+        params![entry_id, text_plain],
+    )?;
+    Ok(())
+}
+
+fn table_exists(connection: &Connection, table_name: &str) -> Result<bool> {
+    Ok(connection
+        .query_row(
+            "SELECT 1
+             FROM sqlite_master
+             WHERE type = 'table' AND name = ?1
+             LIMIT 1",
+            [table_name],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+fn generate_entry_uuid(connection: &Connection) -> Result<String> {
+    let seed = Utc::now()
+        .timestamp_nanos_opt()
+        .unwrap_or_else(|| Utc::now().timestamp_micros() * 1_000) as u64;
+
+    for offset in 0..10_000_u64 {
+        let candidate = format!("entry_{}", base36_8(seed.wrapping_add(offset)));
+        let exists = connection
+            .query_row(
+                "SELECT 1 FROM entries WHERE uuid = ?1 LIMIT 1",
+                [&candidate],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !exists {
+            return Ok(candidate);
+        }
+    }
+
+    Err(anyhow!("Unable to generate a unique entry UUID."))
+}
+
+fn base36_8(mut value: u64) -> String {
+    const ALPHABET: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let mut buffer = [b'0'; 8];
+    for index in (0..8).rev() {
+        buffer[index] = ALPHABET[(value % 36) as usize];
+        value /= 36;
+    }
+    String::from_utf8_lossy(&buffer).to_string()
+}
+
+fn normalize_required_text(value: &str) -> Result<String> {
+    if value.trim().is_empty() {
+        return Err(anyhow!("Entry text is required."));
+    }
+    Ok(value.replace("\r\n", "\n").replace('\r', "\n"))
+}
+
+fn normalize_content_format(value: Option<&str>) -> Result<String> {
+    match normalized_string(value)
+        .unwrap_or_else(|| "markdown".to_string())
+        .to_lowercase()
+        .as_str()
+    {
+        "plain" => Ok("plain".to_string()),
+        "markdown" => Ok("markdown".to_string()),
+        other => Err(anyhow!("Unsupported entry content format: {other}")),
+    }
+}
+
+fn normalize_tags(values: Option<&[String]>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut tags = Vec::new();
+
+    for value in values.unwrap_or_default() {
+        if let Some(tag) = normalized_string(Some(value)) {
+            let tag = tag.to_lowercase();
+            if seen.insert(tag.clone()) {
+                tags.push(tag);
+            }
+        }
+    }
+
+    tags
+}
+
+fn build_text_plain(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn normalized_created_at(value: Option<&str>) -> String {
+    normalized_string(value)
+        .map(|value| value.replace('T', " "))
+        .unwrap_or_else(|| Local::now().format("%Y-%m-%d %H:%M").to_string())
+}
+
+fn current_updated_at() -> String {
+    Local::now().format("%Y-%m-%d %H:%M:%S%.6f").to_string()
+}
+
+fn current_history_timestamp() -> String {
+    Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+fn changed_fields(old_data: &JsonValue, next_data: &JsonValue) -> Vec<String> {
+    [
+        "text",
+        "text_plain",
+        "content_format",
+        "title",
+        "summary",
+        "mood",
+        "tags",
+        "starred",
+        "pinned",
+        "hidden",
+    ]
+    .into_iter()
+    .filter(|field| old_data.get(field) != next_data.get(field))
+    .map(str::to_string)
+    .collect()
+}
+
 fn normalized_string(value: Option<&str>) -> Option<String> {
     value
         .map(str::trim)
@@ -734,6 +1414,7 @@ fn placeholders(count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::NullableStringUpdate;
     use rusqlite::Connection;
 
     #[test]
@@ -838,6 +1519,116 @@ mod tests {
         assert_eq!(entry.unwrap().uuid, "entry_child");
     }
 
+    #[test]
+    fn create_entry_writes_backup_tags_and_continuation() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_fixture_database(temp_dir.path());
+
+        let response = create_entry_for_database(
+            &db_path,
+            EntryCreate {
+                text: "New markdown\n\nentry".to_string(),
+                content_format: Some("markdown".to_string()),
+                title: Some("New entry".to_string()),
+                summary: Some("A safe write".to_string()),
+                mood: Some("proud".to_string()),
+                tags: Some(vec![
+                    "Work".to_string(),
+                    "rust".to_string(),
+                    "work".to_string(),
+                ]),
+                when: Some("2026-02-01T09:30".to_string()),
+                starred: Some(true),
+                pinned: Some(true),
+                continue_from_uuid: Some("entry_child".to_string()),
+            },
+        )
+        .expect("create entry");
+
+        assert!(std::path::PathBuf::from(&response.audit.backup_path).exists());
+        assert_eq!(response.audit.operation, "entry.create");
+        assert_eq!(response.entry.title.as_deref(), Some("New entry"));
+        assert_eq!(response.entry.text_plain, "New markdown entry");
+        assert!(response.entry.starred);
+        assert!(response.entry.pinned);
+        assert_eq!(response.entry.tags.len(), 2);
+        assert_eq!(
+            response
+                .entry
+                .thread
+                .as_ref()
+                .unwrap()
+                .parent_uuid
+                .as_deref(),
+            Some("entry_child")
+        );
+    }
+
+    #[test]
+    fn update_entry_records_history_and_preserves_backup_audit() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_fixture_database(temp_dir.path());
+
+        let response = update_entry_for_database(
+            &db_path,
+            "entry_root",
+            EntryUpdate {
+                text: Some("Changed text".to_string()),
+                content_format: Some("markdown".to_string()),
+                title: NullableStringUpdate::Value("Changed title".to_string()),
+                summary: NullableStringUpdate::Null,
+                mood: NullableStringUpdate::Value("focused".to_string()),
+                tags: Some(vec!["Capsule".to_string(), "Rust".to_string()]),
+                starred: Some(true),
+                ..EntryUpdate::default()
+            },
+        )
+        .expect("update entry");
+
+        assert!(std::path::PathBuf::from(&response.audit.backup_path).exists());
+        assert_eq!(response.entry.title.as_deref(), Some("Changed title"));
+        assert_eq!(response.entry.summary, None);
+        assert_eq!(response.entry.mood.as_deref(), Some("focused"));
+        assert!(response.entry.starred);
+        assert_eq!(
+            response
+                .entry
+                .tags
+                .iter()
+                .map(|tag| tag.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["capsule", "rust"]
+        );
+
+        let history = list_entry_history_for_database(&db_path, "entry_root").expect("history");
+        assert_eq!(history.count, 3);
+        assert!(history
+            .history
+            .iter()
+            .any(|item| item.changed_fields.iter().any(|field| field == "text")));
+        assert!(history
+            .history
+            .iter()
+            .any(|item| item.changed_fields.iter().any(|field| field == "tags")));
+    }
+
+    #[test]
+    fn hide_entry_uses_backup_guard_without_hard_delete() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_fixture_database(temp_dir.path());
+
+        let hidden = backup::with_database_backup_for_database(&db_path, "entry.hide", |path| {
+            set_entry_flag_inner(path, "entry_root", "hidden", true)
+        })
+        .expect("hide entry");
+
+        assert!(hidden.value.hidden);
+        assert!(std::path::PathBuf::from(hidden.audit.backup_path).exists());
+
+        let visible = get_entry_for_database(&db_path, "entry_root").expect("entry");
+        assert!(visible.hidden);
+    }
+
     fn create_fixture_database(path: &Path) -> std::path::PathBuf {
         let db_path = path.join("capsule.db");
         let connection = Connection::open(&db_path).expect("open db");
@@ -882,6 +1673,16 @@ mod tests {
                     thread_root_uuid TEXT PRIMARY KEY,
                     summary TEXT NOT NULL,
                     updated_at TEXT NOT NULL
+                );
+                CREATE TABLE history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    operation_type TEXT NOT NULL,
+                    entry_id INTEGER NOT NULL,
+                    old_data TEXT NOT NULL,
+                    additional_data TEXT,
+                    undone INTEGER DEFAULT 0,
+                    redo_data TEXT
                 );
                 CREATE TABLE plugin_entry_media (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

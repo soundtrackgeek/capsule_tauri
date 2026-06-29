@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
+use serde_json::Value as JsonValue;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -203,4 +204,156 @@ pub struct RandomEntryFilters {
     pub include_hidden: Option<bool>,
     pub tags: Option<Vec<String>>,
     pub moods: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryCreate {
+    pub text: String,
+    pub content_format: Option<String>,
+    pub title: Option<String>,
+    pub summary: Option<String>,
+    pub mood: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub when: Option<String>,
+    pub starred: Option<bool>,
+    pub pinned: Option<bool>,
+    pub continue_from_uuid: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryUpdate {
+    pub text: Option<String>,
+    pub content_format: Option<String>,
+    #[serde(default)]
+    pub title: NullableStringUpdate,
+    #[serde(default)]
+    pub summary: NullableStringUpdate,
+    #[serde(default)]
+    pub mood: NullableStringUpdate,
+    pub tags: Option<Vec<String>>,
+    pub starred: Option<bool>,
+    pub pinned: Option<bool>,
+    pub hidden: Option<bool>,
+    #[serde(default)]
+    pub continue_from_uuid: NullableStringUpdate,
+}
+
+#[derive(Debug, Clone, Default)]
+pub enum NullableStringUpdate {
+    #[default]
+    Missing,
+    Null,
+    Value(String),
+}
+
+impl NullableStringUpdate {
+    pub fn is_present(&self) -> bool {
+        !matches!(self, Self::Missing)
+    }
+
+    pub fn apply_to(&self, current: Option<String>) -> Option<String> {
+        match self {
+            Self::Missing => current,
+            Self::Null => None,
+            Self::Value(value) => Some(value.clone()),
+        }
+    }
+
+    pub fn as_optional_value(&self) -> Option<Option<String>> {
+        match self {
+            Self::Missing => None,
+            Self::Null => Some(None),
+            Self::Value(value) => Some(Some(value.clone())),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for NullableStringUpdate {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct NullableStringVisitor;
+
+        impl<'de> de::Visitor<'de> for NullableStringVisitor {
+            type Value = NullableStringUpdate;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a string, null, or an omitted field")
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(NullableStringUpdate::Null)
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(NullableStringUpdate::Null)
+            }
+
+            fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                String::deserialize(deserializer).map(NullableStringUpdate::Value)
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(NullableStringUpdate::Value(value.to_string()))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(NullableStringUpdate::Value(value))
+            }
+        }
+
+        deserializer.deserialize_option(NullableStringVisitor)
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MutationAudit {
+    pub backup_path: String,
+    pub operation: String,
+    pub completed_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryMutationResponse {
+    pub entry: Entry,
+    pub audit: MutationAudit,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryHistoryItem {
+    pub id: i64,
+    pub timestamp: String,
+    pub operation_type: String,
+    pub old_data: JsonValue,
+    pub changed_fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryHistoryResponse {
+    pub entry_id: i64,
+    pub current: JsonValue,
+    pub history: Vec<EntryHistoryItem>,
+    pub count: usize,
 }

@@ -11,7 +11,8 @@ mod threads;
 
 use models::{
     BackupCreateRequest, BackupCreateResponse, BackupListResponse, DatabaseStatus, Entry,
-    EntryFilters, EntryListResponse, RandomEntryFilters,
+    EntryCreate, EntryFilters, EntryHistoryResponse, EntryListResponse, EntryMutationResponse,
+    EntryUpdate, RandomEntryFilters,
 };
 
 #[tauri::command]
@@ -64,6 +65,81 @@ async fn get_random_entry(filters: Option<RandomEntryFilters>) -> Result<Option<
     .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn create_entry(input: EntryCreate) -> Result<EntryMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || entries::create_entry(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn update_entry(
+    identifier: String,
+    input: EntryUpdate,
+) -> Result<EntryMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || entries::update_entry(identifier, input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn star_entry(identifier: String) -> Result<EntryMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || entries::star_entry(identifier))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn unstar_entry(identifier: String) -> Result<EntryMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || entries::unstar_entry(identifier))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn pin_entry(identifier: String) -> Result<EntryMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || entries::pin_entry(identifier))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn unpin_entry(identifier: String) -> Result<EntryMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || entries::unpin_entry(identifier))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn hide_entry(identifier: String) -> Result<EntryMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || entries::hide_entry(identifier))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn unhide_entry(identifier: String) -> Result<EntryMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || entries::unhide_entry(identifier))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn list_entry_history(identifier: String) -> Result<EntryHistoryResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || entries::list_entry_history(identifier))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -73,7 +149,16 @@ pub fn run() {
             create_backup,
             list_entries,
             get_entry,
-            get_random_entry
+            get_random_entry,
+            create_entry,
+            update_entry,
+            star_entry,
+            unstar_entry,
+            pin_entry,
+            unpin_entry,
+            hide_entry,
+            unhide_entry,
+            list_entry_history
         ])
         .run(tauri::generate_context!())
         .expect("error while running Capsule Tauri app");

@@ -131,3 +131,55 @@ export type RandomEntryFilters = {
   tags?: string[];
   moods?: string[];
 };
+
+export type EntryCreate = {
+  text: string;
+  contentFormat?: "plain" | "markdown";
+  title?: string | null;
+  summary?: string | null;
+  mood?: string | null;
+  tags?: string[];
+  when?: string | null;
+  starred?: boolean;
+  pinned?: boolean;
+  continueFromUuid?: string | null;
+};
+
+export type EntryUpdate = {
+  text?: string;
+  contentFormat?: "plain" | "markdown";
+  title?: string | null;
+  summary?: string | null;
+  mood?: string | null;
+  tags?: string[];
+  starred?: boolean;
+  pinned?: boolean;
+  hidden?: boolean;
+  continueFromUuid?: string | null;
+};
+
+export type MutationAudit = {
+  backupPath: string;
+  operation: string;
+  completedAt: string;
+};
+
+export type EntryMutationResponse = {
+  entry: Entry;
+  audit: MutationAudit;
+};
+
+export type EntryHistoryItem = {
+  id: number;
+  timestamp: string;
+  operationType: "EDIT_TEXT" | "EDIT_MOOD" | "EDIT_TAGS" | string;
+  oldData: Record<string, unknown>;
+  changedFields: string[];
+};
+
+export type EntryHistoryResponse = {
+  entryId: number;
+  current: Record<string, unknown>;
+  history: EntryHistoryItem[];
+  count: number;
+};
