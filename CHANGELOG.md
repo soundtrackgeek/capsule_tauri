@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.4 - 2026-06-29
+
+### Changed
+
+- Changed weather temperature displays to prefer Celsius, falling back to
+  Fahrenheit only when Celsius is unavailable.
+- Bumped the app version to 0.7.4.
+
 ## 0.7.3 - 2026-06-29
 
 ### Changed

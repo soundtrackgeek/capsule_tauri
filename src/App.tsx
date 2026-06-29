@@ -335,6 +335,18 @@ const emptyThreadDraft: ThreadMetadataDraft = {
   summary: "",
 };
 
+function formatWeatherTemperature(location: NonNullable<Entry["location"]>) {
+  if (location.weatherTempC !== null) {
+    return `${location.weatherTempC.toFixed(1)} C`;
+  }
+
+  if (location.weatherTempF !== null) {
+    return `${location.weatherTempF.toFixed(1)} F`;
+  }
+
+  return null;
+}
+
 function App() {
   const [activeView, setActiveView] = useState<ActiveView>("dashboard");
   const [status, setStatus] = useState<DatabaseStatus | null>(null);
@@ -4756,6 +4768,8 @@ function EntryDetail({
     );
   }
 
+  const weatherTemperature = entry.location ? formatWeatherTemperature(entry.location) : null;
+
   return (
     <aside className="detail-panel">
       <div className="entry-detail-heading">
@@ -4840,12 +4854,10 @@ function EntryDetail({
             Location
           </h4>
           <p>{entry.location.placeName ?? `${entry.location.latitude}, ${entry.location.longitude}`}</p>
-          {(entry.location.weatherCondition || entry.location.weatherTempF !== null) && (
+          {(entry.location.weatherCondition || weatherTemperature) && (
             <p>
               {entry.location.weatherCondition ?? "Weather"} /{" "}
-              {entry.location.weatherTempF !== null
-                ? `${entry.location.weatherTempF.toFixed(1)} F`
-                : "No temperature"}
+              {weatherTemperature ?? "No temperature"}
             </p>
           )}
           {(entry.location.weatherHumidity !== null || entry.location.weatherWindKph !== null) && (
@@ -4975,6 +4987,8 @@ function EntryCardContent({ entry }: { entry: Entry }) {
 }
 
 function EntryMeta({ entry }: { entry: Entry }) {
+  const weatherTemperature = entry.location ? formatWeatherTemperature(entry.location) : null;
+
   return (
     <div className="entry-meta">
       {entry.moodInfo.label && <span className="mood-chip">{entry.moodInfo.label}</span>}
@@ -4992,8 +5006,8 @@ function EntryMeta({ entry }: { entry: Entry }) {
       )}
       {entry.location?.weatherCondition && (
         <span className="tag-chip">
-          {entry.location.weatherTempF !== null
-            ? `${entry.location.weatherCondition}, ${entry.location.weatherTempF.toFixed(1)} F`
+          {weatherTemperature
+            ? `${entry.location.weatherCondition}, ${weatherTemperature}`
             : entry.location.weatherCondition}
         </span>
       )}
