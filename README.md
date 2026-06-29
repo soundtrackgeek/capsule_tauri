@@ -3,8 +3,8 @@
 Capsule Tauri is a local-first desktop journal for Capsule built with Tauri 2,
 React, TypeScript, Vite, Rust, and SQLite.
 
-Phase 4 provides backup restore, settings, and data tools over the active
-Capsule database:
+Phase 5 provides images, location-aware browsing, analytics, and a visual cover
+wall over the active Capsule database:
 
 - Tauri 2 desktop configuration.
 - React + TypeScript + Vite frontend.
@@ -12,7 +12,8 @@ Capsule database:
 - Read-only database status for the active Capsule database.
 - Dashboard counts for total entries, total tags, current year, and current month.
 - Recent entries, pinned entries, and random entry panels.
-- Entries list with text, tag, mood, date, image, hidden, and sort filters.
+- Entries list with text, tag, mood, location, date, image, hidden, and sort
+  filters.
 - Entry detail view with full text, tags, mood, location, attachment count, and
   thread metadata when those tables are available.
 - Backup-guarded entry creation and editing.
@@ -24,7 +25,8 @@ Capsule database:
 - Keyword search using `entries_fts` when available, with a compatibility
   fallback to entry text matching.
 - Structured search tokens for `tag:`, `mood:`, `before:`, `after:`, and
-  `NOT tag:` queries, plus include/exclude tag and mood filters.
+  `NOT tag:` queries, plus include/exclude tag and mood filters and a location
+  text filter.
 - Search results with the same star, pin, edit, continue, and hide/unhide
   actions used by the Entries view.
 - Thread groups built from Capsule continuation links with ordered entries,
@@ -45,14 +47,30 @@ Capsule database:
 - Template and prompt library management for custom rows, with built-in rows
   limited to enable/disable actions.
 - Markdown and JSON exports for selected entries and current search result sets.
+- Image attachment browsing with thumbnail/full-size rendering from the local
+  image media root.
+- Backup-guarded image upload from local file paths, entry attachment, removal,
+  and sync tombstone recording.
+- Analytics dashboard with overview counts, monthly trend, tag/mood/location
+  breakdowns, weather breakdowns, top words, and streaks.
+- Writing Calendar heatmap for active days, words, images, and mood metadata.
+- Cover Wall view backed by ignored local cover files under `local-assets/covers`
+  with generated thumbnails under `local-assets/cover_thumbnails`.
 - Rust tests for backup naming, database status inspection, read-only entry
   queries, backup-guarded mutations, entry history, search, thread operations,
-  restore, tag/mood tools, library CRUD, and export generation.
+  restore, tag/mood tools, library CRUD, export generation, image operations,
+  analytics, calendar aggregation, and cover indexing.
 
 The database resolver checks an explicit `CAPSULE_DB_PATH` first. When that is
 not set, it prefers the MVP production database at
 `C:\Users\jtill\.capsule\capsule.db`, then falls back to
 `%USERPROFILE%\.capsule\capsule.db` and finally `CAPSULE_HOME\capsule.db`.
+
+Image storage resolves `CAPSULE_IMAGES_MEDIA_ROOT` first, then
+`images.media_root` from Capsule config, then the default
+`C:\Users\jtill\OneDrive\_capsule\images`. Cover wall assets are local-only and
+ignored by Git under `local-assets/`; set `CAPSULE_COVERS_ROOT` to point at a
+different cover folder.
 
 ## Commands
 
@@ -92,6 +110,6 @@ Restore is constrained to Capsule-compatible backup files in the active database
 backup directory. Before restore replaces the live database, the app creates and
 verifies a fresh safety backup of the current database.
 
-Hard delete is intentionally not exposed in Phase 4. Entries can be hidden and
+Hard delete is intentionally not exposed in Phase 5. Entries can be hidden and
 unhidden safely; true delete remains reserved until the legacy resequencing
 behavior is matched and tested.

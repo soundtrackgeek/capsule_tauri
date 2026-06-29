@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.0 - 2026-06-29
+
+### Added
+
+- Added image attachment commands for listing, data-url rendering, upload,
+  attach, removal, and sync tombstone recording.
+- Added Images view with entry image browsing, thumbnail/full-size previews, and
+  guarded local-path attachment flow.
+- Added location filters to Entries and Search.
+- Added analytics commands and dashboard for counts, streaks, monthly trend,
+  tag/mood/location/weather breakdowns, and top words.
+- Added Writing Calendar command and heatmap view.
+- Added Cover Wall command and UI backed by ignored local cover assets.
+- Added Rust tests for image mutations, analytics, calendar aggregation, and
+  cover indexing.
+
+### Changed
+
+- Bumped the app version to 0.6.0.
+- Updated the app shell from Phase 4 backup/data tools to Phase 5 images,
+  location, analytics, and cover browsing.
+- Allowed `data:` images in the Tauri content security policy for local
+  thumbnails and full-size previews.
+
 ## 0.5.0 - 2026-06-29
 
 ### Added

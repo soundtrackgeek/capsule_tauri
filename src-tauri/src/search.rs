@@ -85,6 +85,7 @@ pub(crate) fn search_entries_for_database(
 
 fn parse_search_request(input: SearchRequest) -> ParsedSearch {
     let mut filters = EntryFilters {
+        location: normalize_string(input.location.as_deref()),
         since: normalize_string(input.since.as_deref()),
         until: normalize_string(input.until.as_deref()),
         tags: normalize_vec(input.tags),
@@ -350,6 +351,23 @@ fn build_sql_filter(filters: &EntryFilters, tables: &HashSet<String>) -> SqlFilt
         true,
     );
 
+    if let Some(location) = normalize_string(filters.location.as_deref()) {
+        if tables.contains("plugin_entry_locations") {
+            conditions.push(
+                "EXISTS (
+                    SELECT 1
+                    FROM plugin_entry_locations pel
+                    WHERE pel.entry_uuid = e.uuid
+                      AND lower(COALESCE(pel.place_name, '')) LIKE ?
+                )"
+                .to_string(),
+            );
+            params.push(Value::Text(format!("%{}%", location.to_lowercase())));
+        } else {
+            conditions.push("1 = 0".to_string());
+        }
+    }
+
     if let Some(has_images) = filters.has_images {
         if tables.contains("plugin_entry_media") {
             let prefix = if has_images { "" } else { "NOT " };
@@ -504,6 +522,7 @@ mod tests {
         SearchRequest {
             query: String::new(),
             mode: Some(SearchMode::Keyword),
+            location: None,
             since: None,
             until: None,
             tags: None,

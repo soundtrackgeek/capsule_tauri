@@ -10,17 +10,19 @@ mod stats;
 mod threads;
 
 use models::{
-    BackupCreateRequest, BackupCreateResponse, BackupListResponse, BackupRestorePreview,
-    BackupRestorePreviewRequest, BackupRestoreRequest, BackupRestoreResponse,
-    BulkThreadDetachRequest, BulkThreadLinkRequest, CapsuleConfigResponse, ConfigMutationResponse,
-    DatabaseStatus, Entry, EntryCreate, EntryFilters, EntryHistoryResponse, EntryListResponse,
-    EntryMutationResponse, EntryUpdate, ExportEntriesRequest, ExportEntriesResponse,
-    LibraryListResponse, LibraryPromptInput, LibraryPromptMutationResponse, LibraryPromptUpdate,
-    LibraryTemplateInput, LibraryTemplateMutationResponse, LibraryTemplateUpdate,
-    MoodCatalogResponse, MoodDeleteRequest, MoodMutationResponse, MoodRenameRequest,
-    RandomEntryFilters, SearchRequest, SearchResponse, TagCatalogResponse, TagDeleteRequest,
-    TagMergeRequest, TagMutationResponse, TagRenameRequest, ThreadListResponse,
-    ThreadMetadataUpdate, ThreadMutationResponse,
+    AnalyticsPeriodRequest, AnalyticsResponse, BackupCreateRequest, BackupCreateResponse,
+    BackupListResponse, BackupRestorePreview, BackupRestorePreviewRequest, BackupRestoreRequest,
+    BackupRestoreResponse, BulkThreadDetachRequest, BulkThreadLinkRequest, CapsuleConfigResponse,
+    ConfigMutationResponse, CoverWallRequest, CoverWallResponse, DatabaseStatus, Entry,
+    EntryCreate, EntryFilters, EntryHistoryResponse, EntryListResponse, EntryMutationResponse,
+    EntryUpdate, ExportEntriesRequest, ExportEntriesResponse, ImageAttachRequest,
+    ImageEntriesListResponse, ImageEntryListResponse, ImageMutationResponse, ImageUploadResponse,
+    ImageVariant, LibraryListResponse, LibraryPromptInput, LibraryPromptMutationResponse,
+    LibraryPromptUpdate, LibraryTemplateInput, LibraryTemplateMutationResponse,
+    LibraryTemplateUpdate, MoodCatalogResponse, MoodDeleteRequest, MoodMutationResponse,
+    MoodRenameRequest, RandomEntryFilters, SearchRequest, SearchResponse, TagCatalogResponse,
+    TagDeleteRequest, TagMergeRequest, TagMutationResponse, TagRenameRequest, ThreadListResponse,
+    ThreadMetadataUpdate, ThreadMutationResponse, WritingCalendarResponse,
 };
 
 #[tauri::command]
@@ -175,8 +177,91 @@ async fn list_entry_history(identifier: String) -> Result<EntryHistoryResponse, 
 }
 
 #[tauri::command]
+async fn list_entry_images(identifier: String) -> Result<ImageEntryListResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || images::list_entry_images(identifier))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn list_images_for_entries(uuids: Vec<String>) -> Result<ImageEntriesListResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || images::list_images_for_entries(uuids))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_image_data_url(attachment_id: i64, variant: ImageVariant) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || images::get_image_data_url(attachment_id, variant))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn upload_image(file_path: String) -> Result<ImageUploadResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || images::upload_image(file_path))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn attach_image(input: ImageAttachRequest) -> Result<ImageMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || images::attach_image(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn remove_image(
+    attachment_id: i64,
+    identifier: Option<String>,
+) -> Result<ImageMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || images::remove_image(attachment_id, identifier))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn search_entries(input: SearchRequest) -> Result<SearchResponse, String> {
     tauri::async_runtime::spawn_blocking(move || search::search_entries(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_analytics(input: Option<AnalyticsPeriodRequest>) -> Result<AnalyticsResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || stats::get_analytics(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_writing_calendar(year: Option<i32>) -> Result<WritingCalendarResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || stats::get_writing_calendar(year))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn list_cover_wall(input: Option<CoverWallRequest>) -> Result<CoverWallResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || images::list_cover_wall(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_cover_data_url(filename: String, variant: ImageVariant) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || images::get_cover_data_url(filename, variant))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())
@@ -418,7 +503,17 @@ pub fn run() {
             hide_entry,
             unhide_entry,
             list_entry_history,
+            list_entry_images,
+            list_images_for_entries,
+            get_image_data_url,
+            upload_image,
+            attach_image,
+            remove_image,
             search_entries,
+            get_analytics,
+            get_writing_calendar,
+            list_cover_wall,
+            get_cover_data_url,
             list_threads,
             update_thread_title,
             update_thread_metadata,

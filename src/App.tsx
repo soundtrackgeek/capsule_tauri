@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Archive,
+  BarChart3,
   BookOpen,
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
   CheckCircle2,
   Clock3,
+  Cloud,
   Database,
   Download,
   Edit3,
   Eye,
   EyeOff,
+  FileImage,
   FileArchive,
   FileText,
   Filter,
@@ -17,10 +23,12 @@ import {
   History,
   HardDrive,
   Image as ImageIcon,
+  Images,
   Info,
   Link2,
   MapPin,
   Maximize2,
+  Paperclip,
   Pin,
   PinOff,
   Plus,
@@ -36,9 +44,11 @@ import {
   TriangleAlert,
   Trash2,
   Unlink2,
+  Upload,
   X,
 } from "lucide-react";
 import {
+  attachImage,
   bulkDetachThreads,
   createPrompt,
   createEntry,
@@ -51,12 +61,19 @@ import {
   deleteTemplate,
   disbandThread,
   exportEntries,
+  getAnalytics,
   getCapsuleConfig,
+  getCoverDataUrl,
   getDatabaseStatus,
   getEntry,
+  getImageDataUrl,
   getRandomEntry,
+  getWritingCalendar,
   hideEntry,
+  listCoverWall,
   listEntryHistory,
+  listEntryImages,
+  listImagesForEntries,
   listBackups,
   listEntries,
   listLibraryItems,
@@ -69,6 +86,7 @@ import {
   pinEntry,
   renameMood,
   renameTag,
+  removeImage,
   restoreBackup,
   searchEntries,
   setCapsuleConfigValue,
@@ -80,6 +98,7 @@ import {
   updateEntry,
   updatePrompt,
   updateTemplate,
+  uploadImage,
 } from "./backend";
 import { StatusPill } from "./components/StatusPill";
 import { formatBytes, formatDateTime } from "./lib/format";
@@ -87,6 +106,10 @@ import type {
   BackupInfo,
   BackupRestorePreview,
   CapsuleConfigResponse,
+  AnalyticsPeriodRequest,
+  AnalyticsResponse,
+  CoverWallRequest,
+  CoverWallResponse,
   DatabaseStatus,
   Entry,
   EntryCreate,
@@ -96,6 +119,11 @@ import type {
   EntryMutationResponse,
   EntryUpdate,
   ExportFormat,
+  EntryCover,
+  ImageAttachment,
+  ImageEntryListResponse,
+  ImageMutationResponse,
+  ImageVariant,
   LibraryListResponse,
   MoodCatalogResponse,
   SearchRequest,
@@ -104,6 +132,7 @@ import type {
   ThreadGroup,
   ThreadListResponse,
   ThreadMutationResponse,
+  WritingCalendarResponse,
 } from "./types";
 import "./styles.css";
 
@@ -112,6 +141,10 @@ type ActiveView =
   | "entries"
   | "threads"
   | "search"
+  | "images"
+  | "analytics"
+  | "calendar"
+  | "covers"
   | "composer"
   | "writer"
   | "backups"
@@ -122,6 +155,7 @@ type EntryFilterForm = {
   text: string;
   tag: string;
   mood: string;
+  location: string;
   since: string;
   until: string;
   includeHidden: boolean;
@@ -136,6 +170,7 @@ type SearchForm = {
   excludeTag: string;
   mood: string;
   excludeMood: string;
+  location: string;
   since: string;
   until: string;
   includeHidden: boolean;
@@ -180,11 +215,34 @@ type UiSettings = {
   sidebarMode: "comfortable" | "compact";
 };
 
+type ImageUploadDraft = {
+  path: string;
+  caption: string;
+  altText: string;
+};
+
+type PeriodForm = {
+  since: string;
+  until: string;
+};
+
+type CoverWallFilters = {
+  coverType: string;
+  tag: string;
+  mood: string;
+  since: string;
+  until: string;
+};
+
 const navItems: Array<{ id: ActiveView; label: string; icon: ReactNode }> = [
   { id: "dashboard", label: "Dashboard", icon: <Database size={18} /> },
   { id: "entries", label: "Entries", icon: <BookOpen size={18} /> },
   { id: "threads", label: "Threads", icon: <GitBranch size={18} /> },
   { id: "search", label: "Search", icon: <Search size={18} /> },
+  { id: "images", label: "Images", icon: <Paperclip size={18} /> },
+  { id: "analytics", label: "Analytics", icon: <BarChart3 size={18} /> },
+  { id: "calendar", label: "Calendar", icon: <CalendarDays size={18} /> },
+  { id: "covers", label: "Cover Wall", icon: <Images size={18} /> },
   { id: "composer", label: "New Entry", icon: <Plus size={18} /> },
   { id: "writer", label: "Writer", icon: <Sparkles size={18} /> },
   { id: "backups", label: "Backups", icon: <Archive size={18} /> },
@@ -224,6 +282,7 @@ const defaultEntryFilters: EntryFilterForm = {
   text: "",
   tag: "",
   mood: "",
+  location: "",
   since: "",
   until: "",
   includeHidden: false,
@@ -238,6 +297,7 @@ const defaultSearchForm: SearchForm = {
   excludeTag: "",
   mood: "",
   excludeMood: "",
+  location: "",
   since: "",
   until: "",
   includeHidden: false,
@@ -269,6 +329,29 @@ function App() {
   const [searchForm, setSearchForm] = useState<SearchForm>(defaultSearchForm);
   const [searchLimit, setSearchLimit] = useState(40);
   const [searchResponse, setSearchResponse] = useState<SearchResponse | null>(null);
+  const [imageEntryResponse, setImageEntryResponse] = useState<EntryListResponse | null>(null);
+  const [imageLimit, setImageLimit] = useState(40);
+  const [selectedImageEntry, setSelectedImageEntry] = useState<Entry | null>(null);
+  const [entryImages, setEntryImages] = useState<ImageEntryListResponse | null>(null);
+  const [imageUploadDraft, setImageUploadDraft] = useState<ImageUploadDraft>({
+    path: "",
+    caption: "",
+    altText: "",
+  });
+  const [analyticsPeriod, setAnalyticsPeriod] = useState<PeriodForm>({ since: "", until: "" });
+  const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
+  const [writingCalendarYear, setWritingCalendarYear] = useState(new Date().getFullYear());
+  const [writingCalendar, setWritingCalendar] = useState<WritingCalendarResponse | null>(null);
+  const [coverFilters, setCoverFilters] = useState<CoverWallFilters>({
+    coverType: "",
+    tag: "",
+    mood: "",
+    since: "",
+    until: "",
+  });
+  const [coverLimit, setCoverLimit] = useState(60);
+  const [coverWall, setCoverWall] = useState<CoverWallResponse | null>(null);
+  const [selectedCover, setSelectedCover] = useState<EntryCover | null>(null);
   const [threadResponse, setThreadResponse] = useState<ThreadListResponse | null>(null);
   const [selectedThreadRoot, setSelectedThreadRoot] = useState<string | null>(null);
   const [threadDraft, setThreadDraft] = useState<ThreadMetadataDraft>(emptyThreadDraft);
@@ -288,6 +371,12 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [entriesLoading, setEntriesLoading] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [imagesLoading, setImagesLoading] = useState(false);
+  const [imageDetailLoading, setImageDetailLoading] = useState(false);
+  const [imageMutating, setImageMutating] = useState(false);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [coverLoading, setCoverLoading] = useState(false);
   const [threadsLoading, setThreadsLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [creatingBackup, setCreatingBackup] = useState(false);
@@ -314,6 +403,7 @@ function App() {
     const moods = splitFilter(entryFilters.mood);
     return {
       text: entryFilters.text || undefined,
+      location: entryFilters.location || undefined,
       tags: tags.length ? tags : undefined,
       moods: moods.length ? moods : undefined,
       since: entryFilters.since || undefined,
@@ -338,6 +428,7 @@ function App() {
       excludeTags: excludeTags.length ? excludeTags : undefined,
       moods: moods.length ? moods : undefined,
       excludeMoods: excludeMoods.length ? excludeMoods : undefined,
+      location: searchForm.location || undefined,
       since: searchForm.since || undefined,
       until: searchForm.until || undefined,
       includeHidden: searchForm.includeHidden,
@@ -347,6 +438,28 @@ function App() {
       sort: searchForm.sort,
     };
   }, [searchForm, searchLimit]);
+
+  const builtAnalyticsPeriod = useMemo<AnalyticsPeriodRequest>(
+    () => ({
+      since: analyticsPeriod.since || undefined,
+      until: analyticsPeriod.until || undefined,
+    }),
+    [analyticsPeriod],
+  );
+
+  const builtCoverRequest = useMemo<CoverWallRequest>(() => {
+    const tags = splitFilter(coverFilters.tag);
+    const moods = splitFilter(coverFilters.mood);
+    return {
+      type: coverFilters.coverType || undefined,
+      since: coverFilters.since || undefined,
+      until: coverFilters.until || undefined,
+      tags: tags.length ? tags : undefined,
+      moods: moods.length ? moods : undefined,
+      limit: coverLimit,
+      offset: 0,
+    };
+  }, [coverFilters, coverLimit]);
 
   const selectedThread = useMemo(
     () => threadResponse?.threads.find((thread) => thread.rootUuid === selectedThreadRoot) ?? null,
@@ -401,6 +514,113 @@ function App() {
       setSearchLoading(false);
     }
   }, [builtSearchRequest, status?.readable]);
+
+  const loadImageEntries = useCallback(async () => {
+    if (!status?.readable) {
+      setImageEntryResponse(null);
+      setSelectedImageEntry(null);
+      setEntryImages(null);
+      return;
+    }
+
+    setImagesLoading(true);
+    setError(null);
+    try {
+      const response = await listEntries({ hasImages: true, limit: imageLimit, sort: "desc" });
+      await listImagesForEntries(response.entries.map((entry) => entry.uuid));
+      setImageEntryResponse(response);
+      const nextSelected =
+        response.entries.find((entry) => entry.uuid === selectedImageEntry?.uuid) ??
+        response.entries[0] ??
+        null;
+      setSelectedImageEntry(nextSelected);
+      if (nextSelected) {
+        setEntryImages(await listEntryImages(nextSelected.uuid));
+      } else {
+        setEntryImages(null);
+      }
+    } catch (imageError) {
+      setError(imageError instanceof Error ? imageError.message : "Unable to load images");
+    } finally {
+      setImagesLoading(false);
+    }
+  }, [imageLimit, selectedImageEntry?.uuid, status?.readable]);
+
+  const loadEntryImages = useCallback(async (entry: Entry) => {
+    setSelectedImageEntry(entry);
+    setImageDetailLoading(true);
+    setError(null);
+    try {
+      setEntryImages(await listEntryImages(entry.uuid));
+    } catch (imageError) {
+      setError(imageError instanceof Error ? imageError.message : "Unable to load entry images");
+    } finally {
+      setImageDetailLoading(false);
+    }
+  }, []);
+
+  const loadAnalytics = useCallback(async () => {
+    if (!status?.readable) {
+      setAnalytics(null);
+      return;
+    }
+
+    setAnalyticsLoading(true);
+    setError(null);
+    try {
+      setAnalytics(await getAnalytics(builtAnalyticsPeriod));
+    } catch (analyticsError) {
+      setError(
+        analyticsError instanceof Error ? analyticsError.message : "Unable to load analytics",
+      );
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }, [builtAnalyticsPeriod, status?.readable]);
+
+  const loadWritingCalendar = useCallback(async () => {
+    if (!status?.readable) {
+      setWritingCalendar(null);
+      return;
+    }
+
+    setCalendarLoading(true);
+    setError(null);
+    try {
+      setWritingCalendar(await getWritingCalendar(writingCalendarYear));
+    } catch (calendarError) {
+      setError(
+        calendarError instanceof Error ? calendarError.message : "Unable to load writing calendar",
+      );
+    } finally {
+      setCalendarLoading(false);
+    }
+  }, [status?.readable, writingCalendarYear]);
+
+  const loadCoverWall = useCallback(async () => {
+    if (!status?.readable) {
+      setCoverWall(null);
+      setSelectedCover(null);
+      return;
+    }
+
+    setCoverLoading(true);
+    setError(null);
+    try {
+      const response = await listCoverWall(builtCoverRequest);
+      setCoverWall(response);
+      setSelectedCover((current) => {
+        if (current && response.covers.some((cover) => cover.filename === current.filename)) {
+          return current;
+        }
+        return response.covers[0] ?? null;
+      });
+    } catch (coverError) {
+      setError(coverError instanceof Error ? coverError.message : "Unable to load cover wall");
+    } finally {
+      setCoverLoading(false);
+    }
+  }, [builtCoverRequest, status?.readable]);
 
   const loadThreads = useCallback(async () => {
     if (!status?.readable) {
@@ -551,6 +771,30 @@ function App() {
       void loadSearchResults();
     }
   }, [activeView, loadSearchResults]);
+
+  useEffect(() => {
+    if (activeView === "images") {
+      void loadImageEntries();
+    }
+  }, [activeView, loadImageEntries]);
+
+  useEffect(() => {
+    if (activeView === "analytics") {
+      void loadAnalytics();
+    }
+  }, [activeView, loadAnalytics]);
+
+  useEffect(() => {
+    if (activeView === "calendar") {
+      void loadWritingCalendar();
+    }
+  }, [activeView, loadWritingCalendar]);
+
+  useEffect(() => {
+    if (activeView === "covers") {
+      void loadCoverWall();
+    }
+  }, [activeView, loadCoverWall]);
 
   useEffect(() => {
     if (activeView === "threads") {
@@ -761,9 +1005,27 @@ function App() {
         await loadSearchResults();
       } else if (activeView === "threads") {
         await loadThreads();
+      } else if (activeView === "images") {
+        await loadImageEntries();
+      } else if (activeView === "analytics") {
+        await loadAnalytics();
+      } else if (activeView === "calendar") {
+        await loadWritingCalendar();
+      } else if (activeView === "covers") {
+        await loadCoverWall();
       }
     },
-    [activeView, loadEntryList, loadSearchResults, loadThreads, refresh],
+    [
+      activeView,
+      loadAnalytics,
+      loadCoverWall,
+      loadEntryList,
+      loadImageEntries,
+      loadSearchResults,
+      loadThreads,
+      loadWritingCalendar,
+      refresh,
+    ],
   );
 
   const handleSaveEntry = useCallback(async () => {
@@ -929,6 +1191,91 @@ function App() {
     [applyThreadMutationResponse],
   );
 
+  const applyImageMutationResponse = useCallback(
+    async (response: ImageMutationResponse) => {
+      setEntryImages({
+        entryUuid: response.entryUuid,
+        images: response.images,
+        warnings: [],
+      });
+      await refresh();
+      await loadImageEntries();
+      if (activeView === "entries") {
+        await loadEntryList();
+      } else if (activeView === "search") {
+        await loadSearchResults();
+      } else if (activeView === "analytics") {
+        await loadAnalytics();
+      } else if (activeView === "calendar") {
+        await loadWritingCalendar();
+      }
+    },
+    [
+      activeView,
+      loadAnalytics,
+      loadEntryList,
+      loadImageEntries,
+      loadSearchResults,
+      loadWritingCalendar,
+      refresh,
+    ],
+  );
+
+  const handleUploadAttachImage = useCallback(async () => {
+    if (!selectedImageEntry) {
+      setError("Select an entry before attaching an image.");
+      return;
+    }
+    if (!imageUploadDraft.path.trim()) {
+      setError("Enter a local image path.");
+      return;
+    }
+
+    setImageMutating(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const upload = await uploadImage(imageUploadDraft.path.trim());
+      const response = await attachImage({
+        identifier: selectedImageEntry.uuid,
+        mediaId: upload.asset.id,
+        caption: nullableFromText(imageUploadDraft.caption),
+        altText: nullableFromText(imageUploadDraft.altText),
+      });
+      setImageUploadDraft({ path: "", caption: "", altText: "" });
+      setNotice(
+        `Attached image. Upload backup: ${upload.audit.backupPath}; attach backup: ${response.audit.backupPath}`,
+      );
+      await applyImageMutationResponse(response);
+    } catch (imageError) {
+      setError(imageError instanceof Error ? imageError.message : "Unable to attach image");
+    } finally {
+      setImageMutating(false);
+    }
+  }, [applyImageMutationResponse, imageUploadDraft, selectedImageEntry]);
+
+  const handleRemoveImage = useCallback(
+    async (attachment: ImageAttachment) => {
+      if (!selectedImageEntry || !window.confirm("Remove this image attachment from the entry?")) {
+        return;
+      }
+
+      setImageMutating(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const response = await removeImage(attachment.attachmentId, selectedImageEntry.uuid);
+        setNotice(`Removed image with backup: ${response.audit.backupPath}`);
+        await applyImageMutationResponse(response);
+      } catch (imageError) {
+        setError(imageError instanceof Error ? imageError.message : "Unable to remove image");
+      } finally {
+        setImageMutating(false);
+      }
+    },
+    [applyImageMutationResponse, selectedImageEntry],
+  );
+
   const handleLoadHistory = useCallback(async (entry: Entry) => {
     setHistoryLoading(true);
     setError(null);
@@ -972,6 +1319,10 @@ function App() {
     entries: "Entries",
     threads: "Threads",
     search: "Search",
+    images: "Images",
+    analytics: "Analytics",
+    calendar: "Writing Calendar",
+    covers: "Cover Wall",
     composer: composerMode === "edit" ? "Edit Entry" : "New Entry",
     writer: "Writer Mode",
     backups: "Backups",
@@ -1039,7 +1390,7 @@ function App() {
       <main className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Phase 4</p>
+            <p className="eyebrow">Phase 5</p>
             <h2>{title}</h2>
           </div>
 
@@ -1177,6 +1528,64 @@ function App() {
             setSearchForm={(next) => {
               setSearchLimit(40);
               setSearchForm(next);
+            }}
+            status={status}
+          />
+        )}
+
+        {activeView === "images" && (
+          <ImagesView
+            detailLoading={imageDetailLoading}
+            draft={imageUploadDraft}
+            entryImages={entryImages}
+            entryResponse={imageEntryResponse}
+            loading={imagesLoading}
+            mutating={imageMutating}
+            onAttach={handleUploadAttachImage}
+            onChangeDraft={setImageUploadDraft}
+            onLoadMore={() => setImageLimit((current) => current + 40)}
+            onRemoveImage={handleRemoveImage}
+            onSelectEntry={loadEntryImages}
+            selectedEntry={selectedImageEntry}
+            status={status}
+          />
+        )}
+
+        {activeView === "analytics" && (
+          <AnalyticsView
+            analytics={analytics}
+            loading={analyticsLoading}
+            onRefresh={loadAnalytics}
+            period={analyticsPeriod}
+            setPeriod={setAnalyticsPeriod}
+            status={status}
+          />
+        )}
+
+        {activeView === "calendar" && (
+          <WritingCalendarView
+            calendar={writingCalendar}
+            loading={calendarLoading}
+            onRefresh={loadWritingCalendar}
+            setYear={setWritingCalendarYear}
+            status={status}
+            year={writingCalendarYear}
+          />
+        )}
+
+        {activeView === "covers" && (
+          <CoverWallView
+            coverWall={coverWall}
+            filters={coverFilters}
+            limit={coverLimit}
+            loading={coverLoading}
+            onLoadMore={() => setCoverLimit((current) => current + 60)}
+            onRefresh={loadCoverWall}
+            onSelectCover={setSelectedCover}
+            selectedCover={selectedCover}
+            setFilters={(next) => {
+              setCoverLimit(60);
+              setCoverFilters(next);
             }}
             status={status}
           />
@@ -1445,6 +1854,15 @@ function EntriesView({
             value={entryFilters.mood}
           />
         </label>
+        <label className="field">
+          <span>Location</span>
+          <input
+            onChange={(event) => setEntryFilters({ ...entryFilters, location: event.target.value })}
+            placeholder="Oslo, trail, rain"
+            type="text"
+            value={entryFilters.location}
+          />
+        </label>
         <div className="field-grid">
           <label className="field">
             <span>Since</span>
@@ -1683,6 +2101,15 @@ function SearchView({
             />
           </label>
         </div>
+        <label className="field">
+          <span>Location</span>
+          <input
+            onChange={(event) => setSearchForm({ ...searchForm, location: event.target.value })}
+            placeholder="Oslo, cafe, sunny"
+            type="text"
+            value={searchForm.location}
+          />
+        </label>
         <div className="field-grid">
           <label className="field">
             <span>After</span>
@@ -1822,6 +2249,615 @@ function SearchView({
         onExport={onExportEntry}
         onLoadHistory={onLoadHistory}
       />
+    </section>
+  );
+}
+
+type ImagesViewProps = {
+  status: DatabaseStatus | null;
+  entryResponse: EntryListResponse | null;
+  selectedEntry: Entry | null;
+  entryImages: ImageEntryListResponse | null;
+  draft: ImageUploadDraft;
+  loading: boolean;
+  detailLoading: boolean;
+  mutating: boolean;
+  onSelectEntry: (entry: Entry) => void;
+  onLoadMore: () => void;
+  onChangeDraft: (next: ImageUploadDraft) => void;
+  onAttach: () => void;
+  onRemoveImage: (attachment: ImageAttachment) => void;
+};
+
+function ImagesView({
+  status,
+  entryResponse,
+  selectedEntry,
+  entryImages,
+  draft,
+  loading,
+  detailLoading,
+  mutating,
+  onSelectEntry,
+  onLoadMore,
+  onChangeDraft,
+  onAttach,
+  onRemoveImage,
+}: ImagesViewProps) {
+  const [expandedImage, setExpandedImage] = useState<ImageAttachment | null>(null);
+
+  if (status && (!status.dbExists || !status.readable)) {
+    return (
+      <section className="state-panel">
+        <TriangleAlert size={22} />
+        <h3>Images are not available</h3>
+        <p>{status.security.message ?? "Open Settings to confirm the active database path."}</p>
+        <code>{status.dbPath}</code>
+      </section>
+    );
+  }
+
+  const entries = entryResponse?.entries ?? [];
+  const images = entryImages?.images ?? [];
+
+  return (
+    <section className="images-workspace" aria-label="Images">
+      <aside className="filters-panel">
+        <div className="panel-title">
+          <FileImage size={18} />
+          <h3>Image Entries</h3>
+        </div>
+        <div className="image-entry-list">
+          {loading && <SkeletonList compact />}
+          {!loading && entries.length === 0 && (
+            <div className="empty-state">No image attachments found.</div>
+          )}
+          {!loading &&
+            entries.map((entry) => (
+              <button
+                className={
+                  selectedEntry?.uuid === entry.uuid
+                    ? "entry-card entry-card--active"
+                    : "entry-card"
+                }
+                key={entry.uuid}
+                onClick={() => onSelectEntry(entry)}
+                type="button"
+              >
+                <EntryCardContent entry={entry} />
+              </button>
+            ))}
+        </div>
+        {entryResponse && entryResponse.entries.length < entryResponse.total && (
+          <button className="secondary-button secondary-button--full" onClick={onLoadMore} type="button">
+            Load more
+          </button>
+        )}
+      </aside>
+
+      <div className="media-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Attachments</p>
+            <h3>
+              {selectedEntry
+                ? selectedEntry.title || selectedEntry.textPlain.slice(0, 72) || selectedEntry.uuid
+                : "Select an entry"}
+            </h3>
+          </div>
+          <StatusPill tone="neutral">{detailLoading ? "Loading" : `${images.length} images`}</StatusPill>
+        </div>
+
+        {selectedEntry ? (
+          <>
+            <div className="upload-strip">
+              <label className="field field--wide">
+                <span>Local image path</span>
+                <input
+                  onChange={(event) => onChangeDraft({ ...draft, path: event.target.value })}
+                  placeholder="C:\\Users\\jtill\\OneDrive\\_capsule\\images\\photo.jpg"
+                  value={draft.path}
+                />
+              </label>
+              <label className="field">
+                <span>Caption</span>
+                <input
+                  onChange={(event) => onChangeDraft({ ...draft, caption: event.target.value })}
+                  value={draft.caption}
+                />
+              </label>
+              <label className="field">
+                <span>Alt text</span>
+                <input
+                  onChange={(event) => onChangeDraft({ ...draft, altText: event.target.value })}
+                  value={draft.altText}
+                />
+              </label>
+              <button
+                className="primary-button"
+                disabled={mutating || !draft.path.trim()}
+                onClick={onAttach}
+                type="button"
+              >
+                <Upload size={17} />
+                Attach
+              </button>
+            </div>
+
+            {entryImages?.warnings.map((warning) => (
+              <div className="inline-warning" key={warning}>
+                <TriangleAlert size={15} />
+                {warning}
+              </div>
+            ))}
+
+            {detailLoading && <SkeletonList />}
+            {!detailLoading && images.length === 0 && (
+              <div className="empty-state">This entry does not have attached images yet.</div>
+            )}
+            {!detailLoading && images.length > 0 && (
+              <div className="gallery-grid">
+                {images.map((attachment) => (
+                  <article className="media-tile" key={attachment.attachmentId}>
+                    <button
+                      className="media-tile-preview"
+                      onClick={() => setExpandedImage(attachment)}
+                      type="button"
+                    >
+                      <DataUrlImage
+                        attachment={attachment}
+                        className="media-thumb"
+                        variant="thumb"
+                      />
+                    </button>
+                    <div className="media-tile-body">
+                      <h4>{attachment.caption || attachment.altText || attachment.hash.slice(0, 12)}</h4>
+                      <p>
+                        {attachment.width} x {attachment.height} / {formatBytes(attachment.bytes)}
+                      </p>
+                      <div className="backup-actions">
+                        <button
+                          className="icon-button icon-button--small"
+                          onClick={() => setExpandedImage(attachment)}
+                          title="View full image"
+                          type="button"
+                        >
+                          <Maximize2 size={15} />
+                        </button>
+                        <button
+                          className="icon-button icon-button--small"
+                          disabled={mutating}
+                          onClick={() => onRemoveImage(attachment)}
+                          title="Remove attachment"
+                          type="button"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="empty-state">Choose an entry with images to inspect attachments.</div>
+        )}
+      </div>
+
+      {expandedImage && (
+        <ImageLightbox
+          attachment={expandedImage}
+          onClose={() => setExpandedImage(null)}
+        />
+      )}
+    </section>
+  );
+}
+
+type AnalyticsViewProps = {
+  status: DatabaseStatus | null;
+  analytics: AnalyticsResponse | null;
+  period: PeriodForm;
+  setPeriod: (next: PeriodForm) => void;
+  loading: boolean;
+  onRefresh: () => void;
+};
+
+function AnalyticsView({
+  status,
+  analytics,
+  period,
+  setPeriod,
+  loading,
+  onRefresh,
+}: AnalyticsViewProps) {
+  if (status && (!status.dbExists || !status.readable)) {
+    return (
+      <section className="state-panel">
+        <TriangleAlert size={22} />
+        <h3>Analytics are not available</h3>
+        <p>{status.security.message ?? "Open Settings to confirm the active database path."}</p>
+        <code>{status.dbPath}</code>
+      </section>
+    );
+  }
+
+  return (
+    <section className="analytics-workspace" aria-label="Analytics">
+      <div className="toolbar-panel">
+        <div className="panel-title">
+          <BarChart3 size={18} />
+          <h3>Period</h3>
+        </div>
+        <div className="inline-form">
+          <label className="field">
+            <span>Since</span>
+            <input
+              onChange={(event) => setPeriod({ ...period, since: event.target.value })}
+              type="date"
+              value={period.since}
+            />
+          </label>
+          <label className="field">
+            <span>Until</span>
+            <input
+              onChange={(event) => setPeriod({ ...period, until: event.target.value })}
+              type="date"
+              value={period.until}
+            />
+          </label>
+          <button className="secondary-button" disabled={loading} onClick={onRefresh} type="button">
+            <RefreshCw size={17} />
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {loading && <SkeletonList />}
+      {!loading && !analytics && <div className="empty-state">Analytics will appear after loading.</div>}
+      {analytics && (
+        <>
+          <div className="metric-strip metric-strip--six">
+            <Metric label="Entries" value={analytics.overview.totalEntries} />
+            <Metric label="Words" value={analytics.overview.totalWords} />
+            <Metric label="Avg words" value={analytics.overview.averageWords} />
+            <Metric label="Images" value={analytics.overview.totalImages} />
+            <Metric label="Location" value={analytics.overview.entriesWithLocation} />
+            <Metric label="Streak" value={`${analytics.overview.currentStreakDays}d`} />
+          </div>
+
+          {analytics.warnings.map((warning) => (
+            <div className="inline-warning" key={warning}>
+              <TriangleAlert size={15} />
+              {warning}
+            </div>
+          ))}
+
+          <div className="analytics-grid">
+            <Panel icon={<BarChart3 size={20} />} title="Monthly Trend">
+              <TrendBars trend={analytics.monthlyTrend} />
+            </Panel>
+            <Panel icon={<Tags size={20} />} title="Tags">
+              <BreakdownList items={analytics.tagBreakdown} />
+            </Panel>
+            <Panel icon={<Sparkles size={20} />} title="Moods">
+              <BreakdownList items={analytics.moodBreakdown} />
+            </Panel>
+            <Panel icon={<MapPin size={20} />} title="Locations">
+              <BreakdownList items={analytics.locationBreakdown} emptyText="No locations in this period." />
+            </Panel>
+            <Panel icon={<Cloud size={20} />} title="Weather">
+              <BreakdownList items={analytics.weatherBreakdown} emptyText="No weather metadata in this period." />
+            </Panel>
+            <Panel icon={<FileText size={20} />} title="Top Words">
+              <div className="word-cloud">
+                {analytics.topWords.length === 0 && <p className="muted">No words counted.</p>}
+                {analytics.topWords.slice(0, 18).map((item) => (
+                  <span className="tag-chip" key={item.word}>
+                    {item.word}
+                    <strong>{item.count}</strong>
+                  </span>
+                ))}
+              </div>
+            </Panel>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+type WritingCalendarViewProps = {
+  status: DatabaseStatus | null;
+  calendar: WritingCalendarResponse | null;
+  year: number;
+  setYear: (year: number) => void;
+  loading: boolean;
+  onRefresh: () => void;
+};
+
+function WritingCalendarView({
+  status,
+  calendar,
+  year,
+  setYear,
+  loading,
+  onRefresh,
+}: WritingCalendarViewProps) {
+  if (status && (!status.dbExists || !status.readable)) {
+    return (
+      <section className="state-panel">
+        <TriangleAlert size={22} />
+        <h3>Writing calendar is not available</h3>
+        <p>{status.security.message ?? "Open Settings to confirm the active database path."}</p>
+        <code>{status.dbPath}</code>
+      </section>
+    );
+  }
+
+  const months = buildCalendarMonths(calendar?.year ?? year, calendar?.days ?? []);
+
+  return (
+    <section className="calendar-workspace" aria-label="Writing calendar">
+      <div className="toolbar-panel">
+        <div className="panel-title">
+          <CalendarDays size={18} />
+          <h3>{calendar?.year ?? year}</h3>
+        </div>
+        <div className="inline-form inline-form--compact">
+          <button className="icon-button" onClick={() => setYear(year - 1)} title="Previous year" type="button">
+            <ChevronLeft size={18} />
+          </button>
+          <label className="field field--year">
+            <span>Year</span>
+            <input
+              max={9999}
+              min={1}
+              onChange={(event) => setYear(Number(event.target.value) || new Date().getFullYear())}
+              type="number"
+              value={year}
+            />
+          </label>
+          <button className="icon-button" onClick={() => setYear(year + 1)} title="Next year" type="button">
+            <ChevronRight size={18} />
+          </button>
+          <button className="secondary-button" disabled={loading} onClick={onRefresh} type="button">
+            <RefreshCw size={17} />
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {loading && <SkeletonList />}
+      {calendar && (
+        <>
+          <div className="metric-strip">
+            <Metric label="Active days" value={calendar.activeDays} />
+            <Metric label="Total days" value={calendar.totalDays} />
+            <Metric label="Max entries" value={calendar.maxEntryCount} />
+            <Metric label="Coverage" value={`${Math.round((calendar.activeDays / Math.max(calendar.totalDays, 1)) * 100)}%`} />
+          </div>
+          {calendar.warnings.map((warning) => (
+            <div className="inline-warning" key={warning}>
+              <TriangleAlert size={15} />
+              {warning}
+            </div>
+          ))}
+          <div className="calendar-grid">
+            {months.map((month) => (
+              <article className="calendar-month" key={month.label}>
+                <h4>{month.label}</h4>
+                <div className="calendar-weekdays" aria-hidden="true">
+                  {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
+                    <span key={`${day}-${index}`}>{day}</span>
+                  ))}
+                </div>
+                <div className="calendar-days">
+                  {Array.from({ length: month.blanks }).map((_, index) => (
+                    <span className="calendar-day calendar-day--empty" key={`blank-${index}`} />
+                  ))}
+                  {month.days.map((day) => {
+                    const level = calendarLevel(day.data, calendar.maxEntryCount);
+                    return (
+                      <span
+                        className={`calendar-day calendar-day--level-${level}`}
+                        key={day.date}
+                        title={calendarDayTitle(day.date, day.data)}
+                      >
+                        {day.day}
+                      </span>
+                    );
+                  })}
+                </div>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
+      {!loading && !calendar && <div className="empty-state">Calendar data will appear after loading.</div>}
+    </section>
+  );
+}
+
+type CoverWallViewProps = {
+  status: DatabaseStatus | null;
+  coverWall: CoverWallResponse | null;
+  selectedCover: EntryCover | null;
+  filters: CoverWallFilters;
+  limit: number;
+  loading: boolean;
+  setFilters: (next: CoverWallFilters) => void;
+  onSelectCover: (cover: EntryCover) => void;
+  onLoadMore: () => void;
+  onRefresh: () => void;
+};
+
+function CoverWallView({
+  status,
+  coverWall,
+  selectedCover,
+  filters,
+  limit,
+  loading,
+  setFilters,
+  onSelectCover,
+  onLoadMore,
+  onRefresh,
+}: CoverWallViewProps) {
+  if (status && (!status.dbExists || !status.readable)) {
+    return (
+      <section className="state-panel">
+        <TriangleAlert size={22} />
+        <h3>Cover wall is not available</h3>
+        <p>{status.security.message ?? "Open Settings to confirm the active database path."}</p>
+        <code>{status.dbPath}</code>
+      </section>
+    );
+  }
+
+  const covers = coverWall?.covers ?? [];
+
+  return (
+    <section className="covers-workspace" aria-label="Cover wall">
+      <aside className="filters-panel">
+        <div className="panel-title">
+          <Images size={18} />
+          <h3>Cover Wall</h3>
+        </div>
+        <label className="field">
+          <span>Type</span>
+          <select
+            onChange={(event) => setFilters({ ...filters, coverType: event.target.value })}
+            value={filters.coverType}
+          >
+            <option value="">All types</option>
+            {(coverWall?.availableTypes ?? []).map((coverType) => (
+              <option key={coverType} value={coverType}>
+                {coverType}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Tags</span>
+          <input
+            onChange={(event) => setFilters({ ...filters, tag: event.target.value })}
+            placeholder="work, capsule"
+            value={filters.tag}
+          />
+        </label>
+        <label className="field">
+          <span>Moods</span>
+          <input
+            onChange={(event) => setFilters({ ...filters, mood: event.target.value })}
+            placeholder="focused"
+            value={filters.mood}
+          />
+        </label>
+        <div className="field-grid">
+          <label className="field">
+            <span>Since</span>
+            <input
+              onChange={(event) => setFilters({ ...filters, since: event.target.value })}
+              type="date"
+              value={filters.since}
+            />
+          </label>
+          <label className="field">
+            <span>Until</span>
+            <input
+              onChange={(event) => setFilters({ ...filters, until: event.target.value })}
+              type="date"
+              value={filters.until}
+            />
+          </label>
+        </div>
+        <button className="secondary-button secondary-button--full" disabled={loading} onClick={onRefresh} type="button">
+          <RefreshCw size={17} />
+          Refresh
+        </button>
+        {coverWall && (
+          <dl className="detail-list detail-list--compact">
+            <Detail label="Root" value={coverWall.coversRoot} />
+            <Detail label="Orphans" value={coverWall.orphanedCoverCount} />
+            <Detail label="Showing" value={`${covers.length} / ${coverWall.total}`} />
+          </dl>
+        )}
+      </aside>
+
+      <div className="cover-wall-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Visual index</p>
+            <h3>{coverWall ? `${coverWall.total} linked covers` : "Loading covers"}</h3>
+          </div>
+          <StatusPill tone="neutral">{loading ? "Loading" : `${limit} limit`}</StatusPill>
+        </div>
+
+        {loading && <SkeletonList />}
+        {!loading && covers.length === 0 && (
+          <div className="empty-state">No linked covers match these filters.</div>
+        )}
+        {!loading && covers.length > 0 && (
+          <div className="cover-grid">
+            {covers.map((cover) => (
+              <button
+                className={
+                  selectedCover?.filename === cover.filename
+                    ? "cover-tile cover-tile--active"
+                    : "cover-tile"
+                }
+                key={cover.filename}
+                onClick={() => onSelectCover(cover)}
+                type="button"
+              >
+                <CoverImage className="cover-thumb" filename={cover.filename} variant="thumb" />
+                <span>{cover.entry.title || cover.entry.uuid}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {coverWall && coverWall.covers.length < coverWall.total && (
+          <button className="secondary-button secondary-button--full" onClick={onLoadMore} type="button">
+            Load more
+          </button>
+        )}
+      </div>
+
+      <aside className="detail-panel cover-detail-panel">
+        {selectedCover ? (
+          <>
+            <div className="entry-detail-heading">
+              <p className="eyebrow">{selectedCover.coverType}</p>
+              <h3>{selectedCover.entry.title || selectedCover.entry.uuid}</h3>
+            </div>
+            <CoverImage className="cover-full-preview" filename={selectedCover.filename} variant="full" />
+            <dl className="detail-list detail-list--compact">
+              <Detail label="Entry" value={selectedCover.entry.uuid} />
+              <Detail label="Date" value={formatDateTime(selectedCover.entry.createdAt)} />
+              <Detail label="File" value={selectedCover.filename} />
+              <Detail label="Size" value={formatBytes(selectedCover.bytes)} />
+              <Detail label="Modified" value={formatDateTime(selectedCover.modifiedAt)} />
+            </dl>
+            <div className="tag-row">
+              {selectedCover.entry.mood && <span className="mood-chip">{selectedCover.entry.mood}</span>}
+              {selectedCover.entry.tags.map((tag) => (
+                <span className="tag-chip" key={tag}>
+                  <Tags size={12} />
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="detail-panel--empty">
+            <Images size={22} />
+            <h3>No cover selected</h3>
+            <p>Select a cover to inspect its linked entry.</p>
+          </div>
+        )}
+      </aside>
     </section>
   );
 }
@@ -2941,9 +3977,9 @@ function AboutView() {
     <section className="about-panel">
       <h3>Capsule Tauri</h3>
       <p>
-        Phase 4 adds restore previews, safety-backed restore, settings, tag and
-        mood tools, template and prompt library management, and Markdown/JSON
-        exports for the active Capsule database.
+        Phase 5 adds local image attachment browsing, guarded image upload and
+        removal, location-aware filters, analytics, a writing calendar, and an
+        ignored local cover wall for visual browsing.
       </p>
       <p>Hard delete remains reserved until the legacy resequencing behavior is fully matched and tested.</p>
     </section>
@@ -3218,6 +4254,119 @@ function EntryMeta({ entry }: { entry: Entry }) {
   );
 }
 
+type DataUrlImageProps = {
+  attachment: ImageAttachment;
+  variant: ImageVariant;
+  className: string;
+};
+
+function DataUrlImage({ attachment, variant, className }: DataUrlImageProps) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSrc(null);
+    setFailed(false);
+    getImageDataUrl(attachment.attachmentId, variant)
+      .then((dataUrl) => {
+        if (!cancelled) {
+          setSrc(dataUrl);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFailed(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attachment.attachmentId, variant]);
+
+  if (failed) {
+    return (
+      <div className={`${className} media-placeholder`}>
+        <FileImage size={24} />
+      </div>
+    );
+  }
+
+  if (!src) {
+    return <div className={`${className} media-placeholder skeleton`} />;
+  }
+
+  return <img alt={attachment.altText ?? attachment.caption ?? "Entry image"} className={className} src={src} />;
+}
+
+type CoverImageProps = {
+  filename: string;
+  variant: ImageVariant;
+  className: string;
+};
+
+function CoverImage({ filename, variant, className }: CoverImageProps) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSrc(null);
+    setFailed(false);
+    getCoverDataUrl(filename, variant)
+      .then((dataUrl) => {
+        if (!cancelled) {
+          setSrc(dataUrl);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFailed(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [filename, variant]);
+
+  if (failed) {
+    return (
+      <div className={`${className} media-placeholder`}>
+        <Images size={24} />
+      </div>
+    );
+  }
+
+  if (!src) {
+    return <div className={`${className} media-placeholder skeleton`} />;
+  }
+
+  return <img alt={filename} className={className} src={src} />;
+}
+
+function ImageLightbox({
+  attachment,
+  onClose,
+}: {
+  attachment: ImageAttachment;
+  onClose: () => void;
+}) {
+  return (
+    <div className="lightbox" role="dialog" aria-modal="true">
+      <div className="lightbox-toolbar">
+        <div>
+          <p className="eyebrow">{attachment.mimeType}</p>
+          <h3>{attachment.caption || attachment.altText || attachment.hash}</h3>
+        </div>
+        <button className="icon-button" onClick={onClose} title="Close" type="button">
+          <X size={18} />
+        </button>
+      </div>
+      <DataUrlImage attachment={attachment} className="lightbox-image" variant="full" />
+    </div>
+  );
+}
+
 type PanelProps = {
   icon: ReactNode;
   title: string;
@@ -3261,6 +4410,109 @@ function Metric({ label, value }: DetailProps) {
       <dd>{value}</dd>
     </div>
   );
+}
+
+function TrendBars({ trend }: { trend: AnalyticsResponse["monthlyTrend"] }) {
+  if (trend.length === 0) {
+    return <p className="muted">No monthly activity in this period.</p>;
+  }
+
+  const maxEntries = Math.max(1, ...trend.map((point) => point.entryCount));
+  return (
+    <div className="bar-list">
+      {trend.map((point) => (
+        <div className="bar-row" key={point.period}>
+          <span>{point.period}</span>
+          <div className="bar-track">
+            <div style={{ width: `${(point.entryCount / maxEntries) * 100}%` }} />
+          </div>
+          <strong>{point.entryCount}</strong>
+          <em>{point.wordCount} words</em>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function BreakdownList({
+  items,
+  emptyText = "No data in this period.",
+}: {
+  items: AnalyticsResponse["tagBreakdown"];
+  emptyText?: string;
+}) {
+  if (items.length === 0) {
+    return <p className="muted">{emptyText}</p>;
+  }
+
+  const maxCount = Math.max(1, ...items.map((item) => item.count));
+  return (
+    <div className="bar-list">
+      {items.slice(0, 10).map((item) => (
+        <div className="bar-row" key={item.label}>
+          <span>{item.label}</span>
+          <div className="bar-track">
+            <div style={{ width: `${(item.count / maxCount) * 100}%` }} />
+          </div>
+          <strong>{item.count}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+type CalendarDayCell = {
+  date: string;
+  day: number;
+  data?: WritingCalendarResponse["days"][number];
+};
+
+type CalendarMonth = {
+  label: string;
+  blanks: number;
+  days: CalendarDayCell[];
+};
+
+function buildCalendarMonths(
+  year: number,
+  days: WritingCalendarResponse["days"],
+): CalendarMonth[] {
+  const daysByDate = new Map(days.map((day) => [day.date, day]));
+  return Array.from({ length: 12 }).map((_, monthIndex) => {
+    const firstDay = new Date(year, monthIndex, 1).getDay();
+    const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+    const label = new Date(year, monthIndex, 1).toLocaleDateString(undefined, {
+      month: "long",
+    });
+    return {
+      label,
+      blanks: firstDay,
+      days: Array.from({ length: daysInMonth }).map((__, dayIndex) => {
+        const day = dayIndex + 1;
+        const date = `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        return {
+          date,
+          day,
+          data: daysByDate.get(date),
+        };
+      }),
+    };
+  });
+}
+
+function calendarLevel(day: CalendarDayCell["data"], maxEntryCount: number) {
+  if (!day || day.entryCount <= 0) {
+    return 0;
+  }
+  return Math.max(1, Math.ceil((day.entryCount / Math.max(maxEntryCount, 1)) * 4));
+}
+
+function calendarDayTitle(date: string, day: CalendarDayCell["data"]) {
+  if (!day) {
+    return `${date}: no entries`;
+  }
+  const moodText = day.moods.length ? ` / ${day.moods.join(", ")}` : "";
+  return `${date}: ${day.entryCount} entries, ${day.wordCount} words, ${day.imageCount} images${moodText}`;
 }
 
 function SkeletonList({ compact = false }: { compact?: boolean }) {

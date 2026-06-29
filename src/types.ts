@@ -379,6 +379,7 @@ export type SearchMode = "keyword" | "semantic" | "hybrid";
 export type SearchRequest = {
   query: string;
   mode?: SearchMode;
+  location?: string;
   since?: string;
   until?: string;
   tags?: string[];
@@ -454,4 +455,170 @@ export type ThreadMutationResponse = {
   thread: ThreadGroup | null;
   affectedUuids: string[];
   audit: MutationAudit;
+};
+
+export type ImageAsset = {
+  id: number;
+  hash: string;
+  mimeType: string;
+  bytes: number;
+  width: number;
+  height: number;
+  storageBackend: string;
+  storageKey: string;
+  createdAt: string;
+  deletedAt: string | null;
+};
+
+export type ImageAttachment = {
+  attachmentId: number;
+  entryUuid: string;
+  mediaId: number;
+  position: number;
+  caption: string | null;
+  altText: string | null;
+  createdAt: string;
+  hash: string;
+  mimeType: string;
+  bytes: number;
+  width: number;
+  height: number;
+  storageBackend: string;
+  storageKey: string;
+  deletedAt: string | null;
+  thumbnailAvailable: boolean;
+  originalAvailable: boolean;
+};
+
+export type ImageEntryListResponse = {
+  entryUuid: string;
+  images: ImageAttachment[];
+  warnings: string[];
+};
+
+export type ImageEntriesListResponse = {
+  entries: Array<{
+    entryUuid: string;
+    images: ImageAttachment[];
+  }>;
+  warnings: string[];
+};
+
+export type ImageAttachRequest = {
+  identifier: string;
+  mediaId: number;
+  caption?: string | null;
+  altText?: string | null;
+  position?: number | null;
+};
+
+export type ImageUploadResponse = {
+  asset: ImageAsset;
+  audit: MutationAudit;
+};
+
+export type ImageMutationResponse = {
+  entryUuid: string;
+  images: ImageAttachment[];
+  audit: MutationAudit;
+};
+
+export type ImageVariant = "thumb" | "full";
+
+export type AnalyticsPeriodRequest = {
+  since?: string | null;
+  until?: string | null;
+};
+
+export type AnalyticsOverview = {
+  totalEntries: number;
+  totalWords: number;
+  averageWords: number;
+  totalImages: number;
+  entriesWithImages: number;
+  entriesWithLocation: number;
+  longestStreakDays: number;
+  currentStreakDays: number;
+};
+
+export type AnalyticsTrendPoint = {
+  period: string;
+  entryCount: number;
+  wordCount: number;
+};
+
+export type AnalyticsBreakdownItem = {
+  label: string;
+  count: number;
+};
+
+export type WordCount = {
+  word: string;
+  count: number;
+};
+
+export type AnalyticsResponse = {
+  overview: AnalyticsOverview;
+  monthlyTrend: AnalyticsTrendPoint[];
+  moodBreakdown: AnalyticsBreakdownItem[];
+  tagBreakdown: AnalyticsBreakdownItem[];
+  locationBreakdown: AnalyticsBreakdownItem[];
+  weatherBreakdown: AnalyticsBreakdownItem[];
+  topWords: WordCount[];
+  warnings: string[];
+};
+
+export type WritingCalendarDay = {
+  date: string;
+  entryCount: number;
+  wordCount: number;
+  imageCount: number;
+  moods: string[];
+};
+
+export type WritingCalendarResponse = {
+  year: number;
+  days: WritingCalendarDay[];
+  totalDays: number;
+  activeDays: number;
+  maxEntryCount: number;
+  warnings: string[];
+};
+
+export type CoverWallRequest = {
+  type?: string | null;
+  since?: string | null;
+  until?: string | null;
+  tags?: string[];
+  moods?: string[];
+  limit?: number;
+  offset?: number;
+};
+
+export type CoverEntrySummary = {
+  id: number;
+  uuid: string;
+  createdAt: string;
+  title: string | null;
+  mood: string | null;
+  tags: string[];
+};
+
+export type EntryCover = {
+  filename: string;
+  coverType: string;
+  entryUuid: string;
+  bytes: number;
+  modifiedAt: string | null;
+  entry: CoverEntrySummary;
+};
+
+export type CoverWallResponse = {
+  covers: EntryCover[];
+  total: number;
+  limit: number;
+  offset: number;
+  availableTypes: string[];
+  orphanedCoverCount: number;
+  coversRoot: string;
 };

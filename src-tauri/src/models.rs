@@ -624,6 +624,7 @@ pub enum SearchMode {
 pub struct SearchRequest {
     pub query: String,
     pub mode: Option<SearchMode>,
+    pub location: Option<String>,
     pub since: Option<String>,
     pub until: Option<String>,
     pub tags: Option<Vec<String>>,
@@ -720,4 +721,218 @@ pub struct ThreadMutationResponse {
     pub thread: Option<ThreadGroup>,
     pub affected_uuids: Vec<String>,
     pub audit: MutationAudit,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageAsset {
+    pub id: i64,
+    pub hash: String,
+    pub mime_type: String,
+    pub bytes: i64,
+    pub width: i64,
+    pub height: i64,
+    pub storage_backend: String,
+    pub storage_key: String,
+    pub created_at: String,
+    pub deleted_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageAttachment {
+    pub attachment_id: i64,
+    pub entry_uuid: String,
+    pub media_id: i64,
+    pub position: i64,
+    pub caption: Option<String>,
+    pub alt_text: Option<String>,
+    pub created_at: String,
+    pub hash: String,
+    pub mime_type: String,
+    pub bytes: i64,
+    pub width: i64,
+    pub height: i64,
+    pub storage_backend: String,
+    pub storage_key: String,
+    pub deleted_at: Option<String>,
+    pub thumbnail_available: bool,
+    pub original_available: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageEntryListResponse {
+    pub entry_uuid: String,
+    pub images: Vec<ImageAttachment>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageEntriesItem {
+    pub entry_uuid: String,
+    pub images: Vec<ImageAttachment>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageEntriesListResponse {
+    pub entries: Vec<ImageEntriesItem>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageAttachRequest {
+    pub identifier: String,
+    pub media_id: i64,
+    pub caption: Option<String>,
+    pub alt_text: Option<String>,
+    pub position: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageUploadResponse {
+    pub asset: ImageAsset,
+    pub audit: MutationAudit,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageMutationResponse {
+    pub entry_uuid: String,
+    pub images: Vec<ImageAttachment>,
+    pub audit: MutationAudit,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ImageVariant {
+    Thumb,
+    Full,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsPeriodRequest {
+    pub since: Option<String>,
+    pub until: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsOverview {
+    pub total_entries: i64,
+    pub total_words: i64,
+    pub average_words: f64,
+    pub total_images: i64,
+    pub entries_with_images: i64,
+    pub entries_with_location: i64,
+    pub longest_streak_days: i64,
+    pub current_streak_days: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsTrendPoint {
+    pub period: String,
+    pub entry_count: i64,
+    pub word_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsBreakdownItem {
+    pub label: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WordCount {
+    pub word: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsResponse {
+    pub overview: AnalyticsOverview,
+    pub monthly_trend: Vec<AnalyticsTrendPoint>,
+    pub mood_breakdown: Vec<AnalyticsBreakdownItem>,
+    pub tag_breakdown: Vec<AnalyticsBreakdownItem>,
+    pub location_breakdown: Vec<AnalyticsBreakdownItem>,
+    pub weather_breakdown: Vec<AnalyticsBreakdownItem>,
+    pub top_words: Vec<WordCount>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WritingCalendarDay {
+    pub date: String,
+    pub entry_count: i64,
+    pub word_count: i64,
+    pub image_count: i64,
+    pub moods: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WritingCalendarResponse {
+    pub year: i32,
+    pub days: Vec<WritingCalendarDay>,
+    pub total_days: i64,
+    pub active_days: i64,
+    pub max_entry_count: i64,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CoverWallRequest {
+    #[serde(rename = "type")]
+    pub cover_type: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub moods: Option<Vec<String>>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoverEntrySummary {
+    pub id: i64,
+    pub uuid: String,
+    pub created_at: String,
+    pub title: Option<String>,
+    pub mood: Option<String>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryCover {
+    pub filename: String,
+    pub cover_type: String,
+    pub entry_uuid: String,
+    pub bytes: u64,
+    pub modified_at: Option<String>,
+    pub entry: CoverEntrySummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoverWallResponse {
+    pub covers: Vec<EntryCover>,
+    pub total: i64,
+    pub limit: i64,
+    pub offset: i64,
+    pub available_types: Vec<String>,
+    pub orphaned_cover_count: i64,
+    pub covers_root: String,
 }

@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AnalyticsPeriodRequest,
+  AnalyticsResponse,
   BackupCreateRequest,
   BackupCreateResponse,
   BackupListResponse,
@@ -9,6 +11,8 @@ import type {
   BackupRestoreResponse,
   CapsuleConfigResponse,
   ConfigMutationResponse,
+  CoverWallRequest,
+  CoverWallResponse,
   DatabaseStatus,
   Entry,
   EntryCreate,
@@ -19,6 +23,13 @@ import type {
   EntryUpdate,
   ExportEntriesRequest,
   ExportEntriesResponse,
+  ImageAttachRequest,
+  ImageAttachment,
+  ImageEntriesListResponse,
+  ImageEntryListResponse,
+  ImageMutationResponse,
+  ImageUploadResponse,
+  ImageVariant,
   LibraryListResponse,
   LibraryPromptInput,
   LibraryPromptMutationResponse,
@@ -42,6 +53,7 @@ import type {
   ThreadListResponse,
   ThreadMetadataUpdate,
   ThreadMutationResponse,
+  WritingCalendarResponse,
 } from "./types";
 
 declare global {
@@ -281,6 +293,78 @@ let mockEntries: Entry[] = [
     },
     attachmentCount: 0,
   },
+];
+
+let mockUploadedAssets: ImageUploadResponse["asset"][] = [];
+
+let mockImageAttachments: Record<string, ImageAttachment[]> = {
+  entry_oiuir59w: [
+    {
+      attachmentId: 1,
+      entryUuid: "entry_oiuir59w",
+      mediaId: 1,
+      position: 0,
+      caption: "Desk reference",
+      altText: "A quiet desktop reference image",
+      createdAt: "2026-06-28 21:16",
+      hash: "mock-desk",
+      mimeType: "image/jpeg",
+      bytes: 102_817,
+      width: 533,
+      height: 800,
+      storageBackend: "local_fs",
+      storageKey: "33/mock-desk.jpg",
+      deletedAt: null,
+      thumbnailAvailable: true,
+      originalAvailable: true,
+    },
+    {
+      attachmentId: 2,
+      entryUuid: "entry_oiuir59w",
+      mediaId: 2,
+      position: 1,
+      caption: null,
+      altText: "A second journal attachment",
+      createdAt: "2026-06-28 21:17",
+      hash: "mock-note",
+      mimeType: "image/jpeg",
+      bytes: 384_718,
+      width: 1024,
+      height: 1024,
+      storageBackend: "local_fs",
+      storageKey: "33/mock-note.jpg",
+      deletedAt: null,
+      thumbnailAvailable: true,
+      originalAvailable: true,
+    },
+  ],
+  entry_kree51ux: [
+    {
+      attachmentId: 3,
+      entryUuid: "entry_kree51ux",
+      mediaId: 3,
+      position: 0,
+      caption: "Art draft",
+      altText: "A square art experiment",
+      createdAt: "2026-06-27 00:14",
+      hash: "mock-art",
+      mimeType: "image/png",
+      bytes: 277_117,
+      width: 1200,
+      height: 1200,
+      storageBackend: "local_fs",
+      storageKey: "0d/mock-art.png",
+      deletedAt: null,
+      thumbnailAvailable: true,
+      originalAvailable: true,
+    },
+  ],
+};
+
+const mockCoverFiles = [
+  "magazine-entry_ti99r1ya.png",
+  "magazine-entry_oiuir59w.png",
+  "notebook-entry_kree51ux.png",
 ];
 
 const pause = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -837,6 +921,226 @@ export async function exportEntries(
   }
 }
 
+export async function listEntryImages(identifier: string): Promise<ImageEntryListResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<ImageEntryListResponse>("list_entry_images", { identifier });
+    }
+
+    await pause(120);
+    const entry = findMockEntry(identifier);
+    return {
+      entryUuid: entry.uuid,
+      images: mockImageAttachments[entry.uuid] ?? [],
+      warnings: [],
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function listImagesForEntries(uuids: string[]): Promise<ImageEntriesListResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke("list_images_for_entries", { uuids });
+    }
+
+    await pause(120);
+    return {
+      entries: uuids.map((entryUuid) => ({
+        entryUuid,
+        images: mockImageAttachments[entryUuid] ?? [],
+      })),
+      warnings: [],
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function getImageDataUrl(
+  attachmentId: number,
+  variant: ImageVariant,
+): Promise<string> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<string>("get_image_data_url", { attachmentId, variant });
+    }
+
+    await pause(80);
+    return mockImageDataUrl(attachmentId, variant);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function uploadImage(filePath: string): Promise<ImageUploadResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<ImageUploadResponse>("upload_image", { filePath });
+    }
+
+    await pause(240);
+    const id = 100 + mockUploadedAssets.length;
+    const asset = {
+      id,
+      hash: `mock-upload-${id}`,
+      mimeType: filePath.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg",
+      bytes: 240_000 + id,
+      width: 1200,
+      height: 900,
+      storageBackend: "local_fs",
+      storageKey: `mock/${id}.jpg`,
+      createdAt: new Date().toISOString(),
+      deletedAt: null,
+    };
+    mockUploadedAssets = [...mockUploadedAssets, asset];
+    return { asset, audit: mockAudit("image.upload") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function attachImage(input: ImageAttachRequest): Promise<ImageMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<ImageMutationResponse>("attach_image", { input });
+    }
+
+    await pause(220);
+    const entry = findMockEntry(input.identifier);
+    const asset = mockUploadedAssets.find((item) => item.id === input.mediaId) ?? {
+      id: input.mediaId,
+      hash: `mock-existing-${input.mediaId}`,
+      mimeType: "image/jpeg",
+      bytes: 180_000,
+      width: 900,
+      height: 900,
+      storageBackend: "local_fs",
+      storageKey: `mock/${input.mediaId}.jpg`,
+      createdAt: new Date().toISOString(),
+      deletedAt: null,
+    };
+    const current = mockImageAttachments[entry.uuid] ?? [];
+    const attachment: ImageAttachment = {
+      attachmentId: Math.max(0, ...Object.values(mockImageAttachments).flat().map((item) => item.attachmentId)) + 1,
+      entryUuid: entry.uuid,
+      mediaId: asset.id,
+      position: input.position ?? current.length,
+      caption: normalizeNullable(input.caption),
+      altText: normalizeNullable(input.altText),
+      createdAt: new Date().toISOString(),
+      hash: asset.hash,
+      mimeType: asset.mimeType,
+      bytes: asset.bytes,
+      width: asset.width,
+      height: asset.height,
+      storageBackend: asset.storageBackend,
+      storageKey: asset.storageKey,
+      deletedAt: null,
+      thumbnailAvailable: true,
+      originalAvailable: true,
+    };
+    mockImageAttachments = {
+      ...mockImageAttachments,
+      [entry.uuid]: [...current, attachment],
+    };
+    mockEntries = mockEntries.map((item) =>
+      item.uuid === entry.uuid ? { ...item, attachmentCount: current.length + 1 } : item,
+    );
+    return {
+      entryUuid: entry.uuid,
+      images: mockImageAttachments[entry.uuid],
+      audit: mockAudit("image.attach"),
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function removeImage(
+  attachmentId: number,
+  identifier?: string | null,
+): Promise<ImageMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<ImageMutationResponse>("remove_image", { attachmentId, identifier });
+    }
+
+    await pause(220);
+    const entryUuid = identifier ? findMockEntry(identifier).uuid : findMockEntryByAttachment(attachmentId);
+    const nextImages = (mockImageAttachments[entryUuid] ?? []).filter(
+      (item) => item.attachmentId !== attachmentId,
+    );
+    mockImageAttachments = { ...mockImageAttachments, [entryUuid]: nextImages };
+    mockEntries = mockEntries.map((item) =>
+      item.uuid === entryUuid ? { ...item, attachmentCount: nextImages.length } : item,
+    );
+    return { entryUuid, images: nextImages, audit: mockAudit("image.remove") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function getAnalytics(
+  input: AnalyticsPeriodRequest = {},
+): Promise<AnalyticsResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<AnalyticsResponse>("get_analytics", { input });
+    }
+
+    await pause(180);
+    return buildMockAnalytics(input);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function getWritingCalendar(year?: number): Promise<WritingCalendarResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<WritingCalendarResponse>("get_writing_calendar", { year });
+    }
+
+    await pause(160);
+    return buildMockCalendar(year ?? new Date().getFullYear());
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function listCoverWall(
+  input: CoverWallRequest = {},
+): Promise<CoverWallResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<CoverWallResponse>("list_cover_wall", { input });
+    }
+
+    await pause(180);
+    return buildMockCoverWall(input);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function getCoverDataUrl(
+  filename: string,
+  variant: ImageVariant,
+): Promise<string> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<string>("get_cover_data_url", { filename, variant });
+    }
+
+    await pause(80);
+    return mockCoverDataUrl(filename, variant);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
 export async function listEntries(filters: EntryFilters = {}): Promise<EntryListResponse> {
   try {
     if (runningInTauri()) {
@@ -1238,8 +1542,232 @@ export async function disbandThread(rootUuid: string): Promise<ThreadMutationRes
   }
 }
 
+function buildMockAnalytics(input: AnalyticsPeriodRequest): AnalyticsResponse {
+  const entries = filterMockPeriod(mockEntries.filter((entry) => !entry.hidden), input);
+  const totalWords = entries.reduce((sum, entry) => sum + writingWordCount(entry.textPlain), 0);
+  const totalImages = entries.reduce((sum, entry) => sum + entry.attachmentCount, 0);
+  const entriesWithImages = entries.filter((entry) => entry.attachmentCount > 0).length;
+  const entriesWithLocation = entries.filter((entry) => entry.location).length;
+  const monthly = new Map<string, { entryCount: number; wordCount: number }>();
+  const moods = new Map<string, number>();
+  const tags = new Map<string, number>();
+  const locations = new Map<string, number>();
+  const weather = new Map<string, number>();
+  const words = new Map<string, number>();
+
+  for (const entry of entries) {
+    const month = entry.createdAt.slice(0, 7);
+    const monthValue = monthly.get(month) ?? { entryCount: 0, wordCount: 0 };
+    monthly.set(month, {
+      entryCount: monthValue.entryCount + 1,
+      wordCount: monthValue.wordCount + writingWordCount(entry.textPlain),
+    });
+    if (entry.mood) moods.set(entry.mood, (moods.get(entry.mood) ?? 0) + 1);
+    for (const tag of entry.tags) tags.set(tag.name, (tags.get(tag.name) ?? 0) + 1);
+    if (entry.location?.placeName) {
+      locations.set(entry.location.placeName, (locations.get(entry.location.placeName) ?? 0) + 1);
+    }
+    if (entry.location?.weatherCondition) {
+      weather.set(entry.location.weatherCondition, (weather.get(entry.location.weatherCondition) ?? 0) + 1);
+    }
+    for (const word of entry.textPlain.toLowerCase().match(/[a-z0-9']+/g) ?? []) {
+      if (word.length > 3 && !["this", "that", "with", "from", "into", "about", "should"].includes(word)) {
+        words.set(word, (words.get(word) ?? 0) + 1);
+      }
+    }
+  }
+
+  return {
+    overview: {
+      totalEntries: entries.length,
+      totalWords,
+      averageWords: entries.length ? totalWords / entries.length : 0,
+      totalImages,
+      entriesWithImages,
+      entriesWithLocation,
+      longestStreakDays: mockStreak(entries),
+      currentStreakDays: mockStreak(entries),
+    },
+    monthlyTrend: [...monthly.entries()].sort().map(([period, value]) => ({ period, ...value })),
+    moodBreakdown: mapToBreakdown(moods),
+    tagBreakdown: mapToBreakdown(tags),
+    locationBreakdown: mapToBreakdown(locations),
+    weatherBreakdown: mapToBreakdown(weather),
+    topWords: [...words.entries()]
+      .map(([word, count]) => ({ word, count }))
+      .sort((left, right) => right.count - left.count)
+      .slice(0, 12),
+    warnings: [],
+  };
+}
+
+function buildMockCalendar(year: number): WritingCalendarResponse {
+  const entries = mockEntries.filter((entry) => !entry.hidden && entry.createdAt.startsWith(String(year)));
+  const days = new Map<string, WritingCalendarResponse["days"][number]>();
+  for (const entry of entries) {
+    const date = entry.createdAt.slice(0, 10);
+    const current = days.get(date) ?? {
+      date,
+      entryCount: 0,
+      wordCount: 0,
+      imageCount: 0,
+      moods: [],
+    };
+    current.entryCount += 1;
+    current.wordCount += writingWordCount(entry.textPlain);
+    current.imageCount += entry.attachmentCount;
+    if (entry.mood && !current.moods.includes(entry.mood)) current.moods.push(entry.mood);
+    days.set(date, current);
+  }
+  const values = [...days.values()].sort((left, right) => left.date.localeCompare(right.date));
+  return {
+    year,
+    days: values,
+    totalDays: isLeapYear(year) ? 366 : 365,
+    activeDays: values.length,
+    maxEntryCount: Math.max(0, ...values.map((day) => day.entryCount)),
+    warnings: [],
+  };
+}
+
+function buildMockCoverWall(input: CoverWallRequest): CoverWallResponse {
+  const tags = new Set(input.tags?.map((tag) => tag.toLowerCase()));
+  const moods = new Set(input.moods?.map((mood) => mood.toLowerCase()));
+  const coverType = input.type?.trim().toLowerCase();
+  const covers = mockCoverFiles
+    .map((filename) => {
+      const [type, rawUuid] = filename.replace(/\.[^.]+$/, "").split("-");
+      const entry = mockEntries.find((item) => item.uuid === rawUuid && !item.hidden);
+      if (!entry) return null;
+      if (coverType && type !== coverType) return null;
+      if (input.since && entry.createdAt.slice(0, 10) < input.since) return null;
+      if (input.until && entry.createdAt.slice(0, 10) > input.until) return null;
+      if (tags.size > 0 && !entry.tags.some((tag) => tags.has(tag.name.toLowerCase()))) return null;
+      if (moods.size > 0 && (!entry.mood || !moods.has(entry.mood.toLowerCase()))) return null;
+      return {
+        filename,
+        coverType: type,
+        entryUuid: entry.uuid,
+        bytes: 2_748_000,
+        modifiedAt: "2026-06-29T10:00:00Z",
+        entry: {
+          id: entry.id,
+          uuid: entry.uuid,
+          createdAt: entry.createdAt,
+          title: entry.title,
+          mood: entry.mood,
+          tags: entry.tags.map((tag) => tag.name),
+        },
+      };
+    })
+    .filter(Boolean) as CoverWallResponse["covers"];
+  const offset = input.offset ?? 0;
+  const limit = input.limit ?? 80;
+  return {
+    covers: covers.slice(offset, offset + limit),
+    total: covers.length,
+    limit,
+    offset,
+    availableTypes: ["magazine", "notebook"],
+    orphanedCoverCount: 0,
+    coversRoot: "C:\\_code\\capsule_tauri\\local-assets\\covers",
+  };
+}
+
+function mockImageDataUrl(attachmentId: number, variant: ImageVariant) {
+  const hue = (attachmentId * 53) % 360;
+  const label = variant === "thumb" ? `Image ${attachmentId}` : `Attachment ${attachmentId}`;
+  return svgDataUrl(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 700">
+      <rect width="900" height="700" fill="hsl(${hue} 28% 28%)"/>
+      <rect x="58" y="58" width="784" height="584" rx="26" fill="hsl(${hue} 26% 44%)"/>
+      <circle cx="690" cy="190" r="74" fill="hsl(${hue} 50% 78%)"/>
+      <path d="M110 575 318 344l130 118 84-92 255 205z" fill="hsl(${hue} 38% 68%)"/>
+      <text x="80" y="110" fill="white" font-family="Segoe UI, sans-serif" font-size="42" font-weight="700">${label}</text>
+    </svg>`,
+  );
+}
+
+function mockCoverDataUrl(filename: string, variant: ImageVariant) {
+  const hue = filename.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0) % 360;
+  return svgDataUrl(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 1000">
+      <rect width="700" height="1000" fill="hsl(${hue} 30% 18%)"/>
+      <rect x="62" y="70" width="576" height="860" rx="28" fill="hsl(${hue} 34% 48%)"/>
+      <path d="M108 760c150-180 242-246 366-130 50 47 90 65 132 47v183H108z" fill="hsl(${hue} 45% 72%)"/>
+      <circle cx="500" cy="250" r="82" fill="hsl(${hue} 62% 80%)"/>
+      <text x="92" y="142" fill="white" font-family="Segoe UI, sans-serif" font-size="${variant === "thumb" ? 42 : 48}" font-weight="800">Cover</text>
+      <text x="92" y="203" fill="white" opacity=".78" font-family="Segoe UI, sans-serif" font-size="24">${filename}</text>
+    </svg>`,
+  );
+}
+
+function svgDataUrl(svg: string) {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function filterMockPeriod(entries: Entry[], input: AnalyticsPeriodRequest) {
+  return entries.filter((entry) => {
+    const date = entry.createdAt.slice(0, 10);
+    if (input.since && date < input.since) return false;
+    if (input.until && date > input.until) return false;
+    return true;
+  });
+}
+
+function mapToBreakdown(values: Map<string, number>) {
+  return [...values.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label))
+    .slice(0, 12);
+}
+
+function writingWordCount(value: string) {
+  return value.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function mockStreak(entries: Entry[]) {
+  const dates = [...new Set(entries.map((entry) => entry.createdAt.slice(0, 10)))].sort();
+  let longest = 0;
+  let current = 0;
+  let previous = "";
+  for (const date of dates) {
+    const previousDate = previous ? new Date(`${previous}T00:00:00`) : null;
+    const currentDate = new Date(`${date}T00:00:00`);
+    const isNext = previousDate
+      ? currentDate.getTime() - previousDate.getTime() === 24 * 60 * 60 * 1000
+      : false;
+    current = isNext ? current + 1 : 1;
+    longest = Math.max(longest, current);
+    previous = date;
+  }
+  return longest;
+}
+
+function isLeapYear(year: number) {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+function findMockEntry(identifier: string) {
+  const entry = mockEntries.find(
+    (item) => item.uuid === identifier || String(item.id) === identifier,
+  );
+  if (!entry) throw new Error(`Entry not found: ${identifier}`);
+  return entry;
+}
+
+function findMockEntryByAttachment(attachmentId: number) {
+  for (const [entryUuid, images] of Object.entries(mockImageAttachments)) {
+    if (images.some((image) => image.attachmentId === attachmentId)) {
+      return entryUuid;
+    }
+  }
+  throw new Error(`Attachment not found: ${attachmentId}`);
+}
+
 function parseMockSearch(input: SearchRequest) {
   const filters: EntryFilters = {
+    location: input.location,
     since: input.since,
     until: input.until,
     tags: input.tags,
@@ -1507,6 +2035,7 @@ function operationToCommand(operation: string) {
 
 function applyMockFilters(entries: Entry[], filters: EntryFilters) {
   const text = filters.text?.trim().toLowerCase();
+  const location = filters.location?.trim().toLowerCase();
   const tagSet = new Set(filters.tags?.map((tag) => tag.trim().toLowerCase()).filter(Boolean));
   const excludedTagSet = new Set(
     filters.excludeTags?.map((tag) => tag.trim().toLowerCase()).filter(Boolean),
@@ -1539,6 +2068,12 @@ function applyMockFilters(entries: Entry[], filters: EntryFilters) {
       if (text) {
         const haystack = `${entry.textPlain} ${entry.title ?? ""} ${entry.summary ?? ""}`.toLowerCase();
         if (!haystack.includes(text)) {
+          return false;
+        }
+      }
+      if (location) {
+        const haystack = `${entry.location?.placeName ?? ""} ${entry.location?.weatherCondition ?? ""}`.toLowerCase();
+        if (!haystack.includes(location)) {
           return false;
         }
       }
