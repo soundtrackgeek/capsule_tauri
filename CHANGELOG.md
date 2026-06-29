@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.3 - 2026-06-29
+
+### Changed
+
+- Bumped the app version to 0.7.3.
+- Expanded entry location responses and UI details to include stored Capsule
+  weather icon, humidity, wind speed, fetched timestamp, and location source.
+
 ## 0.7.2 - 2026-06-29
 
 ### Added

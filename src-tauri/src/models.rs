@@ -626,9 +626,14 @@ pub struct LocationInfo {
     pub latitude: f64,
     pub longitude: f64,
     pub place_name: Option<String>,
+    pub source: Option<String>,
     pub weather_condition: Option<String>,
     pub weather_temp_c: Option<f64>,
     pub weather_temp_f: Option<f64>,
+    pub weather_icon: Option<String>,
+    pub weather_humidity: Option<i64>,
+    pub weather_wind_kph: Option<f64>,
+    pub weather_fetched_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -902,13 +902,25 @@ fn load_locations(
         return Ok(HashMap::new());
     }
 
+    let columns = table_columns(connection, "plugin_entry_locations")?;
+    let source_column = optional_location_column(&columns, "source");
+    let weather_condition_column = optional_location_column(&columns, "weather_condition");
+    let weather_temp_c_column = optional_location_column(&columns, "weather_temp_c");
+    let weather_temp_f_column = optional_location_column(&columns, "weather_temp_f");
+    let weather_icon_column = optional_location_column(&columns, "weather_icon");
+    let weather_humidity_column = optional_location_column(&columns, "weather_humidity");
+    let weather_wind_column = optional_location_column(&columns, "weather_wind_kph");
+    let weather_fetched_column = optional_location_column(&columns, "weather_fetched_at");
     let uuids = entries
         .iter()
         .map(|entry| entry.uuid.clone())
         .collect::<Vec<_>>();
     let placeholders = placeholders(uuids.len());
     let sql = format!(
-        "SELECT entry_uuid, latitude, longitude, place_name, weather_condition, weather_temp_c, weather_temp_f
+        "SELECT entry_uuid, latitude, longitude, place_name, {source_column},
+                {weather_condition_column}, {weather_temp_c_column}, {weather_temp_f_column},
+                {weather_icon_column}, {weather_humidity_column},
+                {weather_wind_column}, {weather_fetched_column}
          FROM plugin_entry_locations
          WHERE entry_uuid IN ({placeholders})"
     );
@@ -922,9 +934,14 @@ fn load_locations(
                     latitude: row.get(1)?,
                     longitude: row.get(2)?,
                     place_name: row.get(3)?,
-                    weather_condition: row.get(4)?,
-                    weather_temp_c: row.get(5)?,
-                    weather_temp_f: row.get(6)?,
+                    source: row.get(4)?,
+                    weather_condition: row.get(5)?,
+                    weather_temp_c: row.get(6)?,
+                    weather_temp_f: row.get(7)?,
+                    weather_icon: row.get(8)?,
+                    weather_humidity: row.get(9)?,
+                    weather_wind_kph: row.get(10)?,
+                    weather_fetched_at: row.get(11)?,
                 },
             ))
         },
@@ -937,6 +954,14 @@ fn load_locations(
     }
 
     Ok(locations_by_uuid)
+}
+
+fn optional_location_column(columns: &HashSet<String>, column_name: &str) -> String {
+    if columns.contains(column_name) {
+        column_name.to_string()
+    } else {
+        format!("NULL AS {column_name}")
+    }
 }
 
 fn load_attachment_counts(
@@ -1294,6 +1319,12 @@ fn table_exists(connection: &Connection, table_name: &str) -> Result<bool> {
         .is_some())
 }
 
+fn table_columns(connection: &Connection, table_name: &str) -> Result<HashSet<String>> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    Ok(rows.collect::<rusqlite::Result<HashSet<_>>>()?)
+}
+
 fn generate_entry_uuid(connection: &Connection) -> Result<String> {
     let seed = Utc::now()
         .timestamp_nanos_opt()
@@ -1484,6 +1515,31 @@ mod tests {
                 .place_name
                 .as_deref(),
             Some("Tromso")
+        );
+        assert_eq!(
+            response.entries[0]
+                .location
+                .as_ref()
+                .unwrap()
+                .weather_icon
+                .as_deref(),
+            Some("cloudy")
+        );
+        assert_eq!(
+            response.entries[0]
+                .location
+                .as_ref()
+                .unwrap()
+                .weather_humidity,
+            Some(82)
+        );
+        assert_eq!(
+            response.entries[0]
+                .location
+                .as_ref()
+                .unwrap()
+                .weather_wind_kph,
+            Some(11.4)
         );
         assert_eq!(
             response.entries[0]
@@ -1778,9 +1834,15 @@ mod tests {
                     latitude REAL NOT NULL,
                     longitude REAL NOT NULL,
                     place_name TEXT,
+                    place_details TEXT,
+                    source TEXT NOT NULL DEFAULT 'auto',
                     weather_condition TEXT,
                     weather_temp_c REAL,
                     weather_temp_f REAL,
+                    weather_icon TEXT,
+                    weather_humidity INTEGER,
+                    weather_wind_kph REAL,
+                    weather_fetched_at TEXT,
                     created_at TEXT NOT NULL
                 );
 
@@ -1805,8 +1867,12 @@ mod tests {
                 VALUES ('entry_child', 1, 0, '2026-01-03 08:00'),
                        ('entry_child', 2, 1, '2026-01-03 08:00');
                 INSERT INTO plugin_entry_locations
-                    (entry_uuid, latitude, longitude, place_name, weather_condition, weather_temp_c, weather_temp_f, created_at)
-                VALUES ('entry_child', 69.65, 18.96, 'Tromso', 'Overcast', 8.0, 46.4, '2026-01-03 08:00');
+                    (entry_uuid, latitude, longitude, place_name, source,
+                     weather_condition, weather_temp_c, weather_temp_f, weather_icon,
+                     weather_humidity, weather_wind_kph, weather_fetched_at, created_at)
+                VALUES ('entry_child', 69.65, 18.96, 'Tromso', 'manual',
+                        'Overcast', 8.0, 46.4, 'cloudy', 82, 11.4,
+                        '2026-01-03 08:05', '2026-01-03 08:00');
                 ",
             )
             .expect("fixture");

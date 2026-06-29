@@ -462,9 +462,14 @@ export type LocationInfo = {
   latitude: number;
   longitude: number;
   placeName: string | null;
+  source: string | null;
   weatherCondition: string | null;
   weatherTempC: number | null;
   weatherTempF: number | null;
+  weatherIcon: string | null;
+  weatherHumidity: number | null;
+  weatherWindKph: number | null;
+  weatherFetchedAt: string | null;
 };
 
 export type EntryThreadInfo = {

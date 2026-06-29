@@ -16,7 +16,8 @@ Capsule database:
 - Entries list with text, tag, mood, location, date, image, hidden, and sort
   filters.
 - Entry detail view with full text, tags, mood, location, attachment count, and
-  thread metadata when those tables are available.
+  thread metadata when those tables are available, including stored weather
+  condition, temperature, humidity, wind, icon, source, and fetched timestamp.
 - Backup-guarded entry creation and editing, with Capsule-compatible location
   and weather auto-capture for new entries.
 - Backup-guarded star, unstar, pin, unpin, hide, and unhide entry actions.

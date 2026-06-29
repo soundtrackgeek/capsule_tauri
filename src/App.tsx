@@ -4848,6 +4848,22 @@ function EntryDetail({
                 : "No temperature"}
             </p>
           )}
+          {(entry.location.weatherHumidity !== null || entry.location.weatherWindKph !== null) && (
+            <p>
+              {entry.location.weatherHumidity !== null ? `Humidity ${entry.location.weatherHumidity}%` : "Humidity n/a"}
+              {" / "}
+              {entry.location.weatherWindKph !== null
+                ? `Wind ${entry.location.weatherWindKph.toFixed(1)} kph`
+                : "Wind n/a"}
+            </p>
+          )}
+          {(entry.location.weatherIcon || entry.location.weatherFetchedAt || entry.location.source) && (
+            <p>
+              {[entry.location.weatherIcon, entry.location.weatherFetchedAt, entry.location.source]
+                .filter(Boolean)
+                .join(" / ")}
+            </p>
+          )}
         </div>
       )}
 
@@ -4972,6 +4988,13 @@ function EntryMeta({ entry }: { entry: Entry }) {
         <span className="tag-chip">
           <MapPin size={12} />
           {entry.location.placeName ?? "Location"}
+        </span>
+      )}
+      {entry.location?.weatherCondition && (
+        <span className="tag-chip">
+          {entry.location.weatherTempF !== null
+            ? `${entry.location.weatherCondition}, ${entry.location.weatherTempF.toFixed(1)} F`
+            : entry.location.weatherCondition}
         </span>
       )}
       {entry.thread && <span className="tag-chip">{entry.thread.entryCount} in thread</span>}
