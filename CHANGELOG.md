@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1 - 2026-06-29
+
+### Fixed
+
+- Fixed Phase 0 database resolution so the MVP production database is preferred
+  over an older `CAPSULE_HOME` fallback database.
+
 ## 0.1.0 - 2026-06-29
 
 ### Added

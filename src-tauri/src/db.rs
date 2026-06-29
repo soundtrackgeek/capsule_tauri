@@ -13,6 +13,8 @@ use crate::{
     models::{DatabaseStatus, SchemaSummary, SecurityMode, SecurityStatus},
 };
 
+const MVP_DATABASE_PATH: &str = r"C:\Users\jtill\.capsule\capsule.db";
+
 pub fn database_status() -> Result<DatabaseStatus> {
     database_status_for_path(resolve_database_path())
 }
@@ -131,19 +133,42 @@ pub fn database_status_for_path(path: PathBuf) -> Result<DatabaseStatus> {
 }
 
 pub fn resolve_database_path() -> PathBuf {
-    if let Some(path) = env_value("CAPSULE_DB_PATH") {
+    resolve_database_path_from_parts(
+        env_value("CAPSULE_DB_PATH"),
+        env_value("USERPROFILE"),
+        env_value("CAPSULE_HOME"),
+        Path::new(MVP_DATABASE_PATH),
+        Path::exists,
+    )
+}
+
+fn resolve_database_path_from_parts(
+    capsule_db_path: Option<String>,
+    userprofile: Option<String>,
+    capsule_home: Option<String>,
+    mvp_database_path: &Path,
+    path_exists: impl Fn(&Path) -> bool,
+) -> PathBuf {
+    if let Some(path) = capsule_db_path {
         return PathBuf::from(path);
     }
 
-    if let Some(home) = env_value("CAPSULE_HOME") {
+    if path_exists(mvp_database_path) {
+        return mvp_database_path.to_path_buf();
+    }
+
+    if let Some(profile) = userprofile {
+        let profile_path = PathBuf::from(profile).join(".capsule").join("capsule.db");
+        if path_exists(&profile_path) {
+            return profile_path;
+        }
+    }
+
+    if let Some(home) = capsule_home {
         return PathBuf::from(home).join("capsule.db");
     }
 
-    if let Some(profile) = env_value("USERPROFILE") {
-        return PathBuf::from(profile).join(".capsule").join("capsule.db");
-    }
-
-    PathBuf::from(r"C:\Users\jtill\.capsule\capsule.db")
+    mvp_database_path.to_path_buf()
 }
 
 pub fn backup_directory_for_database(path: &Path) -> PathBuf {
@@ -249,5 +274,34 @@ mod tests {
         assert!(!status.readable);
         assert_eq!(status.entry_count, None);
         assert!(!status.warnings.is_empty());
+    }
+
+    #[test]
+    fn resolver_prefers_mvp_database_over_capsule_home() {
+        let mvp_path = PathBuf::from(r"C:\Users\jtill\.capsule\capsule.db");
+        let resolved = resolve_database_path_from_parts(
+            None,
+            Some(r"C:\Users\jtill".to_string()),
+            Some(r"C:\Users\jtill\OneDrive\.capsule".to_string()),
+            &mvp_path,
+            |path| path == mvp_path,
+        );
+
+        assert_eq!(resolved, mvp_path);
+    }
+
+    #[test]
+    fn resolver_allows_explicit_capsule_db_path_override() {
+        let mvp_path = PathBuf::from(r"C:\Users\jtill\.capsule\capsule.db");
+        let override_path = r"D:\fixture\capsule.db";
+        let resolved = resolve_database_path_from_parts(
+            Some(override_path.to_string()),
+            Some(r"C:\Users\jtill".to_string()),
+            Some(r"C:\Users\jtill\OneDrive\.capsule".to_string()),
+            &mvp_path,
+            |_| true,
+        );
+
+        assert_eq!(resolved, PathBuf::from(override_path));
     }
 }

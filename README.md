@@ -14,8 +14,10 @@ Phase 0 establishes the scaffold and safety baseline:
 - JSON manifests written next to generated backups.
 - Rust tests for backup naming and database status inspection.
 
-The default database resolution checks `CAPSULE_DB_PATH`, then
-`CAPSULE_HOME\capsule.db`, then `%USERPROFILE%\.capsule\capsule.db`.
+The Phase 0 database resolver checks an explicit `CAPSULE_DB_PATH` first. When
+that is not set, it prefers the MVP production database at
+`C:\Users\jtill\.capsule\capsule.db`, then falls back to
+`%USERPROFILE%\.capsule\capsule.db` and finally `CAPSULE_HOME\capsule.db`.
 
 ## Commands
 

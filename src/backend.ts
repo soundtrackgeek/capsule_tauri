@@ -29,8 +29,8 @@ const mockStatus: DatabaseStatus = {
     hasFtsTable: true,
     missingCoreTables: [],
   },
-  entryCount: 1240,
-  tagCount: 52,
+  entryCount: 608,
+  tagCount: 792,
   backupCount: 3,
   lastBackupPath: "C:\\Users\\jtill\\.capsule\\capsule_backup_20260629_120000.db",
   security: {
