@@ -183,3 +183,85 @@ export type EntryHistoryResponse = {
   history: EntryHistoryItem[];
   count: number;
 };
+
+export type SearchMode = "keyword" | "semantic" | "hybrid";
+
+export type SearchRequest = {
+  query: string;
+  mode?: SearchMode;
+  since?: string;
+  until?: string;
+  tags?: string[];
+  excludeTags?: string[];
+  moods?: string[];
+  excludeMoods?: string[];
+  starred?: boolean | null;
+  pinned?: boolean | null;
+  hidden?: boolean | null;
+  includeHidden?: boolean;
+  hasImages?: boolean | null;
+  limit?: number;
+  offset?: number;
+  sort?: "asc" | "desc";
+};
+
+export type StructuredTokenKind =
+  | "keyword"
+  | "tag"
+  | "excludeTag"
+  | "mood"
+  | "excludeMood"
+  | "before"
+  | "after";
+
+export type StructuredQueryToken = {
+  kind: StructuredTokenKind;
+  value: string;
+};
+
+export type SearchResponse = {
+  entries: Entry[];
+  total: number;
+  limit: number;
+  offset: number;
+  mode: SearchMode;
+  usedFts: boolean;
+  parsedTokens: StructuredQueryToken[];
+  warnings: string[];
+};
+
+export type ThreadGroup = {
+  rootUuid: string;
+  title: string | null;
+  summary: string | null;
+  latestActivity: string | null;
+  entryCount: number;
+  entries: Entry[];
+};
+
+export type ThreadListResponse = {
+  threads: ThreadGroup[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type ThreadMetadataUpdate = {
+  title?: string | null;
+  summary?: string | null;
+};
+
+export type BulkThreadDetachRequest = {
+  childUuids: string[];
+};
+
+export type BulkThreadLinkRequest = {
+  parentUuid: string;
+  childUuids: string[];
+};
+
+export type ThreadMutationResponse = {
+  thread: ThreadGroup | null;
+  affectedUuids: string[];
+  audit: MutationAudit;
+};

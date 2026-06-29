@@ -172,6 +172,43 @@ pub fn get_entry_for_database(db_path: &Path, identifier: &str) -> Result<Entry>
     Ok(build_entry(raw_entry, &relations))
 }
 
+pub(crate) fn list_entries_by_uuids_for_database(
+    db_path: &Path,
+    uuids: &[String],
+) -> Result<Vec<Entry>> {
+    if uuids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let connection = open_entries_connection(db_path)?;
+    let tables = detected_tables(&connection)?;
+    ensure_entries_table(&tables)?;
+
+    let placeholders = placeholders(uuids.len());
+    let sql = format!("{} WHERE e.uuid IN ({placeholders})", entry_select_sql());
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(
+        params_from_iter(uuids.iter().cloned().map(Value::Text)),
+        raw_entry_from_row,
+    )?;
+    let raw_entries = rows
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("failed to load entries by UUID")?;
+    let relations = load_relations(&connection, &tables, &raw_entries)?;
+    let entries_by_uuid = raw_entries
+        .into_iter()
+        .map(|entry| {
+            let uuid = entry.uuid.clone();
+            (uuid, build_entry(entry, &relations))
+        })
+        .collect::<HashMap<_, _>>();
+
+    Ok(uuids
+        .iter()
+        .filter_map(|uuid| entries_by_uuid.get(uuid).cloned())
+        .collect())
+}
+
 pub fn get_random_entry(filters: RandomEntryFilters) -> Result<Option<Entry>> {
     get_random_entry_for_database(&db::resolve_database_path(), filters)
 }

@@ -80,6 +80,8 @@ button:active:not(:disabled) {
 .entry-card h4,
 .entry-mini h4,
 .entry-detail-heading h3,
+.thread-card h4,
+.thread-entry-row h4,
 .metadata-block h4,
 .history-row h5,
 .state-panel h3,
@@ -317,7 +319,8 @@ button:active:not(:disabled) {
 .dashboard,
 .backup-view,
 .settings-grid,
-.about-panel {
+.about-panel,
+.threads-workspace {
   min-width: 0;
 }
 
@@ -341,6 +344,8 @@ button:active:not(:disabled) {
 .filters-panel,
 .entry-list-panel,
 .detail-panel,
+.thread-list-panel,
+.thread-detail-panel,
 .state-panel {
   border: 1px solid #d7ded8;
   border-radius: 8px;
@@ -354,6 +359,8 @@ button:active:not(:disabled) {
 .filters-panel,
 .entry-list-panel,
 .detail-panel,
+.thread-list-panel,
+.thread-detail-panel,
 .state-panel {
   padding: 18px;
 }
@@ -424,6 +431,8 @@ button:active:not(:disabled) {
 .entry-stack,
 .backup-list,
 .entry-list,
+.thread-list,
+.thread-entry-list,
 .skeleton-list {
   display: grid;
   gap: 10px;
@@ -432,6 +441,8 @@ button:active:not(:disabled) {
 .entry-mini,
 .backup-row,
 .entry-card,
+.thread-card,
+.thread-entry-row,
 .skeleton-card {
   border: 1px solid #e1e7e2;
   border-radius: 8px;
@@ -440,13 +451,17 @@ button:active:not(:disabled) {
 }
 
 .entry-mini h4,
-.entry-card h4 {
+.entry-card h4,
+.thread-card h4,
+.thread-entry-row h4 {
   font-size: 14px;
   line-height: 1.35;
 }
 
 .entry-mini p,
 .entry-card p,
+.thread-card p,
+.thread-entry-row p,
 .backup-row p,
 .about-panel p,
 .metadata-block p,
@@ -458,7 +473,9 @@ button:active:not(:disabled) {
 }
 
 .entry-mini p,
-.entry-card p {
+.entry-card p,
+.thread-card p,
+.thread-entry-row p {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
@@ -512,8 +529,16 @@ button:active:not(:disabled) {
   align-items: start;
 }
 
+.threads-workspace {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.42fr) minmax(0, 0.58fr);
+  gap: 16px;
+  align-items: start;
+}
+
 .filters-panel,
-.detail-panel {
+.detail-panel,
+.thread-detail-panel {
   position: sticky;
   top: 18px;
 }
@@ -590,16 +615,20 @@ button:active:not(:disabled) {
 }
 
 .entry-card:hover,
-.entry-card--active {
+.entry-card--active,
+.thread-card:hover,
+.thread-card--active {
   border-color: #7d9b88;
   background: #fbfdfb;
 }
 
-.entry-card--active {
+.entry-card--active,
+.thread-card--active {
   box-shadow: inset 3px 0 0 #25533f;
 }
 
-.detail-panel {
+.detail-panel,
+.thread-detail-panel {
   min-height: 560px;
   max-height: calc(100dvh - 126px);
   overflow: auto;
@@ -688,6 +717,69 @@ button:active:not(:disabled) {
   margin: 4px 0 0;
   color: #66756d;
   font-size: 12px;
+}
+
+.token-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.inline-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  border-radius: 7px;
+  background: #f4e0c5;
+  color: #734417;
+  padding: 9px 10px;
+  font-size: 13px;
+}
+
+.thread-card {
+  width: 100%;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+}
+
+.thread-card-heading {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.thread-metadata-editor {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.thread-entry-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.thread-entry-index {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #edf1ee;
+  color: #3b4941;
+  font-size: 12px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-entry-actions {
+  display: flex;
+  gap: 6px;
 }
 
 .composer-view {
@@ -935,11 +1027,16 @@ button:active:not(:disabled) {
     grid-template-columns: 250px minmax(0, 1fr);
   }
 
+  .threads-workspace {
+    grid-template-columns: 1fr;
+  }
+
   .composer-view {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .detail-panel {
+  .detail-panel,
+  .thread-detail-panel {
     grid-column: 1 / -1;
     position: static;
     max-height: none;
@@ -961,7 +1058,7 @@ button:active:not(:disabled) {
   }
 
   .sidebar-nav {
-    grid-template-columns: repeat(7, minmax(0, 1fr));
+    grid-template-columns: repeat(9, minmax(0, 1fr));
   }
 
   .nav-item {
@@ -986,12 +1083,14 @@ button:active:not(:disabled) {
   .dashboard-grid,
   .settings-grid,
   .entries-workspace,
+  .threads-workspace,
   .composer-view {
     grid-template-columns: 1fr;
   }
 
   .filters-panel,
   .detail-panel,
+  .thread-detail-panel,
   .composer-side {
     position: static;
   }
@@ -1003,5 +1102,13 @@ button:active:not(:disabled) {
 
   .writer-controls {
     justify-content: flex-start;
+  }
+
+  .thread-entry-row {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .thread-entry-actions {
+    grid-column: 2;
   }
 }

@@ -10,9 +10,10 @@ mod stats;
 mod threads;
 
 use models::{
-    BackupCreateRequest, BackupCreateResponse, BackupListResponse, DatabaseStatus, Entry,
-    EntryCreate, EntryFilters, EntryHistoryResponse, EntryListResponse, EntryMutationResponse,
-    EntryUpdate, RandomEntryFilters,
+    BackupCreateRequest, BackupCreateResponse, BackupListResponse, BulkThreadDetachRequest,
+    BulkThreadLinkRequest, DatabaseStatus, Entry, EntryCreate, EntryFilters, EntryHistoryResponse,
+    EntryListResponse, EntryMutationResponse, EntryUpdate, RandomEntryFilters, SearchRequest,
+    SearchResponse, ThreadListResponse, ThreadMetadataUpdate, ThreadMutationResponse,
 };
 
 #[tauri::command]
@@ -140,6 +141,73 @@ async fn list_entry_history(identifier: String) -> Result<EntryHistoryResponse, 
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn search_entries(input: SearchRequest) -> Result<SearchResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || search::search_entries(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn list_threads(
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<ThreadListResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || threads::list_threads(limit, offset))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn update_thread_title(
+    root_uuid: String,
+    title: Option<String>,
+) -> Result<ThreadMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || threads::update_thread_title(root_uuid, title))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn update_thread_metadata(
+    root_uuid: String,
+    input: ThreadMetadataUpdate,
+) -> Result<ThreadMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || threads::update_thread_metadata(root_uuid, input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn bulk_link_threads(input: BulkThreadLinkRequest) -> Result<ThreadMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || threads::bulk_link_threads(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn bulk_detach_threads(
+    input: BulkThreadDetachRequest,
+) -> Result<ThreadMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || threads::bulk_detach_threads(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn disband_thread(root_uuid: String) -> Result<ThreadMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || threads::disband_thread(root_uuid))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -158,7 +226,14 @@ pub fn run() {
             unpin_entry,
             hide_entry,
             unhide_entry,
-            list_entry_history
+            list_entry_history,
+            search_entries,
+            list_threads,
+            update_thread_title,
+            update_thread_metadata,
+            bulk_link_threads,
+            bulk_detach_threads,
+            disband_thread
         ])
         .run(tauri::generate_context!())
         .expect("error while running Capsule Tauri app");

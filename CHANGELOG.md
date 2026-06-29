@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.4.0 - 2026-06-29
+
+### Added
+
+- Added native keyword search with structured query token parsing for tags,
+  moods, date bounds, and `NOT tag:` filters.
+- Added FTS-backed search when `entries_fts` is available, with a compatibility
+  fallback to entry text filtering.
+- Added Search view result cards with shared entry detail and star, pin, edit,
+  continue, hide, and unhide actions.
+- Added native thread group listing from continuation links with ordered entries,
+  latest activity, titles, and summaries.
+- Added backup-guarded thread title/summary updates, bulk link commands, leaf
+  detach, and disband operations with cycle prevention.
+- Added Threads view for inspecting continuation chains and managing thread
+  metadata.
+- Added Rust tests for structured search, FTS fallback, thread grouping,
+  metadata updates, cycle rejection, detach, and disband behavior.
+
+### Changed
+
+- Bumped the app version to 0.4.0.
+- Updated the app shell from Phase 2 write-safe journaling to Phase 3 search and
+  thread workflows.
+
 ## 0.3.0 - 2026-06-29
 
 ### Added

@@ -11,10 +11,12 @@ import {
   FileArchive,
   FileText,
   Filter,
+  GitBranch,
   History,
   HardDrive,
   Image as ImageIcon,
   Info,
+  Link2,
   MapPin,
   Maximize2,
   Pin,
@@ -30,11 +32,14 @@ import {
   Star,
   Tags,
   TriangleAlert,
+  Unlink2,
   X,
 } from "lucide-react";
 import {
+  bulkDetachThreads,
   createEntry,
   createBackup,
+  disbandThread,
   getDatabaseStatus,
   getEntry,
   getRandomEntry,
@@ -42,11 +47,14 @@ import {
   listEntryHistory,
   listBackups,
   listEntries,
+  listThreads,
   pinEntry,
+  searchEntries,
   starEntry,
   unhideEntry,
   unpinEntry,
   unstarEntry,
+  updateThreadMetadata,
   updateEntry,
 } from "./backend";
 import { StatusPill } from "./components/StatusPill";
@@ -61,10 +69,24 @@ import type {
   EntryListResponse,
   EntryMutationResponse,
   EntryUpdate,
+  SearchRequest,
+  SearchResponse,
+  ThreadGroup,
+  ThreadListResponse,
+  ThreadMutationResponse,
 } from "./types";
 import "./styles.css";
 
-type ActiveView = "dashboard" | "entries" | "composer" | "writer" | "backups" | "settings" | "about";
+type ActiveView =
+  | "dashboard"
+  | "entries"
+  | "threads"
+  | "search"
+  | "composer"
+  | "writer"
+  | "backups"
+  | "settings"
+  | "about";
 
 type EntryFilterForm = {
   text: string;
@@ -75,6 +97,25 @@ type EntryFilterForm = {
   includeHidden: boolean;
   hasImages: boolean;
   sort: "asc" | "desc";
+};
+
+type SearchForm = {
+  query: string;
+  mode: "keyword" | "semantic" | "hybrid";
+  tag: string;
+  excludeTag: string;
+  mood: string;
+  excludeMood: string;
+  since: string;
+  until: string;
+  includeHidden: boolean;
+  hasImages: boolean;
+  sort: "asc" | "desc";
+};
+
+type ThreadMetadataDraft = {
+  title: string;
+  summary: string;
 };
 
 type DashboardCounts = {
@@ -107,6 +148,8 @@ type WriterSettings = {
 const navItems: Array<{ id: ActiveView; label: string; icon: ReactNode }> = [
   { id: "dashboard", label: "Dashboard", icon: <Database size={18} /> },
   { id: "entries", label: "Entries", icon: <BookOpen size={18} /> },
+  { id: "threads", label: "Threads", icon: <GitBranch size={18} /> },
+  { id: "search", label: "Search", icon: <Search size={18} /> },
   { id: "composer", label: "New Entry", icon: <Plus size={18} /> },
   { id: "writer", label: "Writer", icon: <Sparkles size={18} /> },
   { id: "backups", label: "Backups", icon: <Archive size={18} /> },
@@ -147,6 +190,25 @@ const defaultEntryFilters: EntryFilterForm = {
   sort: "desc",
 };
 
+const defaultSearchForm: SearchForm = {
+  query: "",
+  mode: "keyword",
+  tag: "",
+  excludeTag: "",
+  mood: "",
+  excludeMood: "",
+  since: "",
+  until: "",
+  includeHidden: false,
+  hasImages: false,
+  sort: "desc",
+};
+
+const emptyThreadDraft: ThreadMetadataDraft = {
+  title: "",
+  summary: "",
+};
+
 function App() {
   const [activeView, setActiveView] = useState<ActiveView>("dashboard");
   const [status, setStatus] = useState<DatabaseStatus | null>(null);
@@ -163,6 +225,12 @@ function App() {
   const [entryLimit, setEntryLimit] = useState(40);
   const [entryResponse, setEntryResponse] = useState<EntryListResponse | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null);
+  const [searchForm, setSearchForm] = useState<SearchForm>(defaultSearchForm);
+  const [searchLimit, setSearchLimit] = useState(40);
+  const [searchResponse, setSearchResponse] = useState<SearchResponse | null>(null);
+  const [threadResponse, setThreadResponse] = useState<ThreadListResponse | null>(null);
+  const [selectedThreadRoot, setSelectedThreadRoot] = useState<string | null>(null);
+  const [threadDraft, setThreadDraft] = useState<ThreadMetadataDraft>(emptyThreadDraft);
   const [composerMode, setComposerMode] = useState<ComposerMode>("create");
   const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
   const [composerDraft, setComposerDraft] = useState<ComposerDraft>(emptyComposerDraft);
@@ -172,9 +240,12 @@ function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [entriesLoading, setEntriesLoading] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [threadsLoading, setThreadsLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [creatingBackup, setCreatingBackup] = useState(false);
   const [savingEntry, setSavingEntry] = useState(false);
+  const [savingThread, setSavingThread] = useState(false);
   const [mutatingEntryUuid, setMutatingEntryUuid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -204,6 +275,33 @@ function App() {
     };
   }, [entryFilters, entryLimit]);
 
+  const builtSearchRequest = useMemo<SearchRequest>(() => {
+    const tags = splitFilter(searchForm.tag);
+    const excludeTags = splitFilter(searchForm.excludeTag);
+    const moods = splitFilter(searchForm.mood);
+    const excludeMoods = splitFilter(searchForm.excludeMood);
+    return {
+      query: searchForm.query,
+      mode: searchForm.mode,
+      tags: tags.length ? tags : undefined,
+      excludeTags: excludeTags.length ? excludeTags : undefined,
+      moods: moods.length ? moods : undefined,
+      excludeMoods: excludeMoods.length ? excludeMoods : undefined,
+      since: searchForm.since || undefined,
+      until: searchForm.until || undefined,
+      includeHidden: searchForm.includeHidden,
+      hasImages: searchForm.hasImages ? true : null,
+      limit: searchLimit,
+      offset: 0,
+      sort: searchForm.sort,
+    };
+  }, [searchForm, searchLimit]);
+
+  const selectedThread = useMemo(
+    () => threadResponse?.threads.find((thread) => thread.rootUuid === selectedThreadRoot) ?? null,
+    [selectedThreadRoot, threadResponse],
+  );
+
   const loadEntryList = useCallback(async () => {
     if (!status?.readable) {
       setEntryResponse(null);
@@ -228,6 +326,55 @@ function App() {
       setEntriesLoading(false);
     }
   }, [builtEntryFilters, status?.readable]);
+
+  const loadSearchResults = useCallback(async () => {
+    if (!status?.readable) {
+      setSearchResponse(null);
+      return;
+    }
+
+    setSearchLoading(true);
+    setError(null);
+    try {
+      const response = await searchEntries(builtSearchRequest);
+      setSearchResponse(response);
+      setSelectedEntry((current) => {
+        if (!current) {
+          return response.entries[0] ?? null;
+        }
+        return response.entries.find((entry) => entry.uuid === current.uuid) ?? response.entries[0] ?? null;
+      });
+    } catch (searchError) {
+      setError(searchError instanceof Error ? searchError.message : "Unable to search entries");
+    } finally {
+      setSearchLoading(false);
+    }
+  }, [builtSearchRequest, status?.readable]);
+
+  const loadThreads = useCallback(async () => {
+    if (!status?.readable) {
+      setThreadResponse(null);
+      setSelectedThreadRoot(null);
+      return;
+    }
+
+    setThreadsLoading(true);
+    setError(null);
+    try {
+      const response = await listThreads(50, 0);
+      setThreadResponse(response);
+      setSelectedThreadRoot((current) => {
+        if (current && response.threads.some((thread) => thread.rootUuid === current)) {
+          return current;
+        }
+        return response.threads[0]?.rootUuid ?? null;
+      });
+    } catch (threadError) {
+      setError(threadError instanceof Error ? threadError.message : "Unable to load threads");
+    } finally {
+      setThreadsLoading(false);
+    }
+  }, [status?.readable]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -310,6 +457,25 @@ function App() {
     }
   }, [activeView, loadEntryList]);
 
+  useEffect(() => {
+    if (activeView === "search") {
+      void loadSearchResults();
+    }
+  }, [activeView, loadSearchResults]);
+
+  useEffect(() => {
+    if (activeView === "threads") {
+      void loadThreads();
+    }
+  }, [activeView, loadThreads]);
+
+  useEffect(() => {
+    setThreadDraft({
+      title: selectedThread?.title ?? "",
+      summary: selectedThread?.summary ?? "",
+    });
+  }, [selectedThread?.rootUuid, selectedThread?.summary, selectedThread?.title]);
+
   const handleCreateBackup = useCallback(async () => {
     setCreatingBackup(true);
     setError(null);
@@ -388,9 +554,13 @@ function App() {
       await refresh();
       if (activeView === "entries") {
         await loadEntryList();
+      } else if (activeView === "search") {
+        await loadSearchResults();
+      } else if (activeView === "threads") {
+        await loadThreads();
       }
     },
-    [activeView, loadEntryList, refresh],
+    [activeView, loadEntryList, loadSearchResults, loadThreads, refresh],
   );
 
   const handleSaveEntry = useCallback(async () => {
@@ -472,6 +642,90 @@ function App() {
     [applyMutationResponse],
   );
 
+  const applyThreadMutationResponse = useCallback(
+    async (response: ThreadMutationResponse) => {
+      setNotice(`Thread saved with backup: ${response.audit.backupPath}`);
+      setThreadResponse((current) => {
+        if (!current || !response.thread) {
+          return current;
+        }
+        return {
+          ...current,
+          threads: current.threads.map((thread) =>
+            thread.rootUuid === response.thread?.rootUuid ? response.thread : thread,
+          ),
+        };
+      });
+      await refresh();
+      await loadThreads();
+      if (activeView === "search") {
+        await loadSearchResults();
+      }
+    },
+    [activeView, loadSearchResults, loadThreads, refresh],
+  );
+
+  const handleSaveThreadMetadata = useCallback(
+    async (thread: ThreadGroup) => {
+      setSavingThread(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const response = await updateThreadMetadata(thread.rootUuid, {
+          title: nullableFromText(threadDraft.title),
+          summary: nullableFromText(threadDraft.summary),
+        });
+        await applyThreadMutationResponse(response);
+      } catch (threadError) {
+        setError(threadError instanceof Error ? threadError.message : "Unable to save thread");
+      } finally {
+        setSavingThread(false);
+      }
+    },
+    [applyThreadMutationResponse, threadDraft],
+  );
+
+  const handleDetachThreadEntry = useCallback(
+    async (entry: Entry) => {
+      if (!window.confirm("Detach this entry from its thread?")) {
+        return;
+      }
+      setMutatingEntryUuid(entry.uuid);
+      setError(null);
+      setNotice(null);
+      try {
+        const response = await bulkDetachThreads({ childUuids: [entry.uuid] });
+        await applyThreadMutationResponse(response);
+      } catch (threadError) {
+        setError(threadError instanceof Error ? threadError.message : "Unable to detach entry");
+      } finally {
+        setMutatingEntryUuid(null);
+      }
+    },
+    [applyThreadMutationResponse],
+  );
+
+  const handleDisbandThread = useCallback(
+    async (thread: ThreadGroup) => {
+      if (!window.confirm("Disband this thread and remove all continuation links?")) {
+        return;
+      }
+      setSavingThread(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const response = await disbandThread(thread.rootUuid);
+        await applyThreadMutationResponse(response);
+        setSelectedThreadRoot(null);
+      } catch (threadError) {
+        setError(threadError instanceof Error ? threadError.message : "Unable to disband thread");
+      } finally {
+        setSavingThread(false);
+      }
+    },
+    [applyThreadMutationResponse],
+  );
+
   const handleLoadHistory = useCallback(async (entry: Entry) => {
     setHistoryLoading(true);
     setError(null);
@@ -513,6 +767,8 @@ function App() {
   const title = {
     dashboard: "Write-Safe Journal",
     entries: "Entries",
+    threads: "Threads",
+    search: "Search",
     composer: composerMode === "edit" ? "Edit Entry" : "New Entry",
     writer: "Writer Mode",
     backups: "Backups",
@@ -574,7 +830,7 @@ function App() {
       <main className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Phase 2</p>
+            <p className="eyebrow">Phase 3</p>
             <h2>{title}</h2>
           </div>
 
@@ -682,6 +938,53 @@ function App() {
               setEntryLimit(40);
               setEntryFilters(next);
             }}
+            status={status}
+          />
+        )}
+
+        {activeView === "search" && (
+          <SearchView
+            detailLoading={detailLoading}
+            entryHistory={entryHistory}
+            historyLoading={historyLoading}
+            loading={searchLoading}
+            mutatingEntryUuid={mutatingEntryUuid}
+            onContinueEntry={openContinueEntry}
+            onEditEntry={openEditEntry}
+            onEntryAction={handleEntryAction}
+            onLoadHistory={handleLoadHistory}
+            onLoadMore={() => setSearchLimit((current) => current + 40)}
+            onResetSearch={() => {
+              setSearchLimit(40);
+              setSearchForm(defaultSearchForm);
+            }}
+            onSelectEntry={handleSelectEntry}
+            searchForm={searchForm}
+            searchResponse={searchResponse}
+            selectedEntry={selectedEntry}
+            setSearchForm={(next) => {
+              setSearchLimit(40);
+              setSearchForm(next);
+            }}
+            status={status}
+          />
+        )}
+
+        {activeView === "threads" && (
+          <ThreadsView
+            draft={threadDraft}
+            loading={threadsLoading}
+            mutatingEntryUuid={mutatingEntryUuid}
+            onContinueEntry={openContinueEntry}
+            onDetachEntry={handleDetachThreadEntry}
+            onDisbandThread={handleDisbandThread}
+            onEditEntry={openEditEntry}
+            onSaveMetadata={handleSaveThreadMetadata}
+            onSelectThread={setSelectedThreadRoot}
+            response={threadResponse}
+            saving={savingThread}
+            selectedThread={selectedThread}
+            setDraft={setThreadDraft}
             status={status}
           />
         )}
@@ -1017,6 +1320,452 @@ function EntriesView({
         onEntryAction={onEntryAction}
         onLoadHistory={onLoadHistory}
       />
+    </section>
+  );
+}
+
+type SearchViewProps = {
+  status: DatabaseStatus | null;
+  searchForm: SearchForm;
+  setSearchForm: (next: SearchForm) => void;
+  searchResponse: SearchResponse | null;
+  selectedEntry: Entry | null;
+  entryHistory: EntryHistoryResponse | null;
+  loading: boolean;
+  detailLoading: boolean;
+  historyLoading: boolean;
+  mutatingEntryUuid: string | null;
+  onSelectEntry: (entry: Entry) => void;
+  onEditEntry: (entry: Entry) => void;
+  onContinueEntry: (entry: Entry) => void;
+  onEntryAction: (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => void;
+  onLoadHistory: (entry: Entry) => void;
+  onLoadMore: () => void;
+  onResetSearch: () => void;
+};
+
+function SearchView({
+  status,
+  searchForm,
+  setSearchForm,
+  searchResponse,
+  selectedEntry,
+  entryHistory,
+  loading,
+  detailLoading,
+  historyLoading,
+  mutatingEntryUuid,
+  onSelectEntry,
+  onEditEntry,
+  onContinueEntry,
+  onEntryAction,
+  onLoadHistory,
+  onLoadMore,
+  onResetSearch,
+}: SearchViewProps) {
+  if (status && (!status.dbExists || !status.readable)) {
+    return (
+      <section className="state-panel">
+        <TriangleAlert size={22} />
+        <h3>Database is not searchable</h3>
+        <p>{status.security.message ?? "Open Settings to confirm the active database path."}</p>
+        <code>{status.dbPath}</code>
+      </section>
+    );
+  }
+
+  const entries = searchResponse?.entries ?? [];
+
+  return (
+    <section className="entries-workspace" aria-label="Search">
+      <aside className="filters-panel">
+        <div className="panel-title">
+          <Search size={18} />
+          <h3>Search</h3>
+        </div>
+        <label className="field">
+          <span>Query</span>
+          <input
+            onChange={(event) => setSearchForm({ ...searchForm, query: event.target.value })}
+            placeholder="keyword tag:work NOT tag:archive"
+            type="search"
+            value={searchForm.query}
+          />
+        </label>
+        <label className="field">
+          <span>Mode</span>
+          <select
+            onChange={(event) =>
+              setSearchForm({ ...searchForm, mode: event.target.value as SearchForm["mode"] })
+            }
+            value={searchForm.mode}
+          >
+            <option value="keyword">Keyword</option>
+            <option disabled value="semantic">
+              Semantic later
+            </option>
+            <option disabled value="hybrid">
+              Hybrid later
+            </option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Include tags</span>
+          <input
+            onChange={(event) => setSearchForm({ ...searchForm, tag: event.target.value })}
+            placeholder="work, capsule"
+            type="text"
+            value={searchForm.tag}
+          />
+        </label>
+        <label className="field">
+          <span>Exclude tags</span>
+          <input
+            onChange={(event) => setSearchForm({ ...searchForm, excludeTag: event.target.value })}
+            placeholder="archive"
+            type="text"
+            value={searchForm.excludeTag}
+          />
+        </label>
+        <div className="field-grid">
+          <label className="field">
+            <span>Mood</span>
+            <input
+              onChange={(event) => setSearchForm({ ...searchForm, mood: event.target.value })}
+              placeholder="focused"
+              type="text"
+              value={searchForm.mood}
+            />
+          </label>
+          <label className="field">
+            <span>Not mood</span>
+            <input
+              onChange={(event) =>
+                setSearchForm({ ...searchForm, excludeMood: event.target.value })
+              }
+              placeholder="sad"
+              type="text"
+              value={searchForm.excludeMood}
+            />
+          </label>
+        </div>
+        <div className="field-grid">
+          <label className="field">
+            <span>After</span>
+            <input
+              onChange={(event) => setSearchForm({ ...searchForm, since: event.target.value })}
+              type="date"
+              value={searchForm.since}
+            />
+          </label>
+          <label className="field">
+            <span>Before</span>
+            <input
+              onChange={(event) => setSearchForm({ ...searchForm, until: event.target.value })}
+              type="date"
+              value={searchForm.until}
+            />
+          </label>
+        </div>
+        <label className="field">
+          <span>Sort</span>
+          <select
+            onChange={(event) =>
+              setSearchForm({ ...searchForm, sort: event.target.value as "asc" | "desc" })
+            }
+            value={searchForm.sort}
+          >
+            <option value="desc">Newest first</option>
+            <option value="asc">Oldest first</option>
+          </select>
+        </label>
+        <label className="check-row">
+          <input
+            checked={searchForm.includeHidden}
+            onChange={(event) =>
+              setSearchForm({ ...searchForm, includeHidden: event.target.checked })
+            }
+            type="checkbox"
+          />
+          <span>Include hidden</span>
+        </label>
+        <label className="check-row">
+          <input
+            checked={searchForm.hasImages}
+            onChange={(event) => setSearchForm({ ...searchForm, hasImages: event.target.checked })}
+            type="checkbox"
+          />
+          <span>Has images</span>
+        </label>
+        <button className="secondary-button secondary-button--full" onClick={onResetSearch} type="button">
+          Reset search
+        </button>
+      </aside>
+
+      <div className="entry-list-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Results</p>
+            <h3>{searchResponse ? `${searchResponse.total} entries` : "Loading search"}</h3>
+          </div>
+          <StatusPill tone={searchResponse?.usedFts ? "good" : "neutral"}>
+            {searchResponse?.usedFts ? "FTS" : "Keyword"}
+          </StatusPill>
+        </div>
+
+        {searchResponse?.parsedTokens.length ? (
+          <div className="token-row">
+            {searchResponse.parsedTokens.map((token, index) => (
+              <span className="tag-chip" key={`${token.kind}-${token.value}-${index}`}>
+                {token.kind}: {token.value}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        {searchResponse?.warnings.map((warning) => (
+          <div className="inline-warning" key={warning}>
+            <TriangleAlert size={15} />
+            {warning}
+          </div>
+        ))}
+
+        <div className="entry-list">
+          {loading && <SkeletonList />}
+          {!loading && entries.length === 0 && (
+            <div className="empty-state">No entries match the current search.</div>
+          )}
+          {!loading &&
+            entries.map((entry) => (
+              <button
+                className={
+                  selectedEntry?.uuid === entry.uuid ? "entry-card entry-card--active" : "entry-card"
+                }
+                key={entry.uuid}
+                onClick={() => onSelectEntry(entry)}
+                type="button"
+              >
+                <EntryCardContent entry={entry} />
+              </button>
+            ))}
+        </div>
+
+        {searchResponse && searchResponse.entries.length < searchResponse.total && (
+          <button className="secondary-button secondary-button--full" onClick={onLoadMore} type="button">
+            Load more
+          </button>
+        )}
+      </div>
+
+      <EntryDetail
+        entry={selectedEntry}
+        entryHistory={entryHistory}
+        historyLoading={historyLoading}
+        loading={detailLoading}
+        mutating={Boolean(selectedEntry && mutatingEntryUuid === selectedEntry.uuid)}
+        onContinue={onContinueEntry}
+        onEdit={onEditEntry}
+        onEntryAction={onEntryAction}
+        onLoadHistory={onLoadHistory}
+      />
+    </section>
+  );
+}
+
+type ThreadsViewProps = {
+  status: DatabaseStatus | null;
+  response: ThreadListResponse | null;
+  selectedThread: ThreadGroup | null;
+  draft: ThreadMetadataDraft;
+  setDraft: (next: ThreadMetadataDraft) => void;
+  loading: boolean;
+  saving: boolean;
+  mutatingEntryUuid: string | null;
+  onSelectThread: (rootUuid: string) => void;
+  onSaveMetadata: (thread: ThreadGroup) => void;
+  onDisbandThread: (thread: ThreadGroup) => void;
+  onEditEntry: (entry: Entry) => void;
+  onContinueEntry: (entry: Entry) => void;
+  onDetachEntry: (entry: Entry) => void;
+};
+
+function ThreadsView({
+  status,
+  response,
+  selectedThread,
+  draft,
+  setDraft,
+  loading,
+  saving,
+  mutatingEntryUuid,
+  onSelectThread,
+  onSaveMetadata,
+  onDisbandThread,
+  onEditEntry,
+  onContinueEntry,
+  onDetachEntry,
+}: ThreadsViewProps) {
+  if (status && (!status.dbExists || !status.readable)) {
+    return (
+      <section className="state-panel">
+        <TriangleAlert size={22} />
+        <h3>Database is not readable</h3>
+        <p>{status.security.message ?? "Open Settings to confirm the active database path."}</p>
+        <code>{status.dbPath}</code>
+      </section>
+    );
+  }
+
+  const threads = response?.threads ?? [];
+
+  return (
+    <section className="threads-workspace" aria-label="Threads">
+      <div className="thread-list-panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Continuation groups</p>
+            <h3>{response ? `${response.total} threads` : "Loading threads"}</h3>
+          </div>
+          <StatusPill tone="neutral">{loading ? "Loading" : "UUID identity"}</StatusPill>
+        </div>
+
+        <div className="thread-list">
+          {loading && <SkeletonList />}
+          {!loading && threads.length === 0 && (
+            <div className="empty-state">No continuation threads found.</div>
+          )}
+          {!loading &&
+            threads.map((thread) => (
+              <button
+                className={
+                  selectedThread?.rootUuid === thread.rootUuid
+                    ? "thread-card thread-card--active"
+                    : "thread-card"
+                }
+                key={thread.rootUuid}
+                onClick={() => onSelectThread(thread.rootUuid)}
+                type="button"
+              >
+                <div className="thread-card-heading">
+                  <GitBranch size={17} />
+                  <div>
+                    <h4>{thread.title || thread.rootUuid}</h4>
+                    <p>{thread.summary || thread.entries[0]?.textPlain.slice(0, 120)}</p>
+                  </div>
+                </div>
+                <div className="entry-meta">
+                  <span className="tag-chip">{thread.entryCount} entries</span>
+                  <span className="tag-chip">{formatDateTime(thread.latestActivity)}</span>
+                </div>
+              </button>
+            ))}
+        </div>
+      </div>
+
+      <aside className="thread-detail-panel">
+        {!selectedThread ? (
+          <div className="detail-panel--empty">
+            <GitBranch size={22} />
+            <h3>No thread selected</h3>
+            <p>Select a thread to inspect continuation order.</p>
+          </div>
+        ) : (
+          <>
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">{selectedThread.rootUuid}</p>
+                <h3>{selectedThread.title || "Untitled thread"}</h3>
+              </div>
+              <StatusPill tone="good">{selectedThread.entryCount} entries</StatusPill>
+            </div>
+
+            <div className="thread-metadata-editor">
+              <label className="field">
+                <span>Title</span>
+                <input
+                  onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+                  placeholder="Thread title"
+                  type="text"
+                  value={draft.title}
+                />
+              </label>
+              <label className="field">
+                <span>Summary</span>
+                <textarea
+                  className="compact-textarea"
+                  onChange={(event) => setDraft({ ...draft, summary: event.target.value })}
+                  placeholder="Thread summary"
+                  value={draft.summary}
+                />
+              </label>
+              <div className="entry-action-bar">
+                <button
+                  className="primary-button"
+                  disabled={saving}
+                  onClick={() => onSaveMetadata(selectedThread)}
+                  type="button"
+                >
+                  <Save size={17} />
+                  {saving ? "Saving" : "Save"}
+                </button>
+                <button
+                  className="secondary-button"
+                  disabled={saving}
+                  onClick={() => onDisbandThread(selectedThread)}
+                  type="button"
+                >
+                  <Unlink2 size={17} />
+                  Disband
+                </button>
+              </div>
+            </div>
+
+            <div className="thread-entry-list">
+              {selectedThread.entries.map((entry, index) => {
+                const canDetach =
+                  !entry.thread?.isRoot && isThreadLeaf(selectedThread, entry);
+                return (
+                  <article className="thread-entry-row" key={entry.uuid}>
+                    <div className="thread-entry-index">{index + 1}</div>
+                    <div className="thread-entry-main">
+                      <h4>{entry.title || entry.textPlain.slice(0, 86) || "Untitled entry"}</h4>
+                      <p>{entry.textPlain.slice(0, 180)}</p>
+                      <EntryMeta entry={entry} />
+                    </div>
+                    <div className="thread-entry-actions">
+                      <button
+                        className="icon-button icon-button--small"
+                        onClick={() => onContinueEntry(entry)}
+                        title="Continue from entry"
+                        type="button"
+                      >
+                        <Link2 size={15} />
+                      </button>
+                      <button
+                        className="icon-button icon-button--small"
+                        onClick={() => onEditEntry(entry)}
+                        title="Edit entry"
+                        type="button"
+                      >
+                        <Edit3 size={15} />
+                      </button>
+                      <button
+                        className="icon-button icon-button--small"
+                        disabled={!canDetach || mutatingEntryUuid === entry.uuid}
+                        onClick={() => onDetachEntry(entry)}
+                        title={canDetach ? "Detach leaf entry" : "Only leaf continuations can detach here"}
+                        type="button"
+                      >
+                        <Unlink2 size={15} />
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </aside>
     </section>
   );
 }
@@ -1398,8 +2147,8 @@ function SettingsView({ status, backupDirectory, statusTone }: SettingsViewProps
       </Panel>
       <Panel icon={<Info size={20} />} title="Application">
         <dl className="detail-list">
-          <Detail label="Version" value="0.3.0" />
-          <Detail label="Mode" value="Write-safe journal" />
+          <Detail label="Version" value="0.4.0" />
+          <Detail label="Mode" value="Search and threads" />
           <Detail label="Writes" value="Backup guarded" />
         </dl>
       </Panel>
@@ -1412,9 +2161,9 @@ function AboutView() {
     <section className="about-panel">
       <h3>Capsule Tauri</h3>
       <p>
-        Phase 2 adds backup-guarded core journaling for the active Capsule database:
-        create, edit, star, pin, hide, local draft recovery, Writer Mode, and entry
-        history review.
+        Phase 3 adds keyword search with structured query tokens and native thread
+        management for the active Capsule database, while keeping Phase 2's
+        backup-guarded journal writes.
       </p>
       <p>Hard delete remains reserved until the legacy resequencing behavior is fully matched and tested.</p>
     </section>
@@ -1786,6 +2535,10 @@ function splitFilter(value: string) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function isThreadLeaf(thread: ThreadGroup, entry: Entry) {
+  return !thread.entries.some((item) => item.thread?.parentUuid === entry.uuid);
 }
 
 export default App;

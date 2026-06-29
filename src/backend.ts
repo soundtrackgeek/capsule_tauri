@@ -12,6 +12,12 @@ import type {
   EntryMutationResponse,
   EntryUpdate,
   RandomEntryFilters,
+  SearchRequest,
+  SearchResponse,
+  ThreadGroup,
+  ThreadListResponse,
+  ThreadMetadataUpdate,
+  ThreadMutationResponse,
 } from "./types";
 
 declare global {
@@ -148,7 +154,14 @@ let mockEntries: Entry[] = [
     pinned: false,
     hidden: false,
     location: null,
-    thread: null,
+    thread: {
+      rootUuid: "entry_oiuir59w",
+      parentUuid: "entry_oiuir59w",
+      title: "Desktop Capsule work",
+      summary: "Notes about bringing Capsule into a local-first desktop app.",
+      entryCount: 3,
+      isRoot: false,
+    },
     attachmentCount: 1,
   },
   {
@@ -171,7 +184,14 @@ let mockEntries: Entry[] = [
     pinned: false,
     hidden: false,
     location: null,
-    thread: null,
+    thread: {
+      rootUuid: "entry_oiuir59w",
+      parentUuid: "entry_kree51ux",
+      title: "Desktop Capsule work",
+      summary: "Notes about bringing Capsule into a local-first desktop app.",
+      entryCount: 3,
+      isRoot: false,
+    },
     attachmentCount: 0,
   },
 ];
@@ -469,6 +489,376 @@ export async function listEntryHistory(identifier: string): Promise<EntryHistory
   }
 }
 
+export async function searchEntries(input: SearchRequest): Promise<SearchResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<SearchResponse>("search_entries", { input });
+    }
+
+    await pause(180);
+    const parsed = parseMockSearch(input);
+    const filtered = applyMockFilters(mockEntries, parsed.filters);
+    const offset = input.offset ?? 0;
+    const limit = input.limit ?? 40;
+    const mode: SearchResponse["mode"] = "keyword";
+    return {
+      entries: filtered.slice(offset, offset + limit),
+      total: filtered.length,
+      limit,
+      offset,
+      mode,
+      usedFts: false,
+      parsedTokens: parsed.tokens,
+      warnings:
+        input.mode && input.mode !== "keyword"
+          ? [
+              "Semantic and hybrid search are not implemented yet; using keyword search.",
+              ...parsed.warnings,
+            ]
+          : parsed.warnings,
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function listThreads(limit = 30, offset = 0): Promise<ThreadListResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<ThreadListResponse>("list_threads", { limit, offset });
+    }
+
+    await pause(180);
+    const threads = buildMockThreads();
+    return {
+      threads: threads.slice(offset, offset + limit),
+      total: threads.length,
+      limit,
+      offset,
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function updateThreadTitle(
+  rootUuid: string,
+  title?: string | null,
+): Promise<ThreadMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<ThreadMutationResponse>("update_thread_title", { rootUuid, title });
+    }
+
+    return updateMockThreadMetadata(rootUuid, { title });
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function updateThreadMetadata(
+  rootUuid: string,
+  input: ThreadMetadataUpdate,
+): Promise<ThreadMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<ThreadMutationResponse>("update_thread_metadata", { rootUuid, input });
+    }
+
+    return updateMockThreadMetadata(rootUuid, input);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function bulkLinkThreads(input: {
+  parentUuid: string;
+  childUuids: string[];
+}): Promise<ThreadMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<ThreadMutationResponse>("bulk_link_threads", { input });
+    }
+
+    await pause(240);
+    const parent = mockEntries.find((entry) => entry.uuid === input.parentUuid);
+    if (!parent) {
+      throw new Error(`Entry not found: ${input.parentUuid}`);
+    }
+    const rootUuid = parent.thread?.rootUuid ?? parent.uuid;
+    const rootThread = mockEntries.find((entry) => entry.uuid === rootUuid)?.thread;
+    const affected = new Set<string>();
+    mockEntries = mockEntries.map((entry) => {
+      if (!input.childUuids.includes(entry.uuid)) {
+        return entry;
+      }
+      if (entry.uuid === input.parentUuid) {
+        throw new Error("An entry cannot continue itself.");
+      }
+      affected.add(entry.uuid);
+      return {
+        ...entry,
+        thread: {
+          rootUuid,
+          parentUuid: parent.uuid,
+          title: rootThread?.title ?? parent.title,
+          summary: rootThread?.summary ?? parent.summary,
+          entryCount: 1,
+          isRoot: false,
+        },
+      };
+    });
+    syncMockThreadCounts();
+    const thread = buildMockThreads().find((item) => item.rootUuid === rootUuid) ?? null;
+    return { thread, affectedUuids: [...affected], audit: mockAudit("thread.link") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function bulkDetachThreads(input: {
+  childUuids: string[];
+}): Promise<ThreadMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<ThreadMutationResponse>("bulk_detach_threads", { input });
+    }
+
+    await pause(240);
+    const affected = new Set<string>();
+    const rootUuid = mockEntries.find((entry) => input.childUuids.includes(entry.uuid))?.thread
+      ?.rootUuid;
+    mockEntries = mockEntries.map((entry) => {
+      if (!input.childUuids.includes(entry.uuid) || entry.thread?.isRoot) {
+        return entry;
+      }
+      affected.add(entry.uuid);
+      return { ...entry, thread: null };
+    });
+    syncMockThreadCounts();
+    const thread = rootUuid
+      ? buildMockThreads().find((item) => item.rootUuid === rootUuid) ?? null
+      : null;
+    return { thread, affectedUuids: [...affected], audit: mockAudit("thread.detach") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function disbandThread(rootUuid: string): Promise<ThreadMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<ThreadMutationResponse>("disband_thread", { rootUuid });
+    }
+
+    await pause(260);
+    const affected: string[] = [];
+    mockEntries = mockEntries.map((entry) => {
+      if (entry.thread?.rootUuid !== rootUuid) {
+        return entry;
+      }
+      affected.push(entry.uuid);
+      return { ...entry, thread: null };
+    });
+    return { thread: null, affectedUuids: affected, audit: mockAudit("thread.disband") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+function parseMockSearch(input: SearchRequest) {
+  const filters: EntryFilters = {
+    since: input.since,
+    until: input.until,
+    tags: input.tags,
+    excludeTags: input.excludeTags,
+    moods: input.moods,
+    excludeMoods: input.excludeMoods,
+    starred: input.starred,
+    pinned: input.pinned,
+    hidden: input.hidden,
+    includeHidden: input.includeHidden,
+    hasImages: input.hasImages,
+    limit: input.limit,
+    offset: input.offset,
+    sort: input.sort,
+  };
+  const tokens: SearchResponse["parsedTokens"] = [];
+  const keywords: string[] = [];
+  const parts = input.query.split(/\s+/).filter(Boolean);
+
+  for (let index = 0; index < parts.length; index += 1) {
+    let negated = false;
+    let token = parts[index];
+    if (token.toUpperCase() === "NOT" && parts[index + 1]) {
+      negated = true;
+      index += 1;
+      token = parts[index];
+    }
+
+    const [rawKey, ...rawValue] = token.split(":");
+    const key = rawKey.toLowerCase();
+    const value = rawValue.join(":").trim();
+    if (value && key === "tag") {
+      if (negated) {
+        filters.excludeTags = appendUnique(filters.excludeTags, value);
+        tokens.push({ kind: "excludeTag", value });
+      } else {
+        filters.tags = appendUnique(filters.tags, value);
+        tokens.push({ kind: "tag", value });
+      }
+    } else if (value && key === "mood") {
+      if (negated) {
+        filters.excludeMoods = appendUnique(filters.excludeMoods, value);
+        tokens.push({ kind: "excludeMood", value });
+      } else {
+        filters.moods = appendUnique(filters.moods, value);
+        tokens.push({ kind: "mood", value });
+      }
+    } else if (value && key === "before") {
+      filters.until = value;
+      tokens.push({ kind: "before", value });
+    } else if (value && key === "after") {
+      filters.since = value;
+      tokens.push({ kind: "after", value });
+    } else {
+      if (negated) {
+        keywords.push("NOT");
+      }
+      keywords.push(token);
+    }
+  }
+
+  const keyword = keywords.join(" ").trim();
+  if (keyword) {
+    filters.text = keyword;
+    tokens.push({ kind: "keyword", value: keyword });
+  }
+
+  return { filters, tokens, warnings: [] as string[] };
+}
+
+function buildMockThreads(): ThreadGroup[] {
+  const groups = new Map<string, Entry[]>();
+  for (const entry of mockEntries) {
+    if (!entry.thread) {
+      continue;
+    }
+    groups.set(entry.thread.rootUuid, [...(groups.get(entry.thread.rootUuid) ?? []), entry]);
+  }
+
+  return [...groups.entries()]
+    .map(([rootUuid, entries]) => {
+      const ordered = orderMockThreadEntries(rootUuid, entries);
+      const root = ordered.find((entry) => entry.uuid === rootUuid) ?? ordered[0];
+      return {
+        rootUuid,
+        title: root.thread?.title ?? root.title,
+        summary: root.thread?.summary ?? root.summary,
+        latestActivity:
+          ordered
+            .map((entry) => entry.updatedAt ?? entry.createdAt)
+            .sort()
+            .at(-1) ?? null,
+        entryCount: ordered.length,
+        entries: ordered,
+      };
+    })
+    .filter((thread) => thread.entries.length > 1)
+    .sort((left, right) => (right.latestActivity ?? "").localeCompare(left.latestActivity ?? ""));
+}
+
+function orderMockThreadEntries(rootUuid: string, entries: Entry[]) {
+  const byParent = new Map<string, Entry[]>();
+  for (const entry of entries) {
+    if (!entry.thread?.parentUuid) {
+      continue;
+    }
+    byParent.set(entry.thread.parentUuid, [...(byParent.get(entry.thread.parentUuid) ?? []), entry]);
+  }
+  for (const children of byParent.values()) {
+    children.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  const ordered: Entry[] = [];
+  const append = (uuid: string) => {
+    const entry = entries.find((item) => item.uuid === uuid);
+    if (entry && !ordered.some((item) => item.uuid === entry.uuid)) {
+      ordered.push(entry);
+    }
+    for (const child of byParent.get(uuid) ?? []) {
+      append(child.uuid);
+    }
+  };
+  append(rootUuid);
+
+  return ordered.length === entries.length
+    ? ordered
+    : [...entries].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
+async function updateMockThreadMetadata(
+  rootUuid: string,
+  input: ThreadMetadataUpdate,
+): Promise<ThreadMutationResponse> {
+  await pause(240);
+  const thread = buildMockThreads().find((item) => item.rootUuid === rootUuid);
+  if (!thread) {
+    throw new Error(`Thread not found: ${rootUuid}`);
+  }
+
+  const title = input.title === undefined ? thread.title : normalizeNullable(input.title);
+  const summary = input.summary === undefined ? thread.summary : normalizeNullable(input.summary);
+  mockEntries = mockEntries.map((entry) => {
+    if (entry.thread?.rootUuid !== rootUuid) {
+      return entry;
+    }
+    return {
+      ...entry,
+      thread: {
+        ...entry.thread,
+        title,
+        summary,
+      },
+    };
+  });
+  const updated = buildMockThreads().find((item) => item.rootUuid === rootUuid) ?? null;
+  return { thread: updated, affectedUuids: [rootUuid], audit: mockAudit("thread.metadata.update") };
+}
+
+function syncMockThreadCounts() {
+  const groups = new Map<string, Entry[]>();
+  for (const entry of mockEntries) {
+    if (!entry.thread) {
+      continue;
+    }
+    groups.set(entry.thread.rootUuid, [...(groups.get(entry.thread.rootUuid) ?? []), entry]);
+  }
+  mockEntries = mockEntries.map((entry) => {
+    if (!entry.thread) {
+      return entry;
+    }
+    return {
+      ...entry,
+      thread: {
+        ...entry.thread,
+        entryCount: groups.get(entry.thread.rootUuid)?.length ?? entry.thread.entryCount,
+      },
+    };
+  });
+}
+
+function appendUnique(values: string[] | undefined, value: string) {
+  const normalized = value.trim();
+  if (!normalized) {
+    return values;
+  }
+  const current = values ?? [];
+  return current.some((item) => item.toLowerCase() === normalized.toLowerCase())
+    ? current
+    : [...current, normalized];
+}
+
 async function setEntryFlag(
   identifier: string,
   flag: "starred" | "pinned" | "hidden",
@@ -513,7 +903,13 @@ function operationToCommand(operation: string) {
 function applyMockFilters(entries: Entry[], filters: EntryFilters) {
   const text = filters.text?.trim().toLowerCase();
   const tagSet = new Set(filters.tags?.map((tag) => tag.trim().toLowerCase()).filter(Boolean));
+  const excludedTagSet = new Set(
+    filters.excludeTags?.map((tag) => tag.trim().toLowerCase()).filter(Boolean),
+  );
   const moodSet = new Set(filters.moods?.map((mood) => mood.trim().toLowerCase()).filter(Boolean));
+  const excludedMoodSet = new Set(
+    filters.excludeMoods?.map((mood) => mood.trim().toLowerCase()).filter(Boolean),
+  );
 
   return entries
     .filter((entry) => {
@@ -549,7 +945,22 @@ function applyMockFilters(entries: Entry[], filters: EntryFilters) {
           }
         }
       }
+      if (excludedTagSet.size > 0) {
+        const entryTags = new Set(entry.tags.map((tag) => tag.name.toLowerCase()));
+        for (const tag of excludedTagSet) {
+          if (entryTags.has(tag)) {
+            return false;
+          }
+        }
+      }
       if (moodSet.size > 0 && (!entry.mood || !moodSet.has(entry.mood.toLowerCase()))) {
+        return false;
+      }
+      if (
+        excludedMoodSet.size > 0 &&
+        entry.mood &&
+        excludedMoodSet.has(entry.mood.toLowerCase())
+      ) {
         return false;
       }
       if (filters.since && new Date(entry.createdAt) < new Date(filters.since)) {

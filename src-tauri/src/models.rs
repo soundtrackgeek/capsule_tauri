@@ -357,3 +357,114 @@ pub struct EntryHistoryResponse {
     pub history: Vec<EntryHistoryItem>,
     pub count: usize,
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SearchMode {
+    Keyword,
+    Semantic,
+    Hybrid,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchRequest {
+    pub query: String,
+    pub mode: Option<SearchMode>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub exclude_tags: Option<Vec<String>>,
+    pub moods: Option<Vec<String>>,
+    pub exclude_moods: Option<Vec<String>>,
+    pub starred: Option<bool>,
+    pub pinned: Option<bool>,
+    pub hidden: Option<bool>,
+    pub include_hidden: Option<bool>,
+    pub has_images: Option<bool>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+    pub sort: Option<EntrySort>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum StructuredTokenKind {
+    Keyword,
+    Tag,
+    ExcludeTag,
+    Mood,
+    ExcludeMood,
+    Before,
+    After,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StructuredQueryToken {
+    pub kind: StructuredTokenKind,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResponse {
+    pub entries: Vec<Entry>,
+    pub total: i64,
+    pub limit: i64,
+    pub offset: i64,
+    pub mode: SearchMode,
+    pub used_fts: bool,
+    pub parsed_tokens: Vec<StructuredQueryToken>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGroup {
+    pub root_uuid: String,
+    pub title: Option<String>,
+    pub summary: Option<String>,
+    pub latest_activity: Option<String>,
+    pub entry_count: usize,
+    pub entries: Vec<Entry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadListResponse {
+    pub threads: Vec<ThreadGroup>,
+    pub total: i64,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadMetadataUpdate {
+    #[serde(default)]
+    pub title: NullableStringUpdate,
+    #[serde(default)]
+    pub summary: NullableStringUpdate,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkThreadDetachRequest {
+    pub child_uuids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkThreadLinkRequest {
+    pub parent_uuid: String,
+    pub child_uuids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadMutationResponse {
+    pub thread: Option<ThreadGroup>,
+    pub affected_uuids: Vec<String>,
+    pub audit: MutationAudit,
+}
