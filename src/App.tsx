@@ -110,6 +110,7 @@ import {
   updateEntry,
   updatePrompt,
   updateTemplate,
+  uploadAndAttachImages,
   uploadImage,
   browseDatabasePath,
   browseDirectoryPath,
@@ -1435,25 +1436,23 @@ function App() {
   const attachQueuedComposerImages = useCallback(
     async (entryUuid: string) => {
       const queuedImages = composerImageDrafts.filter((draft) => draft.path.trim());
-      let latestResponse: ImageMutationResponse | null = null;
+      if (queuedImages.length === 0) {
+        return 0;
+      }
 
-      for (const draft of queuedImages) {
-        const upload = await uploadImage(draft.path.trim());
-        latestResponse = await attachImage({
-          identifier: entryUuid,
-          mediaId: upload.asset.id,
+      const response = await uploadAndAttachImages({
+        identifier: entryUuid,
+        images: queuedImages.map((draft) => ({
+          filePath: draft.path.trim(),
           caption: nullableFromText(draft.caption),
           altText: nullableFromText(draft.altText),
-        });
-      }
-
-      if (latestResponse) {
-        setComposerEntryImages({
-          entryUuid: latestResponse.entryUuid,
-          images: latestResponse.images,
-          warnings: [],
-        });
-      }
+        })),
+      });
+      setComposerEntryImages({
+        entryUuid: response.entryUuid,
+        images: response.images,
+        warnings: [],
+      });
 
       return queuedImages.length;
     },
@@ -4444,7 +4443,7 @@ function SettingsView({
         title="Application"
       >
         <dl className="detail-list">
-          <Detail label="Version" value="0.7.12" />
+          <Detail label="Version" value="0.7.13" />
           <Detail label="Mode" value="Backups and data tools" />
           <Detail label="Writes" value="Backup guarded" />
         </dl>

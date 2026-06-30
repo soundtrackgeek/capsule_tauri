@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.13 - 2026-06-30
+
+### Fixed
+
+- Fixed slow composer saves with multiple queued images by batching all image
+  upload/attach writes behind one backup instead of backing up once per image
+  upload and once per image attachment.
+
+### Changed
+
+- Bumped the app version to 0.7.13.
+
 ## 0.7.12 - 2026-06-30
 
 ### Added

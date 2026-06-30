@@ -61,7 +61,8 @@ Capsule database:
   image media root.
 - Backup-guarded image upload from local file paths, including native image
   file picking in the Images page, multi-select composer image picking, entry
-  attachment previews, removal, and sync tombstone recording.
+  attachment previews, batched composer image save, removal, and sync tombstone
+  recording.
 - Analytics dashboard with overview counts, monthly trend, tag/mood/location
   breakdowns, weather breakdowns, top words, and streaks.
 - Writing Calendar heatmap for active days, words, images, and mood metadata.

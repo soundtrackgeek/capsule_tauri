@@ -1084,6 +1084,21 @@ pub struct ImageAttachRequest {
     pub position: Option<i64>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageUploadAttachItem {
+    pub file_path: String,
+    pub caption: Option<String>,
+    pub alt_text: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageUploadAttachRequest {
+    pub identifier: String,
+    pub images: Vec<ImageUploadAttachItem>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageUploadResponse {

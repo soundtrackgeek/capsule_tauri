@@ -35,6 +35,7 @@ import type {
   ImageEntriesListResponse,
   ImageEntryListResponse,
   ImageMutationResponse,
+  ImageUploadAttachRequest,
   ImageUploadResponse,
   ImageVariant,
   LibraryListResponse,
@@ -1557,6 +1558,37 @@ export async function attachImage(input: ImageAttachRequest): Promise<ImageMutat
       entryUuid: entry.uuid,
       images: mockImageAttachments[entry.uuid],
       audit: mockAudit("image.attach"),
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function uploadAndAttachImages(
+  input: ImageUploadAttachRequest,
+): Promise<ImageMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<ImageMutationResponse>("upload_and_attach_images", { input });
+    }
+
+    await pause(260);
+    let latestResponse: ImageMutationResponse | null = null;
+    for (const image of input.images.filter((item) => item.filePath.trim())) {
+      const upload = await uploadImage(image.filePath.trim());
+      latestResponse = await attachImage({
+        identifier: input.identifier,
+        mediaId: upload.asset.id,
+        caption: image.caption,
+        altText: image.altText,
+      });
+    }
+    if (!latestResponse) {
+      throw new Error("At least one image path is required.");
+    }
+    return {
+      ...latestResponse,
+      audit: mockAudit("image.upload_attach"),
     };
   } catch (error) {
     throw normalizeError(error);

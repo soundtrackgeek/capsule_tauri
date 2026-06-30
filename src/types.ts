@@ -750,6 +750,15 @@ export type ImageAttachRequest = {
   position?: number | null;
 };
 
+export type ImageUploadAttachRequest = {
+  identifier: string;
+  images: Array<{
+    filePath: string;
+    caption?: string | null;
+    altText?: string | null;
+  }>;
+};
+
 export type ImageUploadResponse = {
   asset: ImageAsset;
   audit: MutationAudit;

@@ -16,7 +16,8 @@ use crate::{
     models::{
         CoverEntrySummary, CoverWallRequest, CoverWallResponse, EntryCover, ImageAsset,
         ImageAttachRequest, ImageAttachment, ImageEntriesItem, ImageEntriesListResponse,
-        ImageEntryListResponse, ImageMutationResponse, ImageUploadResponse, ImageVariant,
+        ImageEntryListResponse, ImageMutationResponse, ImageUploadAttachRequest,
+        ImageUploadResponse, ImageVariant,
     },
 };
 
@@ -247,6 +248,24 @@ fn attach_image_with_root(
 ) -> Result<ImageMutationResponse> {
     let guarded = backup::with_database_backup("image.attach", move |db_path| {
         attach_image_inner(db_path, input, media_root_override)
+    })?;
+    Ok(ImageMutationResponse {
+        entry_uuid: guarded.value.0,
+        images: guarded.value.1,
+        audit: guarded.audit,
+    })
+}
+
+pub fn upload_and_attach_images(input: ImageUploadAttachRequest) -> Result<ImageMutationResponse> {
+    upload_and_attach_images_with_root(input, None)
+}
+
+fn upload_and_attach_images_with_root(
+    input: ImageUploadAttachRequest,
+    media_root_override: Option<PathBuf>,
+) -> Result<ImageMutationResponse> {
+    let guarded = backup::with_database_backup("image.upload_attach", move |db_path| {
+        upload_and_attach_images_inner(db_path, input, media_root_override)
     })?;
     Ok(ImageMutationResponse {
         entry_uuid: guarded.value.0,
@@ -509,6 +528,40 @@ fn attach_image_inner(
     let roots = media_roots_for_database(db_path, media_root_override);
     let images = list_attachments_for_entry_with_roots(db_path, &entry_uuid, &roots)?;
     Ok((entry_uuid, images))
+}
+
+fn upload_and_attach_images_inner(
+    db_path: &Path,
+    input: ImageUploadAttachRequest,
+    media_root_override: Option<PathBuf>,
+) -> Result<(String, Vec<ImageAttachment>)> {
+    let images = input
+        .images
+        .into_iter()
+        .filter(|item| normalize_string(Some(&item.file_path)).is_some())
+        .collect::<Vec<_>>();
+    if images.is_empty() {
+        return Err(anyhow!("At least one image path is required."));
+    }
+
+    let mut latest_entry_uuid = String::new();
+    let mut latest_images = Vec::new();
+    for image in images {
+        let asset = upload_image_inner(db_path, &image.file_path, media_root_override.clone())?;
+        let attach_request = ImageAttachRequest {
+            identifier: input.identifier.clone(),
+            media_id: asset.id,
+            caption: image.caption,
+            alt_text: image.alt_text,
+            position: None,
+        };
+        let (entry_uuid, entry_images) =
+            attach_image_inner(db_path, attach_request, media_root_override.clone())?;
+        latest_entry_uuid = entry_uuid;
+        latest_images = entry_images;
+    }
+
+    Ok((latest_entry_uuid, latest_images))
 }
 
 fn remove_image_inner(
@@ -1245,6 +1298,73 @@ mod tests {
     }
 
     #[test]
+    fn upload_and_attach_images_batches_multiple_files_under_one_backup() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_image_fixture(temp_dir.path());
+        let media_root = temp_dir.path().join("media");
+        fs::write(
+            temp_dir.path().join("config.json"),
+            format!(
+                "{{\"images.media_root\":\"{}\"}}",
+                db::path_to_string(&media_root).replace('\\', "\\\\")
+            ),
+        )
+        .expect("config");
+        let first_path = temp_dir.path().join("first.png");
+        let second_path = temp_dir.path().join("second.png");
+        ImageBuffer::from_pixel(4, 4, Rgb([10_u8, 20, 30]))
+            .save(&first_path)
+            .expect("first image");
+        ImageBuffer::from_pixel(4, 4, Rgb([40_u8, 50, 60]))
+            .save(&second_path)
+            .expect("second image");
+
+        let response = upload_and_attach_images_for_database(
+            &db_path,
+            ImageUploadAttachRequest {
+                identifier: "entry_root".to_string(),
+                images: vec![
+                    crate::models::ImageUploadAttachItem {
+                        file_path: db::path_to_string(&first_path),
+                        caption: Some("First".to_string()),
+                        alt_text: None,
+                    },
+                    crate::models::ImageUploadAttachItem {
+                        file_path: db::path_to_string(&second_path),
+                        caption: Some("Second".to_string()),
+                        alt_text: Some("Second image".to_string()),
+                    },
+                ],
+            },
+            &media_root,
+        )
+        .expect("batch attach");
+
+        assert_eq!(response.audit.operation, "image.upload_attach");
+        assert!(PathBuf::from(&response.audit.backup_path).exists());
+        assert_eq!(response.images.len(), 2);
+        assert_eq!(response.images[0].caption.as_deref(), Some("First"));
+        assert_eq!(response.images[1].caption.as_deref(), Some("Second"));
+        assert!(response.images.iter().all(|image| image.original_available));
+        assert!(response
+            .images
+            .iter()
+            .all(|image| image.thumbnail_available));
+        let backup_count = fs::read_dir(temp_dir.path())
+            .expect("read temp dir")
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("capsule_backup_")
+                    && entry.path().extension().and_then(|value| value.to_str()) == Some("db")
+            })
+            .count();
+        assert_eq!(backup_count, 1);
+    }
+
+    #[test]
     fn cover_wall_reads_repo_local_covers() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let db_path = create_image_fixture(temp_dir.path());
@@ -1293,6 +1413,24 @@ mod tests {
             backup::with_database_backup_for_database(db_path, "image.attach", move |path| {
                 attach_image_inner(path, input, Some(media_root))
             })?;
+        Ok(ImageMutationResponse {
+            entry_uuid: guarded.value.0,
+            images: guarded.value.1,
+            audit: guarded.audit,
+        })
+    }
+
+    fn upload_and_attach_images_for_database(
+        db_path: &Path,
+        input: ImageUploadAttachRequest,
+        media_root: &Path,
+    ) -> Result<ImageMutationResponse> {
+        let media_root = media_root.to_path_buf();
+        let guarded = backup::with_database_backup_for_database(
+            db_path,
+            "image.upload_attach",
+            move |path| upload_and_attach_images_inner(path, input, Some(media_root)),
+        )?;
         Ok(ImageMutationResponse {
             entry_uuid: guarded.value.0,
             images: guarded.value.1,

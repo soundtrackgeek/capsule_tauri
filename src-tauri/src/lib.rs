@@ -20,15 +20,15 @@ use models::{
     DeleteEntryResponse, Entry, EntryCreate, EntryFilters, EntryHistoryResponse, EntryListResponse,
     EntryMutationResponse, EntryUpdate, ExportEntriesRequest, ExportEntriesResponse,
     GamificationOverviewResponse, ImageAttachRequest, ImageEntriesListResponse,
-    ImageEntryListResponse, ImageMutationResponse, ImageUploadResponse, ImageVariant,
-    LibraryListResponse, LibraryPromptInput, LibraryPromptMutationResponse, LibraryPromptUpdate,
-    LibraryTemplateInput, LibraryTemplateMutationResponse, LibraryTemplateUpdate,
-    LocationConfigUpdateRequest, MoodCatalogResponse, MoodDeleteRequest, MoodMutationResponse,
-    MoodRenameRequest, PathSettingsResponse, PathSettingsUpdateRequest, PluginOverviewResponse,
-    QuestClaimRequest, QuestClaimResponse, RandomEntryFilters, SearchRequest, SearchResponse,
-    SyncOverviewResponse, TagCatalogResponse, TagDeleteRequest, TagMergeRequest,
-    TagMutationResponse, TagRenameRequest, ThreadListResponse, ThreadMetadataUpdate,
-    ThreadMutationResponse, WritingCalendarResponse,
+    ImageEntryListResponse, ImageMutationResponse, ImageUploadAttachRequest, ImageUploadResponse,
+    ImageVariant, LibraryListResponse, LibraryPromptInput, LibraryPromptMutationResponse,
+    LibraryPromptUpdate, LibraryTemplateInput, LibraryTemplateMutationResponse,
+    LibraryTemplateUpdate, LocationConfigUpdateRequest, MoodCatalogResponse, MoodDeleteRequest,
+    MoodMutationResponse, MoodRenameRequest, PathSettingsResponse, PathSettingsUpdateRequest,
+    PluginOverviewResponse, QuestClaimRequest, QuestClaimResponse, RandomEntryFilters,
+    SearchRequest, SearchResponse, SyncOverviewResponse, TagCatalogResponse, TagDeleteRequest,
+    TagMergeRequest, TagMutationResponse, TagRenameRequest, ThreadListResponse,
+    ThreadMetadataUpdate, ThreadMutationResponse, WritingCalendarResponse,
 };
 
 #[tauri::command]
@@ -243,6 +243,16 @@ async fn upload_image(file_path: String) -> Result<ImageUploadResponse, String> 
 #[tauri::command]
 async fn attach_image(input: ImageAttachRequest) -> Result<ImageMutationResponse, String> {
     tauri::async_runtime::spawn_blocking(move || images::attach_image(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn upload_and_attach_images(
+    input: ImageUploadAttachRequest,
+) -> Result<ImageMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || images::upload_and_attach_images(input))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())
@@ -653,6 +663,7 @@ pub fn run() {
             get_local_image_preview_data_url,
             upload_image,
             attach_image,
+            upload_and_attach_images,
             remove_image,
             search_entries,
             get_analytics,
