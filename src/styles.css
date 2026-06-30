@@ -529,6 +529,10 @@ button:active:not(:disabled) {
   grid-template-columns: 86px minmax(0, 1fr);
 }
 
+.detail-list--paths {
+  grid-template-columns: 96px minmax(0, 1fr);
+}
+
 .detail-list dt,
 .metric dt {
   color: #66756d;
@@ -541,6 +545,14 @@ button:active:not(:disabled) {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.detail-list--paths code {
+  color: #24342c;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: normal;
 }
 
 .metric {

@@ -190,6 +190,14 @@ async fn list_entry_images(identifier: String) -> Result<ImageEntryListResponse,
 }
 
 #[tauri::command]
+async fn get_image_media_root() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(images::get_image_media_root)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn list_images_for_entries(uuids: Vec<String>) -> Result<ImageEntriesListResponse, String> {
     tauri::async_runtime::spawn_blocking(move || images::list_images_for_entries(uuids))
         .await
@@ -569,6 +577,7 @@ pub fn run() {
             unhide_entry,
             list_entry_history,
             list_entry_images,
+            get_image_media_root,
             list_images_for_entries,
             get_image_data_url,
             upload_image,

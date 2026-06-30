@@ -45,6 +45,8 @@ Capsule database:
 - JSON manifests written next to generated backups.
 - Capsule `config.json` display plus file-backed set/delete actions that create
   config backups before writing.
+- Settings path overview for the active database file, resolved image media
+  root, and active backup directory.
 - Local theme and sidebar-density settings stored outside the journal database.
 - Tag rename, merge, and delete tools guarded by verified database backups.
 - Mood rename and clear tools guarded by verified database backups.

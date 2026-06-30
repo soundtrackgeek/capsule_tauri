@@ -120,11 +120,14 @@ let mockConfig: CapsuleConfigResponse = {
   configPath: "C:\\Users\\jtill\\.capsule\\config.json",
   exists: true,
   values: [
+    { key: "images.media_root", value: "C:\\Users\\jtill\\OneDrive\\_capsule\\images" },
     { key: "backup_count", value: "3" },
     { key: "theme", value: "system" },
   ],
   warnings: [],
 };
+
+const mockImageMediaRoot = "C:\\Users\\jtill\\OneDrive\\_capsule\\images";
 
 let mockTags: TagCatalogResponse = {
   tags: [
@@ -669,6 +672,19 @@ export async function openBackupFolder(): Promise<void> {
     }
 
     await pause(100);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function getImageMediaRoot(): Promise<string> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<string>("get_image_media_root");
+    }
+
+    await pause(120);
+    return mockConfig.values.find((item) => item.key === "images.media_root")?.value ?? mockImageMediaRoot;
   } catch (error) {
     throw normalizeError(error);
   }

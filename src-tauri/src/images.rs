@@ -62,6 +62,14 @@ pub fn list_entry_images(identifier: String) -> Result<ImageEntryListResponse> {
     list_entry_images_for_database(&db::resolve_database_path(), &identifier)
 }
 
+pub fn get_image_media_root() -> Result<String> {
+    let db_path = db::resolve_database_path();
+    let roots = media_roots_for_database(&db_path, None);
+    let root = first_existing_or_default_root(&roots)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_MEDIA_ROOT));
+    Ok(db::path_to_string(&root))
+}
+
 pub(crate) fn list_entry_images_for_database(
     db_path: &Path,
     identifier: &str,

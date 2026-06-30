@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.5 - 2026-06-30
+
+### Added
+
+- Added a Settings path overview for the active database file, resolved image
+  media root, and active backup directory.
+
+### Changed
+
+- Bumped the app version to 0.7.5.
+
 ## 0.7.4 - 2026-06-29
 
 ### Changed

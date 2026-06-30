@@ -73,6 +73,7 @@ import {
   getGamificationOverview,
   getEntry,
   getImageDataUrl,
+  getImageMediaRoot,
   getPluginOverview,
   getRandomEntry,
   getSyncOverview,
@@ -352,6 +353,7 @@ function App() {
   const [status, setStatus] = useState<DatabaseStatus | null>(null);
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [backupDirectory, setBackupDirectory] = useState<string>("");
+  const [imageMediaRoot, setImageMediaRoot] = useState<string>("");
   const [recentEntries, setRecentEntries] = useState<Entry[]>([]);
   const [pinnedEntries, setPinnedEntries] = useState<Entry[]>([]);
   const [randomEntry, setRandomEntry] = useState<Entry | null>(null);
@@ -774,13 +776,15 @@ function App() {
   const loadDataTools = useCallback(async () => {
     setDataToolsLoading(true);
     try {
-      const [nextConfig, nextTags, nextMoods, nextLibrary] = await Promise.all([
+      const [nextConfig, nextImageMediaRoot, nextTags, nextMoods, nextLibrary] = await Promise.all([
         getCapsuleConfig(),
+        getImageMediaRoot(),
         status?.readable ? listTags() : Promise.resolve<TagCatalogResponse | null>(null),
         status?.readable ? listMoods() : Promise.resolve<MoodCatalogResponse | null>(null),
         status?.readable ? listLibraryItems() : Promise.resolve<LibraryListResponse | null>(null),
       ]);
       setCapsuleConfig(nextConfig);
+      setImageMediaRoot(nextImageMediaRoot);
       setTagCatalog(nextTags);
       setMoodCatalog(nextMoods);
       setLibrary(nextLibrary);
@@ -1910,6 +1914,7 @@ function App() {
             backupDirectory={backupDirectory}
             config={capsuleConfig}
             dataToolMutating={dataToolMutating}
+            imageMediaRoot={imageMediaRoot}
             library={library}
             loading={dataToolsLoading}
             moodCatalog={moodCatalog}
@@ -3743,6 +3748,7 @@ function BackupsView({
 type SettingsViewProps = {
   status: DatabaseStatus | null;
   backupDirectory: string;
+  imageMediaRoot: string;
   statusTone: "good" | "warn" | "neutral";
   config: CapsuleConfigResponse | null;
   tagCatalog: TagCatalogResponse | null;
@@ -3759,6 +3765,7 @@ type SettingsViewProps = {
 function SettingsView({
   status,
   backupDirectory,
+  imageMediaRoot,
   statusTone,
   config,
   tagCatalog,
@@ -3790,6 +3797,14 @@ function SettingsView({
 
   return (
     <section className="settings-grid" aria-label="Settings">
+      <Panel icon={<HardDrive size={20} />} title="Local Paths">
+        <dl className="detail-list detail-list--paths">
+          <Detail label="Database" value={<code>{status?.dbPath ?? "Loading"}</code>} />
+          <Detail label="Images" value={<code>{imageMediaRoot || "Loading"}</code>} />
+          <Detail label="Backups" value={<code>{backupDirectory || "Not available"}</code>} />
+        </dl>
+      </Panel>
+
       <Panel action={<StatusPill tone={statusTone}>{status?.security.mode ?? "unknown"}</StatusPill>} icon={<Database size={20} />} title="Database">
         <dl className="detail-list">
           <Detail label="Path" value={status?.dbPath ?? "Loading"} />
@@ -3810,7 +3825,7 @@ function SettingsView({
         title="Application"
       >
         <dl className="detail-list">
-          <Detail label="Version" value="0.5.0" />
+          <Detail label="Version" value="0.7.5" />
           <Detail label="Mode" value="Backups and data tools" />
           <Detail label="Writes" value="Backup guarded" />
         </dl>
