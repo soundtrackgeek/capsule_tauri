@@ -164,14 +164,18 @@ pub fn browse_directory_path(current_path: Option<String>) -> Result<Option<Stri
 }
 
 pub fn browse_image_path(current_path: Option<String>) -> Result<Option<String>> {
-    let mut dialog = rfd::FileDialog::new()
-        .set_title("Select image")
-        .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
-        .add_filter("All files", &["*"]);
-    if let Some(directory) = dialog_start_directory(current_path.as_deref(), true) {
-        dialog = dialog.set_directory(directory);
-    }
-    Ok(dialog.pick_file().map(|path| db::path_to_string(&path)))
+    Ok(image_file_dialog(current_path.as_deref())
+        .pick_file()
+        .map(|path| db::path_to_string(&path)))
+}
+
+pub fn browse_image_paths(current_path: Option<String>) -> Result<Vec<String>> {
+    Ok(image_file_dialog(current_path.as_deref())
+        .pick_files()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|path| db::path_to_string(&path))
+        .collect())
 }
 
 pub fn list_tags() -> Result<TagCatalogResponse> {
@@ -483,6 +487,17 @@ fn config_path_for_database(db_path: &Path) -> PathBuf {
         }
     }
     db::database_directory_for_database(db_path).join("config.json")
+}
+
+fn image_file_dialog(current_path: Option<&str>) -> rfd::FileDialog {
+    let mut dialog = rfd::FileDialog::new()
+        .set_title("Select images")
+        .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
+        .add_filter("All files", &["*"]);
+    if let Some(directory) = dialog_start_directory(current_path, true) {
+        dialog = dialog.set_directory(directory);
+    }
+    dialog
 }
 
 fn dialog_start_directory(value: Option<&str>, file_path: bool) -> Option<PathBuf> {

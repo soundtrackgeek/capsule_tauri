@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.11 - 2026-06-30
+
+### Changed
+
+- Changed the composer Add Image action to open a native multi-select image
+  picker immediately and append all selected images to the queued attachments.
+- Bumped the app version to 0.7.11.
+
 ## 0.7.10 - 2026-06-30
 
 ### Added

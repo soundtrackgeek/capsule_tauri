@@ -24,7 +24,8 @@ Capsule database:
 - Backup-guarded star, unstar, pin, unpin, hide, unhide, and confirmed delete
   entry actions.
 - Full-page markdown composer with metadata fields, continuation UUID support,
-  queued local image attachments, writing stats, and local draft recovery.
+  multi-select queued local image attachments, writing stats, and local draft
+  recovery.
 - Distraction-free Writer Mode with local display preferences.
 - Entry history review for legacy Capsule edit snapshots.
 - Keyword search using `entries_fts` when available, with a compatibility
@@ -59,8 +60,8 @@ Capsule database:
 - Image attachment browsing with thumbnail/full-size rendering from the local
   image media root.
 - Backup-guarded image upload from local file paths, including native image
-  file picking in the Images page and composer, entry attachment, removal, and
-  sync tombstone recording.
+  file picking in the Images page, multi-select composer image picking, entry
+  attachment, removal, and sync tombstone recording.
 - Analytics dashboard with overview counts, monthly trend, tag/mood/location
   breakdowns, weather breakdowns, top words, and streaks.
 - Writing Calendar heatmap for active days, words, images, and mood metadata.

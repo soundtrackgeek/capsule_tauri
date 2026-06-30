@@ -113,6 +113,7 @@ import {
   browseDatabasePath,
   browseDirectoryPath,
   browseImagePath,
+  browseImagePaths,
 } from "./backend";
 import { StatusPill } from "./components/StatusPill";
 import { formatBytes, formatDateTime } from "./lib/format";
@@ -1190,9 +1191,21 @@ function App() {
     }
   }, []);
 
-  const handleAddComposerImageDraft = useCallback(() => {
-    setComposerImageDrafts((current) => [...current, createComposerImageDraft()]);
-  }, []);
+  const handleAddComposerImageDraft = useCallback(async () => {
+    try {
+      const currentPath = composerImageDrafts[composerImageDrafts.length - 1]?.path ?? "";
+      const selectedPaths = await browseImagePaths(currentPath || null);
+      if (selectedPaths.length === 0) {
+        return;
+      }
+      setComposerImageDrafts((current) => [
+        ...current,
+        ...selectedPaths.map((path) => createComposerImageDraft(path)),
+      ]);
+    } catch (browseError) {
+      setError(browseError instanceof Error ? browseError.message : "Unable to browse for images");
+    }
+  }, [composerImageDrafts]);
 
   const handleChangeComposerImageDraft = useCallback(
     (id: string, next: ImageUploadDraft) => {
@@ -3789,7 +3802,7 @@ function ComposerView({
             <button
               className="icon-button icon-button--small"
               onClick={onAddImageDraft}
-              title="Add image"
+              title="Add Image"
               type="button"
             >
               <Plus size={15} />
@@ -3806,7 +3819,7 @@ function ComposerView({
                 type="button"
               >
                 <Plus size={16} />
-                Add image
+                Add Image
               </button>
             )}
 
@@ -4414,7 +4427,7 @@ function SettingsView({
         title="Application"
       >
         <dl className="detail-list">
-          <Detail label="Version" value="0.7.10" />
+          <Detail label="Version" value="0.7.11" />
           <Detail label="Mode" value="Backups and data tools" />
           <Detail label="Writes" value="Backup guarded" />
         </dl>

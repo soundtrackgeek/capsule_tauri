@@ -716,6 +716,26 @@ export async function browseImagePath(currentPath?: string | null): Promise<stri
   }
 }
 
+export async function browseImagePaths(currentPath?: string | null): Promise<string[]> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<string[]>("browse_image_paths", { currentPath });
+    }
+
+    await pause(80);
+    const selected = window.prompt("Image paths, separated by semicolons", currentPath ?? "");
+    if (!selected) {
+      return [];
+    }
+    return selected
+      .split(";")
+      .map((path) => path.trim())
+      .filter(Boolean);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
 export async function getCapsuleConfig(): Promise<CapsuleConfigResponse> {
   try {
     if (runningInTauri()) {
