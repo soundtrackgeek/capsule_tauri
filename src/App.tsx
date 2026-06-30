@@ -59,6 +59,7 @@ import {
   createBackup,
   createTemplate,
   deleteCapsuleConfigValue,
+  deleteEntry,
   deleteMood,
   deletePrompt,
   deleteTag,
@@ -128,6 +129,7 @@ import type {
   CoverWallRequest,
   CoverWallResponse,
   DatabaseStatus,
+  DeleteEntryResponse,
   Entry,
   EntryCreate,
   EntryFilters,
@@ -403,6 +405,7 @@ function App() {
   const [entryLimit, setEntryLimit] = useState(40);
   const [entryResponse, setEntryResponse] = useState<EntryListResponse | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<Entry | null>(null);
   const [searchForm, setSearchForm] = useState<SearchForm>(defaultSearchForm);
   const [searchLimit, setSearchLimit] = useState(40);
   const [searchResponse, setSearchResponse] = useState<SearchResponse | null>(null);
@@ -1246,6 +1249,76 @@ function App() {
     ],
   );
 
+  const applyDeleteResponse = useCallback(
+    async (response: DeleteEntryResponse) => {
+      setNotice(`Deleted ${response.entryUuid} with backup: ${response.audit.backupPath}`);
+      setSelectedEntry((current) =>
+        current?.uuid === response.entryUuid ? null : current,
+      );
+      setSelectedImageEntry((current) =>
+        current?.uuid === response.entryUuid ? null : current,
+      );
+      setEntryImages((current) =>
+        current?.entryUuid === response.entryUuid ? null : current,
+      );
+      setSelectedCover((current) =>
+        current?.entryUuid === response.entryUuid ? null : current,
+      );
+      setEntryHistory(null);
+      setEditingEntry((current) => (current?.uuid === response.entryUuid ? null : current));
+      await refresh();
+      if (activeView === "entries") {
+        await loadEntryList();
+      } else if (activeView === "search") {
+        await loadSearchResults();
+      } else if (activeView === "threads") {
+        await loadThreads();
+      } else if (activeView === "images") {
+        await loadImageEntries();
+      } else if (activeView === "analytics") {
+        await loadAnalytics();
+      } else if (activeView === "calendar") {
+        await loadWritingCalendar();
+      } else if (activeView === "covers") {
+        await loadCoverWall();
+      }
+    },
+    [
+      activeView,
+      loadAnalytics,
+      loadCoverWall,
+      loadEntryList,
+      loadImageEntries,
+      loadSearchResults,
+      loadThreads,
+      loadWritingCalendar,
+      refresh,
+    ],
+  );
+
+  const handleRequestDeleteEntry = useCallback((entry: Entry) => {
+    setDeleteCandidate(entry);
+  }, []);
+
+  const handleConfirmDeleteEntry = useCallback(async () => {
+    if (!deleteCandidate) {
+      return;
+    }
+
+    setMutatingEntryUuid(deleteCandidate.uuid);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await deleteEntry(deleteCandidate.uuid);
+      setDeleteCandidate(null);
+      await applyDeleteResponse(response);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Unable to delete entry");
+    } finally {
+      setMutatingEntryUuid(null);
+    }
+  }, [applyDeleteResponse, deleteCandidate]);
+
   const handleSuggestAiMetadata = useCallback(async () => {
     const identifier =
       aiSuggestionIdentifier.trim() || selectedEntry?.uuid || recentEntries[0]?.uuid || "";
@@ -1775,6 +1848,7 @@ function App() {
             loading={entriesLoading}
             mutatingEntryUuid={mutatingEntryUuid}
             onContinueEntry={openContinueEntry}
+            onDeleteEntry={handleRequestDeleteEntry}
             onEditEntry={openEditEntry}
             onEntryAction={handleEntryAction}
             onExportEntry={handleExportEntry}
@@ -1802,6 +1876,7 @@ function App() {
             loading={searchLoading}
             mutatingEntryUuid={mutatingEntryUuid}
             onContinueEntry={openContinueEntry}
+            onDeleteEntry={handleRequestDeleteEntry}
             onEditEntry={openEditEntry}
             onEntryAction={handleEntryAction}
             onExportEntry={handleExportEntry}
@@ -2000,6 +2075,15 @@ function App() {
 
         {activeView === "about" && <AboutView />}
       </main>
+
+      {deleteCandidate && (
+        <DeleteEntryDialog
+          deleting={mutatingEntryUuid === deleteCandidate.uuid}
+          entry={deleteCandidate}
+          onCancel={() => setDeleteCandidate(null)}
+          onConfirm={handleConfirmDeleteEntry}
+        />
+      )}
     </div>
   );
 }
@@ -2121,6 +2205,7 @@ type EntriesViewProps = {
   onSelectEntry: (entry: Entry) => void;
   onEditEntry: (entry: Entry) => void;
   onContinueEntry: (entry: Entry) => void;
+  onDeleteEntry: (entry: Entry) => void;
   onEntryAction: (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => void;
   onExportEntry: (entry: Entry, format: ExportFormat) => void;
   onLoadHistory: (entry: Entry) => void;
@@ -2142,6 +2227,7 @@ function EntriesView({
   onSelectEntry,
   onEditEntry,
   onContinueEntry,
+  onDeleteEntry,
   onEntryAction,
   onExportEntry,
   onLoadHistory,
@@ -2304,6 +2390,7 @@ function EntriesView({
         loading={detailLoading}
         mutating={Boolean(selectedEntry && mutatingEntryUuid === selectedEntry.uuid)}
         onContinue={onContinueEntry}
+        onDelete={onDeleteEntry}
         onEdit={onEditEntry}
         onEntryAction={onEntryAction}
         onExport={onExportEntry}
@@ -2327,6 +2414,7 @@ type SearchViewProps = {
   onSelectEntry: (entry: Entry) => void;
   onEditEntry: (entry: Entry) => void;
   onContinueEntry: (entry: Entry) => void;
+  onDeleteEntry: (entry: Entry) => void;
   onEntryAction: (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => void;
   onExportEntry: (entry: Entry, format: ExportFormat) => void;
   onExportSearch: (format: ExportFormat) => void;
@@ -2349,6 +2437,7 @@ function SearchView({
   onSelectEntry,
   onEditEntry,
   onContinueEntry,
+  onDeleteEntry,
   onEntryAction,
   onExportEntry,
   onExportSearch,
@@ -2585,6 +2674,7 @@ function SearchView({
         loading={detailLoading}
         mutating={Boolean(selectedEntry && mutatingEntryUuid === selectedEntry.uuid)}
         onContinue={onContinueEntry}
+        onDelete={onDeleteEntry}
         onEdit={onEditEntry}
         onEntryAction={onEntryAction}
         onExport={onExportEntry}
@@ -4041,7 +4131,7 @@ function SettingsView({
         title="Application"
       >
         <dl className="detail-list">
-          <Detail label="Version" value="0.7.7" />
+          <Detail label="Version" value="0.7.8" />
           <Detail label="Mode" value="Backups and data tools" />
           <Detail label="Writes" value="Backup guarded" />
         </dl>
@@ -5051,7 +5141,7 @@ function AboutView() {
         surfaces over the local Capsule database. Cloud and bridge-driven paths
         stay explicit, and plugin/quest writes keep the backup guard.
       </p>
-      <p>Hard delete remains reserved until the legacy resequencing behavior is fully matched and tested.</p>
+      <p>Entry delete now requires an explicit warning and keeps the legacy ID resequencing path.</p>
     </section>
   );
 }
@@ -5064,6 +5154,7 @@ type EntryDetailProps = {
   mutating: boolean;
   onEdit: (entry: Entry) => void;
   onContinue: (entry: Entry) => void;
+  onDelete: (entry: Entry) => void;
   onEntryAction: (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => void;
   onExport: (entry: Entry, format: ExportFormat) => void;
   onLoadHistory: (entry: Entry) => void;
@@ -5077,6 +5168,7 @@ function EntryDetail({
   mutating,
   onEdit,
   onContinue,
+  onDelete,
   onEntryAction,
   onExport,
   onLoadHistory,
@@ -5152,6 +5244,15 @@ function EntryDetail({
         </button>
         <button className="secondary-button" onClick={() => onExport(entry, "json")} type="button">
           JSON
+        </button>
+        <button
+          className="icon-button icon-button--danger"
+          disabled={mutating}
+          onClick={() => onDelete(entry)}
+          title="Delete entry"
+          type="button"
+        >
+          <Trash2 size={17} />
         </button>
       </div>
 
@@ -5458,6 +5559,59 @@ function ImageLightbox({
         </button>
       </div>
       <DataUrlImage attachment={attachment} className="lightbox-image" variant="full" />
+    </div>
+  );
+}
+
+function DeleteEntryDialog({
+  deleting,
+  entry,
+  onCancel,
+  onConfirm,
+}: {
+  deleting: boolean;
+  entry: Entry;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-entry-title">
+        <div className="confirm-dialog-header">
+          <div className="danger-mark" aria-hidden="true">
+            <TriangleAlert size={22} />
+          </div>
+          <div>
+            <p className="eyebrow">Delete entry</p>
+            <h3 id="delete-entry-title">{entry.title || entry.textPlain.slice(0, 72) || entry.uuid}</h3>
+          </div>
+          <button
+            className="icon-button icon-button--small"
+            disabled={deleting}
+            onClick={onCancel}
+            title="Cancel"
+            type="button"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <p>
+          This permanently deletes the entry after creating a verified backup.
+          Later entry IDs will be resequenced.
+        </p>
+        <blockquote>{entry.textPlain.slice(0, 180) || "Untitled entry"}</blockquote>
+
+        <div className="confirm-dialog-actions">
+          <button className="secondary-button" disabled={deleting} onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button className="danger-button" disabled={deleting} onClick={onConfirm} type="button">
+            <Trash2 size={17} />
+            {deleting ? "Deleting" : "Yes, I want to delete"}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }

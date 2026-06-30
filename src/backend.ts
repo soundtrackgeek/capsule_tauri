@@ -17,6 +17,7 @@ import type {
   CoverWallRequest,
   CoverWallResponse,
   DatabaseStatus,
+  DeleteEntryResponse,
   Entry,
   EntryCreate,
   EntryFilters,
@@ -1876,6 +1877,38 @@ export async function updateEntry(
     };
     mockEntries = mockEntries.map((entry, entryIndex) => (entryIndex === index ? updated : entry));
     return { entry: updated, audit: mockAudit("entry.update") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function deleteEntry(identifier: string): Promise<DeleteEntryResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<DeleteEntryResponse>("delete_entry", { identifier });
+    }
+
+    await pause(260);
+    const deleted = findMockEntry(identifier);
+    mockEntries = mockEntries
+      .filter((entry) => entry.uuid !== deleted.uuid)
+      .map((entry) => (entry.id > deleted.id ? { ...entry, id: entry.id - 1 } : entry))
+      .map((entry) =>
+        entry.thread?.parentUuid === deleted.uuid || entry.thread?.rootUuid === deleted.uuid
+          ? { ...entry, thread: null }
+          : entry,
+      );
+    delete mockImageAttachments[deleted.uuid];
+    syncMockThreadCounts();
+    mockStatus = {
+      ...mockStatus,
+      entryCount: Math.max(0, (mockStatus.entryCount ?? mockEntries.length + 1) - 1),
+    };
+    return {
+      entryId: deleted.id,
+      entryUuid: deleted.uuid,
+      audit: mockAudit("entry.delete"),
+    };
   } catch (error) {
     throw normalizeError(error);
   }

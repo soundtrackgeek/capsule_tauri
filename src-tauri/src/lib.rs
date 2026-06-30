@@ -16,18 +16,18 @@ use models::{
     AnalyticsPeriodRequest, AnalyticsResponse, BackupCreateRequest, BackupCreateResponse,
     BackupListResponse, BackupRestorePreview, BackupRestorePreviewRequest, BackupRestoreRequest,
     BackupRestoreResponse, BulkThreadDetachRequest, BulkThreadLinkRequest, CapsuleConfigResponse,
-    ConfigMutationResponse, CoverWallRequest, CoverWallResponse, DatabaseStatus, Entry,
-    EntryCreate, EntryFilters, EntryHistoryResponse, EntryListResponse, EntryMutationResponse,
-    EntryUpdate, ExportEntriesRequest, ExportEntriesResponse, GamificationOverviewResponse,
-    ImageAttachRequest, ImageEntriesListResponse, ImageEntryListResponse, ImageMutationResponse,
-    ImageUploadResponse, ImageVariant, LibraryListResponse, LibraryPromptInput,
-    LibraryPromptMutationResponse, LibraryPromptUpdate, LibraryTemplateInput,
-    LibraryTemplateMutationResponse, LibraryTemplateUpdate, LocationConfigUpdateRequest,
-    MoodCatalogResponse, MoodDeleteRequest, MoodMutationResponse, MoodRenameRequest,
-    PathSettingsResponse, PathSettingsUpdateRequest, PluginMutationRequest, PluginMutationResponse,
-    PluginOverviewResponse, QuestClaimRequest, QuestClaimResponse, RandomEntryFilters,
-    SearchRequest, SearchResponse, SyncOverviewResponse, TagCatalogResponse, TagDeleteRequest,
-    TagMergeRequest, TagMutationResponse, TagRenameRequest, ThreadListResponse,
+    ConfigMutationResponse, CoverWallRequest, CoverWallResponse, DatabaseStatus,
+    DeleteEntryResponse, Entry, EntryCreate, EntryFilters, EntryHistoryResponse, EntryListResponse,
+    EntryMutationResponse, EntryUpdate, ExportEntriesRequest, ExportEntriesResponse,
+    GamificationOverviewResponse, ImageAttachRequest, ImageEntriesListResponse,
+    ImageEntryListResponse, ImageMutationResponse, ImageUploadResponse, ImageVariant,
+    LibraryListResponse, LibraryPromptInput, LibraryPromptMutationResponse, LibraryPromptUpdate,
+    LibraryTemplateInput, LibraryTemplateMutationResponse, LibraryTemplateUpdate,
+    LocationConfigUpdateRequest, MoodCatalogResponse, MoodDeleteRequest, MoodMutationResponse,
+    MoodRenameRequest, PathSettingsResponse, PathSettingsUpdateRequest, PluginMutationRequest,
+    PluginMutationResponse, PluginOverviewResponse, QuestClaimRequest, QuestClaimResponse,
+    RandomEntryFilters, SearchRequest, SearchResponse, SyncOverviewResponse, TagCatalogResponse,
+    TagDeleteRequest, TagMergeRequest, TagMutationResponse, TagRenameRequest, ThreadListResponse,
     ThreadMetadataUpdate, ThreadMutationResponse, WritingCalendarResponse,
 };
 
@@ -121,6 +121,14 @@ async fn update_entry(
     input: EntryUpdate,
 ) -> Result<EntryMutationResponse, String> {
     tauri::async_runtime::spawn_blocking(move || entries::update_entry(identifier, input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn delete_entry(identifier: String) -> Result<DeleteEntryResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || entries::delete_entry(identifier))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())
@@ -614,6 +622,7 @@ pub fn run() {
             get_random_entry,
             create_entry,
             update_entry,
+            delete_entry,
             star_entry,
             unstar_entry,
             pin_entry,

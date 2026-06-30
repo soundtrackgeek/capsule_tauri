@@ -591,6 +591,12 @@ export type EntryMutationResponse = {
   audit: MutationAudit;
 };
 
+export type DeleteEntryResponse = {
+  entryId: number;
+  entryUuid: string;
+  audit: MutationAudit;
+};
+
 export type EntryHistoryItem = {
   id: number;
   timestamp: string;

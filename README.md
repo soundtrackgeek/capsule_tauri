@@ -21,7 +21,8 @@ Capsule database:
   fetched timestamp.
 - Backup-guarded entry creation and editing, with Capsule-compatible location
   and weather auto-capture for new entries.
-- Backup-guarded star, unstar, pin, unpin, hide, and unhide entry actions.
+- Backup-guarded star, unstar, pin, unpin, hide, unhide, and confirmed delete
+  entry actions.
 - Full-page markdown composer with metadata fields, continuation UUID support,
   writing stats, and local draft recovery.
 - Distraction-free Writer Mode with local display preferences.
@@ -31,7 +32,7 @@ Capsule database:
 - Structured search tokens for `tag:`, `mood:`, `before:`, `after:`, and
   `NOT tag:` queries, plus include/exclude tag and mood filters and a location
   text filter.
-- Search results with the same star, pin, edit, continue, and hide/unhide
+- Search results with the same star, pin, edit, continue, delete, and hide/unhide
   actions used by the Entries view.
 - Thread groups built from Capsule continuation links with ordered entries,
   latest activity, titles, and summaries.
@@ -144,9 +145,10 @@ Restore is constrained to Capsule-compatible backup files in the active database
 backup directory. Before restore replaces the live database, the app creates and
 verifies a fresh safety backup of the current database.
 
-Hard delete is intentionally not exposed in Phase 6. Entries can be hidden and
-unhidden safely; true delete remains reserved until the legacy resequencing
-behavior is matched and tested.
+Entry delete is exposed only after an explicit warning dialog. Deleting an entry
+creates a verified backup first, records a sync tombstone, removes local
+entry-owned relation rows, resequences later numeric IDs, and rebuilds
+`entries_fts` so legacy Capsule ID ordering stays compatible.
 
 AI chat, semantic vector ranking, shared-folder sync execution, and GitHub Gist
 mobile import remain capability-gated. Tauri reads their existing state, but it

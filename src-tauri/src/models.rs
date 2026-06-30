@@ -876,6 +876,14 @@ pub struct EntryMutationResponse {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DeleteEntryResponse {
+    pub entry_id: i64,
+    pub entry_uuid: String,
+    pub audit: MutationAudit,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EntryHistoryItem {
     pub id: i64,
     pub timestamp: String,

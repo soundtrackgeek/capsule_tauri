@@ -12,9 +12,9 @@ use serde_json::{json, Value as JsonValue};
 use crate::{
     backup, db, location,
     models::{
-        Entry, EntryCreate, EntryFilters, EntryHistoryItem, EntryHistoryResponse,
-        EntryListResponse, EntryMutationResponse, EntrySort, EntryThreadInfo, EntryUpdate,
-        LocationInfo, MoodInfo, RandomEntryFilters, TagInfo,
+        DeleteEntryResponse, Entry, EntryCreate, EntryFilters, EntryHistoryItem,
+        EntryHistoryResponse, EntryListResponse, EntryMutationResponse, EntrySort, EntryThreadInfo,
+        EntryUpdate, LocationInfo, MoodInfo, RandomEntryFilters, TagInfo,
     },
 };
 
@@ -120,6 +120,28 @@ struct QueryParts {
     limit: i64,
     offset: i64,
     sort: EntrySort,
+}
+
+#[derive(Debug, Clone)]
+struct DeletedEntry {
+    entry_id: i64,
+    entry_uuid: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ContinuationSnapshot {
+    child_entry_uuid: String,
+    parent_entry_uuid: String,
+    updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ImageAttachmentForDelete {
+    media_id: i64,
+    hash: String,
+    position: i64,
+    caption: Option<String>,
+    alt_text: Option<String>,
 }
 
 pub fn list_entries(filters: EntryFilters) -> Result<EntryListResponse> {
@@ -282,6 +304,30 @@ fn update_entry_for_database(
         })?;
     Ok(EntryMutationResponse {
         entry: guarded.value,
+        audit: guarded.audit,
+    })
+}
+
+pub fn delete_entry(identifier: String) -> Result<DeleteEntryResponse> {
+    let guarded = backup::with_database_backup("entry.delete", move |db_path| {
+        delete_entry_inner(db_path, &identifier)
+    })?;
+    Ok(DeleteEntryResponse {
+        entry_id: guarded.value.entry_id,
+        entry_uuid: guarded.value.entry_uuid,
+        audit: guarded.audit,
+    })
+}
+
+#[cfg(test)]
+fn delete_entry_for_database(db_path: &Path, identifier: &str) -> Result<DeleteEntryResponse> {
+    let guarded =
+        backup::with_database_backup_for_database(db_path, "entry.delete", move |path| {
+            delete_entry_inner(path, identifier)
+        })?;
+    Ok(DeleteEntryResponse {
+        entry_id: guarded.value.entry_id,
+        entry_uuid: guarded.value.entry_uuid,
         audit: guarded.audit,
     })
 }
@@ -530,6 +576,140 @@ fn update_entry_inner(db_path: &Path, identifier: &str, input: EntryUpdate) -> R
     get_entry_for_database(db_path, &uuid)
 }
 
+fn delete_entry_inner(db_path: &Path, identifier: &str) -> Result<DeletedEntry> {
+    let connection = db::open_read_write_connection(db_path)?;
+    let schema = db::inspect_schema(&connection)?;
+    ensure_entries_table(&schema.detected_tables.into_iter().collect())?;
+
+    connection.execute_batch("PRAGMA foreign_keys = OFF")?;
+    connection.execute_batch("BEGIN IMMEDIATE")?;
+
+    let result = (|| -> Result<DeletedEntry> {
+        let (entry_id, entry_uuid) = resolve_entry_identity(&connection, identifier)?;
+        let old_snapshot = get_entry_snapshot(&connection, entry_id)?;
+        let affected_ids = load_affected_entry_ids(&connection, entry_id)?;
+        let mut additional_data = serde_json::Map::new();
+        if !affected_ids.is_empty() {
+            additional_data.insert("affected_ids".to_string(), json!(affected_ids));
+        }
+
+        let deleted_at = current_history_timestamp();
+        ensure_sync_tombstones(&connection)?;
+        connection.execute(
+            "INSERT OR IGNORE INTO sync_tombstones (uuid, deleted_at) VALUES (?1, ?2)",
+            params![&entry_uuid, &deleted_at],
+        )?;
+
+        let continuation_rows = load_continuation_rows_for_entry(&connection, &entry_uuid)?;
+        if !continuation_rows.is_empty() {
+            additional_data.insert("continuations".to_string(), json!(continuation_rows));
+        }
+
+        let thread_title_rows = load_thread_text_rows_for_uuids(
+            &connection,
+            "entry_thread_titles",
+            "title",
+            &[entry_uuid.clone()],
+        )?;
+        if !thread_title_rows.is_empty() {
+            additional_data.insert("thread_titles".to_string(), json!(thread_title_rows));
+        }
+
+        let thread_summary_rows = load_thread_text_rows_for_uuids(
+            &connection,
+            "entry_thread_summaries",
+            "summary",
+            &[entry_uuid.clone()],
+        )?;
+        if !thread_summary_rows.is_empty() {
+            additional_data.insert("thread_summaries".to_string(), json!(thread_summary_rows));
+        }
+
+        let affected_surviving_roots = continuation_rows
+            .iter()
+            .filter(|row| row.parent_entry_uuid != entry_uuid)
+            .map(|row| row.parent_entry_uuid.clone())
+            .collect::<Vec<_>>();
+        delete_entry_continuations_for_entry(&connection, &entry_uuid)?;
+        let cleared_title_rows = clear_invalid_thread_text_rows(
+            &connection,
+            "entry_thread_titles",
+            "title",
+            "sync_entry_thread_title_tombstones",
+            &affected_surviving_roots,
+            &deleted_at,
+        )?;
+        if !cleared_title_rows.is_empty() {
+            merge_thread_text_snapshots(&mut additional_data, "thread_titles", cleared_title_rows);
+        }
+        let cleared_summary_rows = clear_invalid_thread_text_rows(
+            &connection,
+            "entry_thread_summaries",
+            "summary",
+            "sync_entry_thread_summary_tombstones",
+            &affected_surviving_roots,
+            &deleted_at,
+        )?;
+        if !cleared_summary_rows.is_empty() {
+            merge_thread_text_snapshots(
+                &mut additional_data,
+                "thread_summaries",
+                cleared_summary_rows,
+            );
+        }
+        delete_thread_text_for_root(&connection, "entry_thread_titles", &entry_uuid)?;
+        delete_thread_text_for_root(&connection, "entry_thread_summaries", &entry_uuid)?;
+
+        mark_entry_images_deleted(&connection, &entry_uuid, &deleted_at)?;
+        mark_entry_location_deleted(&connection, &entry_uuid, &deleted_at)?;
+
+        let additional_data = if additional_data.is_empty() {
+            None
+        } else {
+            Some(JsonValue::Object(additional_data))
+        };
+        record_history_with_additional(
+            &connection,
+            "DELETE",
+            entry_id,
+            &old_snapshot,
+            additional_data.as_ref(),
+        )?;
+
+        delete_if_table_exists(&connection, "entry_tags", "entry_id", entry_id)?;
+        connection.execute("DELETE FROM entries WHERE id = ?1", [entry_id])?;
+        connection.execute("UPDATE entries SET id = id - 1 WHERE id > ?1", [entry_id])?;
+        if table_exists(&connection, "entry_tags")? {
+            connection.execute(
+                "UPDATE entry_tags SET entry_id = entry_id - 1 WHERE entry_id > ?1",
+                [entry_id],
+            )?;
+        }
+        update_sqlite_sequence(&connection)?;
+        if let Err(error) = rebuild_entries_fts(&connection) {
+            eprintln!("[Entries] Rebuilding entries_fts after delete failed: {error}");
+        }
+
+        Ok(DeletedEntry {
+            entry_id,
+            entry_uuid,
+        })
+    })();
+
+    match result {
+        Ok(deleted) => {
+            connection.execute_batch("COMMIT")?;
+            connection.execute_batch("PRAGMA foreign_keys = ON")?;
+            Ok(deleted)
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            let _ = connection.execute_batch("PRAGMA foreign_keys = ON");
+            Err(error)
+        }
+    }
+}
+
 fn set_entry_flag(
     identifier: String,
     column: &'static str,
@@ -577,6 +757,446 @@ fn update_flag(
         params![bool_to_int(value), current_updated_at(), entry_id],
     )?;
     Ok(())
+}
+
+fn load_affected_entry_ids(connection: &Connection, deleted_entry_id: i64) -> Result<Vec<i64>> {
+    let mut statement =
+        connection.prepare("SELECT id FROM entries WHERE id > ?1 ORDER BY id ASC")?;
+    let rows = statement.query_map([deleted_entry_id], |row| row.get::<_, i64>(0))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn ensure_sync_tombstones(connection: &Connection) -> Result<()> {
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS sync_tombstones (
+            uuid TEXT PRIMARY KEY,
+            deleted_at TEXT NOT NULL
+        )",
+        [],
+    )?;
+    Ok(())
+}
+
+fn load_continuation_rows_for_entry(
+    connection: &Connection,
+    entry_uuid: &str,
+) -> Result<Vec<ContinuationSnapshot>> {
+    if !table_exists(connection, "entry_continuations")? {
+        return Ok(Vec::new());
+    }
+
+    let columns = table_columns(connection, "entry_continuations")?;
+    let updated_at_column = if columns.contains("updated_at") {
+        "updated_at"
+    } else {
+        "NULL"
+    };
+    let mut statement = connection.prepare(&format!(
+        "SELECT child_entry_uuid, parent_entry_uuid, {updated_at_column}
+         FROM entry_continuations
+         WHERE child_entry_uuid = ?1 OR parent_entry_uuid = ?1
+         ORDER BY child_entry_uuid ASC"
+    ))?;
+    let rows = statement.query_map([entry_uuid], |row| {
+        Ok(ContinuationSnapshot {
+            child_entry_uuid: row.get(0)?,
+            parent_entry_uuid: row.get(1)?,
+            updated_at: row.get(2)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn delete_entry_continuations_for_entry(connection: &Connection, entry_uuid: &str) -> Result<()> {
+    if !table_exists(connection, "entry_continuations")? {
+        return Ok(());
+    }
+    connection.execute(
+        "DELETE FROM entry_continuations
+         WHERE child_entry_uuid = ?1 OR parent_entry_uuid = ?1",
+        [entry_uuid],
+    )?;
+    Ok(())
+}
+
+fn load_thread_text_rows_for_uuids(
+    connection: &Connection,
+    table: &str,
+    value_column: &str,
+    root_uuids: &[String],
+) -> Result<Vec<JsonValue>> {
+    let (table, value_column) = safe_thread_text_table(table, value_column)?;
+    if root_uuids.is_empty() || !table_exists(connection, table)? {
+        return Ok(Vec::new());
+    }
+
+    let placeholders = placeholders(root_uuids.len());
+    let sql = format!(
+        "SELECT thread_root_uuid, {value_column}, updated_at
+         FROM {table}
+         WHERE thread_root_uuid IN ({placeholders})
+         ORDER BY thread_root_uuid ASC"
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(
+        params_from_iter(root_uuids.iter().cloned().map(Value::Text)),
+        |row| {
+            let root_uuid = row.get::<_, String>(0)?;
+            let text = row.get::<_, String>(1)?;
+            let updated_at = row.get::<_, Option<String>>(2)?;
+            Ok(json!({
+                "thread_root_uuid": root_uuid,
+                value_column: text,
+                "updated_at": updated_at,
+            }))
+        },
+    )?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn clear_invalid_thread_text_rows(
+    connection: &Connection,
+    table: &str,
+    value_column: &str,
+    tombstone_table: &str,
+    root_uuids: &[String],
+    deleted_at: &str,
+) -> Result<Vec<JsonValue>> {
+    let (table, value_column) = safe_thread_text_table(table, value_column)?;
+    let tombstone_table = safe_thread_tombstone_table(tombstone_table)?;
+    if root_uuids.is_empty() || !table_exists(connection, table)? {
+        return Ok(Vec::new());
+    }
+    ensure_thread_tombstone_table(connection, tombstone_table)?;
+
+    let rows = load_thread_text_rows_for_uuids(connection, table, value_column, root_uuids)?;
+    let mut cleared_rows = Vec::new();
+    for row in rows {
+        let Some(root_uuid) = row
+            .get("thread_root_uuid")
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        if entry_can_have_thread_title(connection, &root_uuid)? {
+            continue;
+        }
+        connection.execute(
+            &format!("DELETE FROM {table} WHERE thread_root_uuid = ?1"),
+            [root_uuid.as_str()],
+        )?;
+        record_thread_text_tombstone(connection, tombstone_table, &root_uuid, deleted_at)?;
+        cleared_rows.push(row);
+    }
+
+    Ok(cleared_rows)
+}
+
+fn merge_thread_text_snapshots(
+    additional_data: &mut serde_json::Map<String, JsonValue>,
+    key: &str,
+    snapshots: Vec<JsonValue>,
+) {
+    let mut values_by_root = additional_data
+        .get(key)
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|value| {
+            let root_uuid = value
+                .get("thread_root_uuid")
+                .and_then(|field| field.as_str())
+                .map(str::to_string)?;
+            Some((root_uuid, value))
+        })
+        .collect::<HashMap<_, _>>();
+
+    for snapshot in snapshots {
+        if let Some(root_uuid) = snapshot
+            .get("thread_root_uuid")
+            .and_then(|field| field.as_str())
+            .map(str::to_string)
+        {
+            values_by_root.insert(root_uuid, snapshot);
+        }
+    }
+
+    additional_data.insert(
+        key.to_string(),
+        JsonValue::Array(values_by_root.into_values().collect()),
+    );
+}
+
+fn delete_thread_text_for_root(
+    connection: &Connection,
+    table: &str,
+    root_uuid: &str,
+) -> Result<()> {
+    let table = match table {
+        "entry_thread_titles" => "entry_thread_titles",
+        "entry_thread_summaries" => "entry_thread_summaries",
+        _ => return Err(anyhow!("Unsupported thread metadata table: {table}")),
+    };
+    if table_exists(connection, table)? {
+        connection.execute(
+            &format!("DELETE FROM {table} WHERE thread_root_uuid = ?1"),
+            [root_uuid],
+        )?;
+    }
+    Ok(())
+}
+
+fn entry_can_have_thread_title(connection: &Connection, thread_root_uuid: &str) -> Result<bool> {
+    if !table_exists(connection, "entry_continuations")? {
+        return Ok(false);
+    }
+    let entry_exists = connection
+        .query_row(
+            "SELECT 1 FROM entries WHERE uuid = ?1 LIMIT 1",
+            [thread_root_uuid],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if !entry_exists {
+        return Ok(false);
+    }
+    let has_parent = connection
+        .query_row(
+            "SELECT 1 FROM entry_continuations WHERE child_entry_uuid = ?1 LIMIT 1",
+            [thread_root_uuid],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if has_parent {
+        return Ok(false);
+    }
+    let child_count = connection.query_row(
+        "SELECT COUNT(*) FROM entry_continuations WHERE parent_entry_uuid = ?1",
+        [thread_root_uuid],
+        |row| row.get::<_, i64>(0),
+    )?;
+    Ok(child_count > 0)
+}
+
+fn ensure_thread_tombstone_table(connection: &Connection, table: &str) -> Result<()> {
+    match table {
+        "sync_entry_thread_title_tombstones" => connection.execute(
+            "CREATE TABLE IF NOT EXISTS sync_entry_thread_title_tombstones (
+                thread_root_uuid TEXT PRIMARY KEY,
+                deleted_at TEXT NOT NULL
+            )",
+            [],
+        )?,
+        "sync_entry_thread_summary_tombstones" => connection.execute(
+            "CREATE TABLE IF NOT EXISTS sync_entry_thread_summary_tombstones (
+                thread_root_uuid TEXT PRIMARY KEY,
+                deleted_at TEXT NOT NULL
+            )",
+            [],
+        )?,
+        _ => return Err(anyhow!("Unsupported thread tombstone table: {table}")),
+    };
+    Ok(())
+}
+
+fn record_thread_text_tombstone(
+    connection: &Connection,
+    table: &str,
+    root_uuid: &str,
+    deleted_at: &str,
+) -> Result<()> {
+    let table = safe_thread_tombstone_table(table)?;
+    connection.execute(
+        &format!(
+            "INSERT INTO {table} (thread_root_uuid, deleted_at)
+             VALUES (?1, ?2)
+             ON CONFLICT(thread_root_uuid)
+             DO UPDATE SET deleted_at = excluded.deleted_at"
+        ),
+        params![root_uuid, deleted_at],
+    )?;
+    Ok(())
+}
+
+fn mark_entry_images_deleted(
+    connection: &Connection,
+    entry_uuid: &str,
+    deleted_at: &str,
+) -> Result<()> {
+    if !table_exists(connection, "plugin_entry_media")? {
+        return Ok(());
+    }
+
+    let mut media_ids = Vec::new();
+    if table_exists(connection, "plugin_media_assets")? {
+        let mut statement = connection.prepare(
+            "SELECT em.media_id, ma.hash, em.position, em.caption, em.alt_text
+             FROM plugin_entry_media em
+             JOIN plugin_media_assets ma ON ma.id = em.media_id
+             WHERE em.entry_uuid = ?1",
+        )?;
+        let rows = statement.query_map([entry_uuid], |row| {
+            Ok(ImageAttachmentForDelete {
+                media_id: row.get(0)?,
+                hash: row.get(1)?,
+                position: row.get(2)?,
+                caption: row.get(3)?,
+                alt_text: row.get(4)?,
+            })
+        })?;
+        let attachments = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        if !attachments.is_empty() {
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS sync_image_tombstones (
+                    entry_uuid TEXT NOT NULL,
+                    asset_hash TEXT NOT NULL,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    caption TEXT,
+                    alt_text TEXT,
+                    deleted_at TEXT NOT NULL,
+                    PRIMARY KEY (entry_uuid, asset_hash, position, caption, alt_text)
+                )",
+                [],
+            )?;
+        }
+        for attachment in attachments {
+            let media_id = attachment.media_id;
+            let hash = attachment.hash;
+            let position = attachment.position;
+            let caption = attachment.caption.unwrap_or_default();
+            let alt_text = attachment.alt_text.unwrap_or_default();
+            connection.execute(
+                "INSERT OR IGNORE INTO sync_image_tombstones
+                    (entry_uuid, asset_hash, position, caption, alt_text, deleted_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![entry_uuid, hash, position, caption, alt_text, deleted_at,],
+            )?;
+            media_ids.push(media_id);
+        }
+    }
+
+    connection.execute(
+        "DELETE FROM plugin_entry_media WHERE entry_uuid = ?1",
+        [entry_uuid],
+    )?;
+    if table_exists(connection, "plugin_media_assets")? {
+        for media_id in media_ids {
+            let remaining = connection.query_row(
+                "SELECT COUNT(*) FROM plugin_entry_media WHERE media_id = ?1",
+                [media_id],
+                |row| row.get::<_, i64>(0),
+            )?;
+            if remaining == 0 {
+                connection.execute(
+                    "UPDATE plugin_media_assets SET deleted_at = ?1 WHERE id = ?2",
+                    params![deleted_at, media_id],
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn mark_entry_location_deleted(
+    connection: &Connection,
+    entry_uuid: &str,
+    deleted_at: &str,
+) -> Result<()> {
+    if !table_exists(connection, "plugin_entry_locations")? {
+        return Ok(());
+    }
+    let had_location = connection
+        .query_row(
+            "SELECT 1 FROM plugin_entry_locations WHERE entry_uuid = ?1 LIMIT 1",
+            [entry_uuid],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if had_location {
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS sync_location_tombstones (
+                entry_uuid TEXT NOT NULL PRIMARY KEY,
+                deleted_at TEXT NOT NULL
+            )",
+            [],
+        )?;
+        connection.execute(
+            "INSERT OR REPLACE INTO sync_location_tombstones (entry_uuid, deleted_at)
+             VALUES (?1, ?2)",
+            params![entry_uuid, deleted_at],
+        )?;
+    }
+    connection.execute(
+        "DELETE FROM plugin_entry_locations WHERE entry_uuid = ?1",
+        [entry_uuid],
+    )?;
+    Ok(())
+}
+
+fn delete_if_table_exists(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    value: i64,
+) -> Result<()> {
+    let (table, column) = match (table, column) {
+        ("entry_tags", "entry_id") => ("entry_tags", "entry_id"),
+        _ => return Err(anyhow!("Unsupported delete target: {table}.{column}")),
+    };
+    if table_exists(connection, table)? {
+        connection.execute(&format!("DELETE FROM {table} WHERE {column} = ?1"), [value])?;
+    }
+    Ok(())
+}
+
+fn update_sqlite_sequence(connection: &Connection) -> Result<()> {
+    if table_exists(connection, "sqlite_sequence")? {
+        let max_id =
+            connection.query_row("SELECT COALESCE(MAX(id), 0) FROM entries", [], |row| {
+                row.get::<_, i64>(0)
+            })?;
+        connection.execute(
+            "UPDATE sqlite_sequence SET seq = ?1 WHERE name = 'entries'",
+            [max_id],
+        )?;
+    }
+    Ok(())
+}
+
+fn rebuild_entries_fts(connection: &Connection) -> Result<()> {
+    if !table_exists(connection, "entries_fts")? {
+        return Ok(());
+    }
+    connection.execute("DELETE FROM entries_fts", [])?;
+    connection.execute(
+        "INSERT INTO entries_fts(rowid, text)
+         SELECT id, COALESCE(NULLIF(text_plain, ''), text, '') FROM entries",
+        [],
+    )?;
+    Ok(())
+}
+
+fn safe_thread_text_table<'a>(table: &'a str, value_column: &'a str) -> Result<(&'a str, &'a str)> {
+    match (table, value_column) {
+        ("entry_thread_titles", "title") => Ok(("entry_thread_titles", "title")),
+        ("entry_thread_summaries", "summary") => Ok(("entry_thread_summaries", "summary")),
+        _ => Err(anyhow!(
+            "Unsupported thread metadata table: {table}.{value_column}"
+        )),
+    }
+}
+
+fn safe_thread_tombstone_table(table: &str) -> Result<&str> {
+    match table {
+        "sync_entry_thread_title_tombstones" => Ok("sync_entry_thread_title_tombstones"),
+        "sync_entry_thread_summary_tombstones" => Ok("sync_entry_thread_summary_tombstones"),
+        _ => Err(anyhow!("Unsupported thread tombstone table: {table}")),
+    }
 }
 
 fn detected_tables(connection: &Connection) -> Result<HashSet<String>> {
@@ -1156,6 +1776,16 @@ fn record_history(
     entry_id: i64,
     old_snapshot: &EntrySnapshot,
 ) -> Result<()> {
+    record_history_with_additional(connection, operation_type, entry_id, old_snapshot, None)
+}
+
+fn record_history_with_additional(
+    connection: &Connection,
+    operation_type: &str,
+    entry_id: i64,
+    old_snapshot: &EntrySnapshot,
+    additional_data: Option<&JsonValue>,
+) -> Result<()> {
     if !table_exists(connection, "history")? {
         return Ok(());
     }
@@ -1163,12 +1793,15 @@ fn record_history(
     connection.execute("DELETE FROM history WHERE COALESCE(undone, 0) = 1", [])?;
     connection.execute(
         "INSERT INTO history (timestamp, operation_type, entry_id, old_data, additional_data, undone, redo_data)
-         VALUES (?1, ?2, ?3, ?4, NULL, 0, NULL)",
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL)",
         params![
             current_history_timestamp(),
             operation_type,
             entry_id,
             serde_json::to_string(old_snapshot)?,
+            additional_data
+                .map(serde_json::to_string)
+                .transpose()?,
         ],
     )?;
     Ok(())
@@ -1764,6 +2397,150 @@ mod tests {
         assert!(visible.hidden);
     }
 
+    #[test]
+    fn delete_entry_resequences_ids_and_clears_thread_relations() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_fixture_database(temp_dir.path());
+
+        let response = delete_entry_for_database(&db_path, "entry_middle").expect("delete entry");
+
+        assert!(std::path::PathBuf::from(&response.audit.backup_path).exists());
+        assert_eq!(response.audit.operation, "entry.delete");
+        assert_eq!(response.entry_id, 2);
+        assert_eq!(response.entry_uuid, "entry_middle");
+
+        let connection = Connection::open(&db_path).expect("open db");
+        let missing_middle = connection
+            .query_row(
+                "SELECT 1 FROM entries WHERE uuid = 'entry_middle'",
+                [],
+                |_| Ok(()),
+            )
+            .optional()
+            .expect("missing middle");
+        assert!(missing_middle.is_none());
+
+        let child_id = connection
+            .query_row(
+                "SELECT id FROM entries WHERE uuid = 'entry_child'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("child id");
+        assert_eq!(child_id, 2);
+        let child_tag_entry_id = connection
+            .query_row(
+                "SELECT entry_id FROM entry_tags WHERE tag_id = 2",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("entry tag");
+        assert_eq!(child_tag_entry_id, 2);
+
+        let continuation_count = connection
+            .query_row("SELECT COUNT(*) FROM entry_continuations", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("continuations");
+        assert_eq!(continuation_count, 0);
+        let title_count = connection
+            .query_row("SELECT COUNT(*) FROM entry_thread_titles", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("titles");
+        assert_eq!(title_count, 0);
+        let tombstone_count = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sync_tombstones WHERE uuid = 'entry_middle'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("sync tombstone");
+        assert_eq!(tombstone_count, 1);
+        let fts_count = connection
+            .query_row("SELECT COUNT(*) FROM entries_fts", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("fts count");
+        assert_eq!(fts_count, 3);
+
+        let (operation_type, additional_data): (String, Option<String>) = connection
+            .query_row(
+                "SELECT operation_type, additional_data FROM history ORDER BY id DESC LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("history");
+        assert_eq!(operation_type, "DELETE");
+        let additional: JsonValue =
+            serde_json::from_str(&additional_data.expect("additional data")).expect("json");
+        assert!(additional.get("affected_ids").is_some());
+        assert_eq!(
+            additional
+                .get("continuations")
+                .and_then(|value| value.as_array())
+                .map(Vec::len),
+            Some(2),
+        );
+        assert_eq!(
+            additional
+                .get("thread_titles")
+                .and_then(|value| value.as_array())
+                .map(Vec::len),
+            Some(1),
+        );
+    }
+
+    #[test]
+    fn delete_entry_removes_media_location_rows_and_tombstones() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_fixture_database(temp_dir.path());
+
+        delete_entry_for_database(&db_path, "entry_child").expect("delete entry");
+
+        let connection = Connection::open(&db_path).expect("open db");
+        let media_count = connection
+            .query_row(
+                "SELECT COUNT(*) FROM plugin_entry_media WHERE entry_uuid = 'entry_child'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("entry media");
+        assert_eq!(media_count, 0);
+        let image_tombstones = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sync_image_tombstones WHERE entry_uuid = 'entry_child'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("image tombstones");
+        assert_eq!(image_tombstones, 2);
+        let deleted_assets = connection
+            .query_row(
+                "SELECT COUNT(*) FROM plugin_media_assets WHERE deleted_at IS NOT NULL",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("deleted assets");
+        assert_eq!(deleted_assets, 2);
+        let location_count = connection
+            .query_row(
+                "SELECT COUNT(*) FROM plugin_entry_locations WHERE entry_uuid = 'entry_child'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("location");
+        assert_eq!(location_count, 0);
+        let location_tombstones = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sync_location_tombstones WHERE entry_uuid = 'entry_child'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("location tombstones");
+        assert_eq!(location_tombstones, 1);
+    }
+
     fn create_fixture_database(path: &Path) -> std::path::PathBuf {
         let db_path = path.join("capsule.db");
         let connection = Connection::open(&db_path).expect("open db");
@@ -1819,6 +2596,19 @@ mod tests {
                     undone INTEGER DEFAULT 0,
                     redo_data TEXT
                 );
+                CREATE TABLE entries_fts (text);
+                CREATE TABLE plugin_media_assets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    hash TEXT NOT NULL UNIQUE,
+                    mime_type TEXT NOT NULL,
+                    bytes INTEGER NOT NULL,
+                    width INTEGER NOT NULL,
+                    height INTEGER NOT NULL,
+                    storage_backend TEXT NOT NULL,
+                    storage_key TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    deleted_at TEXT
+                );
                 CREATE TABLE plugin_entry_media (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     entry_uuid TEXT NOT NULL,
@@ -1863,6 +2653,12 @@ mod tests {
                 VALUES ('entry_root', 'Thread title', '2026-01-03 08:00');
                 INSERT INTO entry_thread_summaries (thread_root_uuid, summary, updated_at)
                 VALUES ('entry_root', 'Thread summary', '2026-01-03 08:00');
+                INSERT INTO entries_fts(rowid, text) SELECT id, text_plain FROM entries;
+                INSERT INTO plugin_media_assets
+                    (id, hash, mime_type, bytes, width, height, storage_backend, storage_key, created_at)
+                VALUES
+                    (1, 'asset-one', 'image/jpeg', 100, 400, 300, 'local_fs', 'aa/asset-one.jpg', '2026-01-03 08:00'),
+                    (2, 'asset-two', 'image/jpeg', 120, 400, 300, 'local_fs', 'aa/asset-two.jpg', '2026-01-03 08:00');
                 INSERT INTO plugin_entry_media (entry_uuid, media_id, position, created_at)
                 VALUES ('entry_child', 1, 0, '2026-01-03 08:00'),
                        ('entry_child', 2, 1, '2026-01-03 08:00');

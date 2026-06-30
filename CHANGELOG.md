@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.8 - 2026-06-30
+
+### Added
+
+- Added backup-guarded entry deletion with an explicit warning dialog, sync
+  tombstone recording, relation cleanup, legacy ID resequencing, and FTS
+  rebuilds.
+
+### Changed
+
+- Bumped the app version to 0.7.8.
+
 ## 0.7.7 - 2026-06-30
 
 ### Added
