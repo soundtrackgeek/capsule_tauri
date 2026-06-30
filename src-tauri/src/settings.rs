@@ -10,15 +10,16 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{Map, Value as JsonValue};
 
 use crate::{
-    backup, db, entries,
+    backup, db, entries, images,
     models::{
         CapsuleConfigResponse, CapsuleConfigValue, ConfigMutationResponse, Entry, EntryFilters,
         ExportEntriesRequest, ExportEntriesResponse, ExportFormat, LibraryListResponse,
         LibraryPrompt, LibraryPromptInput, LibraryPromptMutationResponse, LibraryPromptUpdate,
         LibraryTemplate, LibraryTemplateInput, LibraryTemplateMutationResponse,
         LibraryTemplateUpdate, MoodCatalogResponse, MoodDeleteRequest, MoodMutationResponse,
-        MoodRenameRequest, MoodUsage, TagCatalogResponse, TagDeleteRequest, TagMergeRequest,
-        TagMutationResponse, TagRenameRequest, TagUsage,
+        MoodRenameRequest, MoodUsage, PathSettingsResponse, PathSettingsUpdateRequest,
+        TagCatalogResponse, TagDeleteRequest, TagMergeRequest, TagMutationResponse,
+        TagRenameRequest, TagUsage,
     },
     search,
 };
@@ -76,6 +77,83 @@ pub fn delete_capsule_config_value(key: String) -> Result<ConfigMutationResponse
         object.remove(&key);
         Ok(())
     })
+}
+
+pub fn get_path_settings() -> Result<PathSettingsResponse> {
+    let mut warnings = Vec::new();
+    if let Err(error) = db::try_read_local_path_settings() {
+        warnings.push(format!("Unable to read saved path settings: {error}"));
+    }
+    if env::var("CAPSULE_DB_PATH")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .is_some()
+    {
+        warnings.push("CAPSULE_DB_PATH is set and overrides the saved database path.".to_string());
+    }
+    if env::var("CAPSULE_IMAGES_MEDIA_ROOT")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .is_some()
+    {
+        warnings.push(
+            "CAPSULE_IMAGES_MEDIA_ROOT is set and overrides the saved image path.".to_string(),
+        );
+    }
+    if env::var("CAPSULE_BACKUP_DIR")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .is_some()
+    {
+        warnings.push("CAPSULE_BACKUP_DIR is set and overrides the saved backup path.".to_string());
+    }
+
+    let db_path = db::resolve_database_path();
+    let backup_directory = db::backup_directory_for_database(&db_path);
+
+    Ok(PathSettingsResponse {
+        database_path: db::path_to_string(&db_path),
+        image_media_root: images::get_image_media_root()?,
+        backup_directory: db::path_to_string(&backup_directory),
+        settings_path: db::path_to_string(&db::local_path_settings_path()),
+        warnings,
+    })
+}
+
+pub fn set_path_settings(input: PathSettingsUpdateRequest) -> Result<PathSettingsResponse> {
+    let mut settings = db::read_local_path_settings();
+    settings.database_path = normalize_string(input.database_path.as_deref());
+    settings.image_media_root = normalize_string(input.image_media_root.as_deref());
+    settings.backup_directory = normalize_string(input.backup_directory.as_deref());
+
+    if let Some(path) = settings.image_media_root.as_deref() {
+        fs::create_dir_all(path).with_context(|| format!("failed to create image path {path}"))?;
+    }
+    if let Some(path) = settings.backup_directory.as_deref() {
+        fs::create_dir_all(path).with_context(|| format!("failed to create backup path {path}"))?;
+    }
+
+    db::write_local_path_settings(&settings)?;
+    get_path_settings()
+}
+
+pub fn browse_database_path(current_path: Option<String>) -> Result<Option<String>> {
+    let mut dialog = rfd::FileDialog::new()
+        .set_title("Select Capsule database")
+        .add_filter("SQLite databases", &["db", "sqlite", "sqlite3"])
+        .add_filter("All files", &["*"]);
+    if let Some(directory) = dialog_start_directory(current_path.as_deref(), true) {
+        dialog = dialog.set_directory(directory);
+    }
+    Ok(dialog.pick_file().map(|path| db::path_to_string(&path)))
+}
+
+pub fn browse_directory_path(current_path: Option<String>) -> Result<Option<String>> {
+    let mut dialog = rfd::FileDialog::new().set_title("Select folder");
+    if let Some(directory) = dialog_start_directory(current_path.as_deref(), false) {
+        dialog = dialog.set_directory(directory);
+    }
+    Ok(dialog.pick_folder().map(|path| db::path_to_string(&path)))
 }
 
 pub fn list_tags() -> Result<TagCatalogResponse> {
@@ -386,7 +464,18 @@ fn config_path_for_database(db_path: &Path) -> PathBuf {
             return PathBuf::from(path);
         }
     }
-    db::backup_directory_for_database(db_path).join("config.json")
+    db::database_directory_for_database(db_path).join("config.json")
+}
+
+fn dialog_start_directory(value: Option<&str>, file_path: bool) -> Option<PathBuf> {
+    let path = value
+        .and_then(|value| normalize_string(Some(value)))
+        .map(PathBuf::from)?;
+    if file_path {
+        path.parent().map(Path::to_path_buf).or(Some(path))
+    } else {
+        Some(path)
+    }
 }
 
 fn read_config_object(path: &Path) -> Result<Map<String, JsonValue>> {

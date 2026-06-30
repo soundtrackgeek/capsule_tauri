@@ -73,7 +73,7 @@ import {
   getGamificationOverview,
   getEntry,
   getImageDataUrl,
-  getImageMediaRoot,
+  getPathSettings,
   getPluginOverview,
   getRandomEntry,
   getSyncOverview,
@@ -99,6 +99,7 @@ import {
   restoreBackup,
   searchEntries,
   setCapsuleConfigValue,
+  setPathSettings,
   setPluginEnabled,
   starEntry,
   suggestAiMetadata,
@@ -110,6 +111,8 @@ import {
   updatePrompt,
   updateTemplate,
   uploadImage,
+  browseDatabasePath,
+  browseDirectoryPath,
 } from "./backend";
 import { StatusPill } from "./components/StatusPill";
 import { formatBytes, formatDateTime } from "./lib/format";
@@ -141,6 +144,8 @@ import type {
   ImageVariant,
   LibraryListResponse,
   MoodCatalogResponse,
+  PathSettingsResponse,
+  PathSettingsUpdateRequest,
   Phase6Capability,
   PluginOverviewResponse,
   SearchRequest,
@@ -354,6 +359,7 @@ function App() {
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [backupDirectory, setBackupDirectory] = useState<string>("");
   const [imageMediaRoot, setImageMediaRoot] = useState<string>("");
+  const [pathSettings, setPathSettingsState] = useState<PathSettingsResponse | null>(null);
   const [recentEntries, setRecentEntries] = useState<Entry[]>([]);
   const [pinnedEntries, setPinnedEntries] = useState<Entry[]>([]);
   const [randomEntry, setRandomEntry] = useState<Entry | null>(null);
@@ -776,15 +782,17 @@ function App() {
   const loadDataTools = useCallback(async () => {
     setDataToolsLoading(true);
     try {
-      const [nextConfig, nextImageMediaRoot, nextTags, nextMoods, nextLibrary] = await Promise.all([
+      const [nextConfig, nextPathSettings, nextTags, nextMoods, nextLibrary] = await Promise.all([
         getCapsuleConfig(),
-        getImageMediaRoot(),
+        getPathSettings(),
         status?.readable ? listTags() : Promise.resolve<TagCatalogResponse | null>(null),
         status?.readable ? listMoods() : Promise.resolve<MoodCatalogResponse | null>(null),
         status?.readable ? listLibraryItems() : Promise.resolve<LibraryListResponse | null>(null),
       ]);
       setCapsuleConfig(nextConfig);
-      setImageMediaRoot(nextImageMediaRoot);
+      setPathSettingsState(nextPathSettings);
+      setImageMediaRoot(nextPathSettings.imageMediaRoot);
+      setBackupDirectory(nextPathSettings.backupDirectory);
       setTagCatalog(nextTags);
       setMoodCatalog(nextMoods);
       setLibrary(nextLibrary);
@@ -1090,6 +1098,32 @@ function App() {
     },
     [loadDataTools, refresh],
   );
+
+  const handleSavePathSettings = useCallback(async (input: PathSettingsUpdateRequest) => {
+    const response = await setPathSettings(input);
+    setPathSettingsState(response);
+    setImageMediaRoot(response.imageMediaRoot);
+    setBackupDirectory(response.backupDirectory);
+    return `Saved local paths: ${response.settingsPath}`;
+  }, []);
+
+  const handleBrowseDatabasePath = useCallback(async (currentPath: string) => {
+    try {
+      return await browseDatabasePath(currentPath || null);
+    } catch (browseError) {
+      setError(browseError instanceof Error ? browseError.message : "Unable to browse for database");
+      return null;
+    }
+  }, []);
+
+  const handleBrowseDirectoryPath = useCallback(async (currentPath: string) => {
+    try {
+      return await browseDirectoryPath(currentPath || null);
+    } catch (browseError) {
+      setError(browseError instanceof Error ? browseError.message : "Unable to browse for folder");
+      return null;
+    }
+  }, []);
 
   const handleSelectEntry = useCallback(async (entry: Entry) => {
     setSelectedEntry(entry);
@@ -1918,8 +1952,12 @@ function App() {
             library={library}
             loading={dataToolsLoading}
             moodCatalog={moodCatalog}
+            onBrowseDatabasePath={handleBrowseDatabasePath}
+            onBrowseDirectoryPath={handleBrowseDirectoryPath}
             onRefresh={loadDataTools}
             onRunMutation={runDataToolMutation}
+            onSavePathSettings={handleSavePathSettings}
+            pathSettings={pathSettings}
             status={status}
             statusTone={statusTone}
             tagCatalog={tagCatalog}
@@ -3749,6 +3787,7 @@ type SettingsViewProps = {
   status: DatabaseStatus | null;
   backupDirectory: string;
   imageMediaRoot: string;
+  pathSettings: PathSettingsResponse | null;
   statusTone: "good" | "warn" | "neutral";
   config: CapsuleConfigResponse | null;
   tagCatalog: TagCatalogResponse | null;
@@ -3758,14 +3797,18 @@ type SettingsViewProps = {
   setUiSettings: (next: UiSettings) => void;
   loading: boolean;
   dataToolMutating: boolean;
+  onBrowseDatabasePath: (currentPath: string) => Promise<string | null>;
+  onBrowseDirectoryPath: (currentPath: string) => Promise<string | null>;
   onRefresh: () => void;
   onRunMutation: (mutation: () => Promise<string>) => Promise<void>;
+  onSavePathSettings: (input: PathSettingsUpdateRequest) => Promise<string>;
 };
 
 function SettingsView({
   status,
   backupDirectory,
   imageMediaRoot,
+  pathSettings,
   statusTone,
   config,
   tagCatalog,
@@ -3775,9 +3818,17 @@ function SettingsView({
   setUiSettings,
   loading,
   dataToolMutating,
+  onBrowseDatabasePath,
+  onBrowseDirectoryPath,
   onRefresh,
   onRunMutation,
+  onSavePathSettings,
 }: SettingsViewProps) {
+  const [pathDraft, setPathDraft] = useState({
+    databasePath: "",
+    imageMediaRoot: "",
+    backupDirectory: "",
+  });
   const [configDraft, setConfigDraft] = useState({ key: "", value: "" });
   const [tagDraft, setTagDraft] = useState({ from: "", to: "", source: "", target: "", deleteName: "" });
   const [moodDraft, setMoodDraft] = useState({ from: "", to: "", deleteName: "" });
@@ -3795,14 +3846,130 @@ function SettingsView({
     tags: "",
   });
 
+  useEffect(() => {
+    setPathDraft({
+      databasePath: pathSettings?.databasePath ?? status?.dbPath ?? "",
+      imageMediaRoot: pathSettings?.imageMediaRoot ?? imageMediaRoot,
+      backupDirectory: pathSettings?.backupDirectory ?? backupDirectory,
+    });
+  }, [
+    backupDirectory,
+    imageMediaRoot,
+    pathSettings?.backupDirectory,
+    pathSettings?.databasePath,
+    pathSettings?.imageMediaRoot,
+    status?.dbPath,
+  ]);
+
   return (
     <section className="settings-grid" aria-label="Settings">
       <Panel icon={<HardDrive size={20} />} title="Local Paths">
-        <dl className="detail-list detail-list--paths">
-          <Detail label="Database" value={<code>{status?.dbPath ?? "Loading"}</code>} />
-          <Detail label="Images" value={<code>{imageMediaRoot || "Loading"}</code>} />
-          <Detail label="Backups" value={<code>{backupDirectory || "Not available"}</code>} />
+        <div className="path-settings-list">
+          <label className="field">
+            <span>Database</span>
+            <div className="path-input-row">
+              <input
+                onChange={(event) =>
+                  setPathDraft({ ...pathDraft, databasePath: event.target.value })
+                }
+                value={pathDraft.databasePath}
+              />
+              <button
+                aria-label="Browse database path"
+                className="icon-button"
+                disabled={dataToolMutating}
+                onClick={async () => {
+                  const selected = await onBrowseDatabasePath(pathDraft.databasePath);
+                  if (selected) {
+                    setPathDraft({ ...pathDraft, databasePath: selected });
+                  }
+                }}
+                title="Browse database path"
+                type="button"
+              >
+                <FolderOpen size={17} />
+              </button>
+            </div>
+          </label>
+          <label className="field">
+            <span>Images</span>
+            <div className="path-input-row">
+              <input
+                onChange={(event) =>
+                  setPathDraft({ ...pathDraft, imageMediaRoot: event.target.value })
+                }
+                value={pathDraft.imageMediaRoot}
+              />
+              <button
+                aria-label="Browse image path"
+                className="icon-button"
+                disabled={dataToolMutating}
+                onClick={async () => {
+                  const selected = await onBrowseDirectoryPath(pathDraft.imageMediaRoot);
+                  if (selected) {
+                    setPathDraft({ ...pathDraft, imageMediaRoot: selected });
+                  }
+                }}
+                title="Browse image path"
+                type="button"
+              >
+                <FolderOpen size={17} />
+              </button>
+            </div>
+          </label>
+          <label className="field">
+            <span>Backups</span>
+            <div className="path-input-row">
+              <input
+                onChange={(event) =>
+                  setPathDraft({ ...pathDraft, backupDirectory: event.target.value })
+                }
+                value={pathDraft.backupDirectory}
+              />
+              <button
+                aria-label="Browse backup path"
+                className="icon-button"
+                disabled={dataToolMutating}
+                onClick={async () => {
+                  const selected = await onBrowseDirectoryPath(pathDraft.backupDirectory);
+                  if (selected) {
+                    setPathDraft({ ...pathDraft, backupDirectory: selected });
+                  }
+                }}
+                title="Browse backup path"
+                type="button"
+              >
+                <FolderOpen size={17} />
+              </button>
+            </div>
+          </label>
+          <button
+            className="primary-button"
+            disabled={dataToolMutating}
+            onClick={() =>
+              onRunMutation(() =>
+                onSavePathSettings({
+                  databasePath: pathDraft.databasePath,
+                  imageMediaRoot: pathDraft.imageMediaRoot,
+                  backupDirectory: pathDraft.backupDirectory,
+                }),
+              )
+            }
+            type="button"
+          >
+            <Save size={17} />
+            Save paths
+          </button>
+        </div>
+        <dl className="detail-list detail-list--compact detail-list--paths path-settings-meta">
+          <Detail label="Settings" value={<code>{pathSettings?.settingsPath ?? "Loading"}</code>} />
         </dl>
+        {pathSettings?.warnings.map((warning) => (
+          <div className="inline-warning" key={warning}>
+            <TriangleAlert size={15} />
+            {warning}
+          </div>
+        ))}
       </Panel>
 
       <Panel action={<StatusPill tone={statusTone}>{status?.security.mode ?? "unknown"}</StatusPill>} icon={<Database size={20} />} title="Database">
@@ -3825,7 +3992,7 @@ function SettingsView({
         title="Application"
       >
         <dl className="detail-list">
-          <Detail label="Version" value="0.7.5" />
+          <Detail label="Version" value="0.7.6" />
           <Detail label="Mode" value="Backups and data tools" />
           <Detail label="Writes" value="Backup guarded" />
         </dl>

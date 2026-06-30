@@ -96,6 +96,20 @@ export type ConfigMutationResponse = {
   completedAt: string;
 };
 
+export type PathSettingsResponse = {
+  databasePath: string;
+  imageMediaRoot: string;
+  backupDirectory: string;
+  settingsPath: string;
+  warnings: string[];
+};
+
+export type PathSettingsUpdateRequest = {
+  databasePath?: string | null;
+  imageMediaRoot?: string | null;
+  backupDirectory?: string | null;
+};
+
 export type TagUsage = {
   id: number;
   name: string;

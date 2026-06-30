@@ -860,7 +860,7 @@ fn config_path_candidates(db_path: &Path) -> Vec<PathBuf> {
             paths.push(PathBuf::from(value));
         }
     }
-    paths.push(crate::db::backup_directory_for_database(db_path).join("config.json"));
+    paths.push(crate::db::database_directory_for_database(db_path).join("config.json"));
     dedupe_paths(paths)
 }
 

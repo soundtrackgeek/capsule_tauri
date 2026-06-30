@@ -41,12 +41,12 @@ Capsule database:
 - Manual SQLite backup creation using SQLite's backup API.
 - Backup restore preview with schema, entry, tag, size, and timestamp checks.
 - Restore with a fresh safety backup before the live database is replaced.
-- Open-backup-folder command for the active database directory.
+- Open-backup-folder command for the active backup directory.
 - JSON manifests written next to generated backups.
 - Capsule `config.json` display plus file-backed set/delete actions that create
   config backups before writing.
-- Settings path overview for the active database file, resolved image media
-  root, and active backup directory.
+- Editable Settings paths for the active database file, image media root, and
+  backup directory, with native browse buttons.
 - Local theme and sidebar-density settings stored outside the journal database.
 - Tag rename, merge, and delete tools guarded by verified database backups.
 - Mood rename and clear tools guarded by verified database backups.
@@ -78,15 +78,19 @@ Capsule database:
   toggles, and quest claiming.
 
 The database resolver checks an explicit `CAPSULE_DB_PATH` first. When that is
-not set, it prefers the MVP production database at
-`C:\Users\jtill\.capsule\capsule.db`, then falls back to
-`%USERPROFILE%\.capsule\capsule.db` and finally `CAPSULE_HOME\capsule.db`.
+not set, it uses the saved local database path from Settings, then prefers the
+MVP production database at `C:\Users\jtill\.capsule\capsule.db`, then falls
+back to `%USERPROFILE%\.capsule\capsule.db` and finally
+`CAPSULE_HOME\capsule.db`.
 
 Image storage resolves `CAPSULE_IMAGES_MEDIA_ROOT` first, then
-`images.media_root` from Capsule config, then the default
-`C:\Users\jtill\OneDrive\_capsule\images`. Cover wall assets are local-only and
-ignored by Git under `local-assets/`; set `CAPSULE_COVERS_ROOT` to point at a
-different cover folder.
+the saved local image path from Settings, then `images.media_root` from Capsule
+config, then the default `C:\Users\jtill\OneDrive\_capsule\images`. Backup
+storage resolves `CAPSULE_BACKUP_DIR` first, then the saved local backup path
+from Settings, then the active database directory. Saved local paths are stored
+outside the journal database in the app path settings file shown in Settings.
+Cover wall assets are local-only and ignored by Git under `local-assets/`; set
+`CAPSULE_COVERS_ROOT` to point at a different cover folder.
 
 Location auto-capture on entry creation uses the same Capsule configuration keys
 as the existing app: `location.auto_capture`, `location.auto_capture_method`,

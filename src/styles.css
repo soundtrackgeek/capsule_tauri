@@ -1188,6 +1188,27 @@ button:active:not(:disabled) {
   overflow-wrap: anywhere;
 }
 
+.path-settings-list {
+  display: grid;
+  gap: 12px;
+}
+
+.path-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  gap: 8px;
+  align-items: center;
+}
+
+.path-input-row input {
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+}
+
+.path-settings-meta {
+  margin-top: 14px;
+}
+
 .settings-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr)) auto;

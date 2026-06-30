@@ -7,6 +7,7 @@ use std::{
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     backup,
@@ -14,6 +15,16 @@ use crate::{
 };
 
 const MVP_DATABASE_PATH: &str = r"C:\Users\jtill\.capsule\capsule.db";
+const PATH_SETTINGS_ENV: &str = "CAPSULE_PATH_SETTINGS_PATH";
+const BACKUP_DIRECTORY_ENV: &str = "CAPSULE_BACKUP_DIR";
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalPathSettings {
+    pub database_path: Option<String>,
+    pub image_media_root: Option<String>,
+    pub backup_directory: Option<String>,
+}
 
 pub fn database_status() -> Result<DatabaseStatus> {
     database_status_for_path(resolve_database_path())
@@ -42,7 +53,7 @@ pub fn database_status_for_path(path: PathBuf) -> Result<DatabaseStatus> {
         .map(|backup| backup.path.clone());
 
     if backup_response.backups.is_empty() {
-        warnings.push("No Capsule backups were found next to the active database.".to_string());
+        warnings.push("No Capsule backups were found in the active backup directory.".to_string());
     }
 
     if !db_exists {
@@ -135,6 +146,7 @@ pub fn database_status_for_path(path: PathBuf) -> Result<DatabaseStatus> {
 pub fn resolve_database_path() -> PathBuf {
     resolve_database_path_from_parts(
         env_value("CAPSULE_DB_PATH"),
+        read_local_path_settings().database_path,
         env_value("USERPROFILE"),
         env_value("CAPSULE_HOME"),
         Path::new(MVP_DATABASE_PATH),
@@ -144,12 +156,17 @@ pub fn resolve_database_path() -> PathBuf {
 
 fn resolve_database_path_from_parts(
     capsule_db_path: Option<String>,
+    local_database_path: Option<String>,
     userprofile: Option<String>,
     capsule_home: Option<String>,
     mvp_database_path: &Path,
     path_exists: impl Fn(&Path) -> bool,
 ) -> PathBuf {
     if let Some(path) = capsule_db_path {
+        return PathBuf::from(path);
+    }
+
+    if let Some(path) = local_database_path {
         return PathBuf::from(path);
     }
 
@@ -172,9 +189,84 @@ fn resolve_database_path_from_parts(
 }
 
 pub fn backup_directory_for_database(path: &Path) -> PathBuf {
+    if is_active_database_path(path) {
+        if let Some(path) = env_value(BACKUP_DIRECTORY_ENV) {
+            return PathBuf::from(path);
+        }
+        if let Some(path) = read_local_path_settings().backup_directory {
+            return PathBuf::from(path);
+        }
+    }
+
+    database_directory_for_database(path)
+}
+
+pub fn database_directory_for_database(path: &Path) -> PathBuf {
     path.parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+pub fn local_image_media_root_for_database(path: &Path) -> Option<PathBuf> {
+    if is_active_database_path(path) {
+        return read_local_path_settings()
+            .image_media_root
+            .map(PathBuf::from);
+    }
+    None
+}
+
+pub fn is_active_database_path(path: &Path) -> bool {
+    comparable_path(path) == comparable_path(&resolve_database_path())
+}
+
+pub fn local_path_settings_path() -> PathBuf {
+    if let Some(path) = env_value(PATH_SETTINGS_ENV) {
+        return PathBuf::from(path);
+    }
+
+    if let Some(app_data) = env_value("APPDATA") {
+        return PathBuf::from(app_data)
+            .join("Capsule")
+            .join("path_settings.json");
+    }
+
+    if let Some(profile) = env_value("USERPROFILE") {
+        return PathBuf::from(profile)
+            .join(".capsule")
+            .join("path_settings.json");
+    }
+
+    PathBuf::from("path_settings.json")
+}
+
+pub fn read_local_path_settings() -> LocalPathSettings {
+    try_read_local_path_settings().unwrap_or_default()
+}
+
+pub fn try_read_local_path_settings() -> Result<LocalPathSettings> {
+    let path = local_path_settings_path();
+    if !path.exists() {
+        return Ok(LocalPathSettings::default());
+    }
+
+    let raw = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let mut settings: LocalPathSettings = serde_json::from_slice(&raw)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    settings.normalize();
+    Ok(settings)
+}
+
+pub fn write_local_path_settings(settings: &LocalPathSettings) -> Result<()> {
+    let path = local_path_settings_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let mut settings = settings.clone();
+    settings.normalize();
+    fs::write(&path, serde_json::to_vec_pretty(&settings)?)
+        .with_context(|| format!("failed to write {}", path.display()))
 }
 
 pub fn open_read_only_connection(path: &Path) -> Result<Connection> {
@@ -235,12 +327,30 @@ fn env_value(name: &str) -> Option<String> {
     env::var(name).ok().filter(|value| !value.trim().is_empty())
 }
 
+fn comparable_path(path: &Path) -> String {
+    path.to_string_lossy().replace('/', "\\").to_lowercase()
+}
+
 pub fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().to_string()
 }
 
 pub fn system_time_to_iso(value: SystemTime) -> String {
     DateTime::<Utc>::from(value).to_rfc3339()
+}
+
+impl LocalPathSettings {
+    fn normalize(&mut self) {
+        self.database_path = normalize_path_setting(self.database_path.take());
+        self.image_media_root = normalize_path_setting(self.image_media_root.take());
+        self.backup_directory = normalize_path_setting(self.backup_directory.take());
+    }
+}
+
+fn normalize_path_setting(value: Option<String>) -> Option<String> {
+    value
+        .map(|path| path.trim().to_string())
+        .filter(|path| !path.is_empty())
 }
 
 #[cfg(test)]
@@ -295,6 +405,7 @@ mod tests {
         let mvp_path = PathBuf::from(r"C:\Users\jtill\.capsule\capsule.db");
         let resolved = resolve_database_path_from_parts(
             None,
+            None,
             Some(r"C:\Users\jtill".to_string()),
             Some(r"C:\Users\jtill\OneDrive\.capsule".to_string()),
             &mvp_path,
@@ -310,6 +421,7 @@ mod tests {
         let override_path = r"D:\fixture\capsule.db";
         let resolved = resolve_database_path_from_parts(
             Some(override_path.to_string()),
+            None,
             Some(r"C:\Users\jtill".to_string()),
             Some(r"C:\Users\jtill\OneDrive\.capsule".to_string()),
             &mvp_path,

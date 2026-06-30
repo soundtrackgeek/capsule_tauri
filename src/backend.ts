@@ -50,6 +50,8 @@ import type {
   PluginMutationRequest,
   PluginMutationResponse,
   PluginOverviewResponse,
+  PathSettingsResponse,
+  PathSettingsUpdateRequest,
   RandomEntryFilters,
   SearchRequest,
   SearchResponse,
@@ -75,8 +77,13 @@ declare global {
 const runningInTauri = () =>
   typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 
-const mockStatus: DatabaseStatus = {
-  dbPath: "C:\\Users\\jtill\\.capsule\\capsule.db",
+const defaultMockDatabasePath = "C:\\Users\\jtill\\.capsule\\capsule.db";
+const defaultMockBackupDirectory = "C:\\Users\\jtill\\.capsule";
+const mockImageMediaRoot = "C:\\Users\\jtill\\OneDrive\\_capsule\\images";
+const mockPathSettingsPath = "C:\\Users\\jtill\\AppData\\Roaming\\Capsule\\path_settings.json";
+
+let mockStatus: DatabaseStatus = {
+  dbPath: defaultMockDatabasePath,
   dbExists: true,
   dbSizeBytes: 110_792_704,
   dbModifiedAt: "2026-06-29T12:43:21Z",
@@ -102,8 +109,8 @@ const mockStatus: DatabaseStatus = {
   warnings: [],
 };
 
-const mockBackups: BackupListResponse = {
-  backupDirectory: "C:\\Users\\jtill\\.capsule",
+let mockBackups: BackupListResponse = {
+  backupDirectory: defaultMockBackupDirectory,
   backups: [
     {
       path: "C:\\Users\\jtill\\.capsule\\capsule_backup_20260629_120000.db",
@@ -126,8 +133,6 @@ let mockConfig: CapsuleConfigResponse = {
   ],
   warnings: [],
 };
-
-const mockImageMediaRoot = "C:\\Users\\jtill\\OneDrive\\_capsule\\images";
 
 let mockTags: TagCatalogResponse = {
   tags: [
@@ -685,6 +690,77 @@ export async function getImageMediaRoot(): Promise<string> {
 
     await pause(120);
     return mockConfig.values.find((item) => item.key === "images.media_root")?.value ?? mockImageMediaRoot;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function getPathSettings(): Promise<PathSettingsResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<PathSettingsResponse>("get_path_settings");
+    }
+
+    await pause(120);
+    return mockPathSettings();
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function setPathSettings(
+  input: PathSettingsUpdateRequest,
+): Promise<PathSettingsResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<PathSettingsResponse>("set_path_settings", { input });
+    }
+
+    await pause(180);
+    const databasePath = normalizeNullable(input.databasePath);
+    const imageMediaRoot = normalizeNullable(input.imageMediaRoot);
+    const backupDirectory = normalizeNullable(input.backupDirectory);
+
+    mockStatus = {
+      ...mockStatus,
+      dbPath: databasePath ?? defaultMockDatabasePath,
+    };
+    mockBackups = {
+      ...mockBackups,
+      backupDirectory: backupDirectory ?? defaultMockBackupDirectory,
+    };
+    mockConfig = {
+      ...mockConfig,
+      values: upsertConfigValue(mockConfig.values, "images.media_root", imageMediaRoot),
+    };
+
+    return mockPathSettings();
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function browseDatabasePath(currentPath?: string | null): Promise<string | null> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<string | null>("browse_database_path", { currentPath });
+    }
+
+    await pause(80);
+    return window.prompt("Database path", currentPath ?? mockStatus.dbPath);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function browseDirectoryPath(currentPath?: string | null): Promise<string | null> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<string | null>("browse_directory_path", { currentPath });
+    }
+
+    await pause(80);
+    return window.prompt("Folder path", currentPath ?? defaultMockBackupDirectory);
   } catch (error) {
     throw normalizeError(error);
   }
@@ -2127,6 +2203,30 @@ function buildMockCoverWall(input: CoverWallRequest): CoverWallResponse {
     orphanedCoverCount: 0,
     coversRoot: "C:\\_code\\capsule_tauri\\local-assets\\covers",
   };
+}
+
+function mockPathSettings(): PathSettingsResponse {
+  return {
+    databasePath: mockStatus.dbPath,
+    imageMediaRoot:
+      mockConfig.values.find((item) => item.key === "images.media_root")?.value ??
+      mockImageMediaRoot,
+    backupDirectory: mockBackups.backupDirectory,
+    settingsPath: mockPathSettingsPath,
+    warnings: [],
+  };
+}
+
+function upsertConfigValue(
+  values: CapsuleConfigResponse["values"],
+  key: string,
+  value: string | null,
+) {
+  const nextValues = values.filter((item) => item.key !== key);
+  if (value) {
+    nextValues.push({ key, value });
+  }
+  return nextValues.sort((left, right) => left.key.localeCompare(right.key));
 }
 
 function mockImageDataUrl(attachmentId: number, variant: ImageVariant) {

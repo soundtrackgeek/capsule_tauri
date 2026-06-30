@@ -65,8 +65,8 @@ pub fn list_entry_images(identifier: String) -> Result<ImageEntryListResponse> {
 pub fn get_image_media_root() -> Result<String> {
     let db_path = db::resolve_database_path();
     let roots = media_roots_for_database(&db_path, None);
-    let root = first_existing_or_default_root(&roots)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_MEDIA_ROOT));
+    let root =
+        first_existing_or_default_root(&roots).unwrap_or_else(|| PathBuf::from(DEFAULT_MEDIA_ROOT));
     Ok(db::path_to_string(&root))
 }
 
@@ -771,19 +771,22 @@ fn media_roots_for_database(db_path: &Path, override_root: Option<PathBuf>) -> V
             push_unique_path(&mut roots, PathBuf::from(value));
         }
     }
+    if let Some(local_root) = db::local_image_media_root_for_database(db_path) {
+        push_unique_path(&mut roots, local_root);
+    }
     if let Some(configured) = config_media_root(db_path) {
         push_unique_path(&mut roots, configured);
     }
     push_unique_path(&mut roots, PathBuf::from(DEFAULT_MEDIA_ROOT));
     push_unique_path(
         &mut roots,
-        db::backup_directory_for_database(db_path).join("media"),
+        db::database_directory_for_database(db_path).join("media"),
     );
     roots
 }
 
 fn config_media_root(db_path: &Path) -> Option<PathBuf> {
-    let config_path = db::backup_directory_for_database(db_path).join("config.json");
+    let config_path = db::database_directory_for_database(db_path).join("config.json");
     let raw = fs::read(config_path).ok()?;
     let json = serde_json::from_slice::<serde_json::Value>(&raw).ok()?;
     json.get("images.media_root")

@@ -23,11 +23,11 @@ use models::{
     ImageUploadResponse, ImageVariant, LibraryListResponse, LibraryPromptInput,
     LibraryPromptMutationResponse, LibraryPromptUpdate, LibraryTemplateInput,
     LibraryTemplateMutationResponse, LibraryTemplateUpdate, MoodCatalogResponse, MoodDeleteRequest,
-    MoodMutationResponse, MoodRenameRequest, PluginMutationRequest, PluginMutationResponse,
-    PluginOverviewResponse, QuestClaimRequest, QuestClaimResponse, RandomEntryFilters,
-    SearchRequest, SearchResponse, SyncOverviewResponse, TagCatalogResponse, TagDeleteRequest,
-    TagMergeRequest, TagMutationResponse, TagRenameRequest, ThreadListResponse,
-    ThreadMetadataUpdate, ThreadMutationResponse, WritingCalendarResponse,
+    MoodMutationResponse, MoodRenameRequest, PathSettingsResponse, PathSettingsUpdateRequest,
+    PluginMutationRequest, PluginMutationResponse, PluginOverviewResponse, QuestClaimRequest,
+    QuestClaimResponse, RandomEntryFilters, SearchRequest, SearchResponse, SyncOverviewResponse,
+    TagCatalogResponse, TagDeleteRequest, TagMergeRequest, TagMutationResponse, TagRenameRequest,
+    ThreadListResponse, ThreadMetadataUpdate, ThreadMutationResponse, WritingCalendarResponse,
 };
 
 #[tauri::command]
@@ -367,6 +367,40 @@ async fn delete_capsule_config_value(key: String) -> Result<ConfigMutationRespon
 }
 
 #[tauri::command]
+async fn get_path_settings() -> Result<PathSettingsResponse, String> {
+    tauri::async_runtime::spawn_blocking(settings::get_path_settings)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn set_path_settings(
+    input: PathSettingsUpdateRequest,
+) -> Result<PathSettingsResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || settings::set_path_settings(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn browse_database_path(current_path: Option<String>) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || settings::browse_database_path(current_path))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn browse_directory_path(current_path: Option<String>) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || settings::browse_directory_path(current_path))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn list_tags() -> Result<TagCatalogResponse, String> {
     tauri::async_runtime::spawn_blocking(settings::list_tags)
         .await
@@ -597,6 +631,10 @@ pub fn run() {
             get_capsule_config,
             set_capsule_config_value,
             delete_capsule_config_value,
+            get_path_settings,
+            set_path_settings,
+            browse_database_path,
+            browse_directory_path,
             list_tags,
             rename_tag,
             merge_tag,

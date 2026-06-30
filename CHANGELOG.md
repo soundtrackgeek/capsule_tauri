@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.6 - 2026-06-30
+
+### Added
+
+- Added editable Settings controls for the active database file, image media
+  root, and backup directory.
+- Added native browse dialogs for selecting the database file and image/backup
+  folders.
+- Added local path settings persistence for database, image, and backup paths.
+
+### Changed
+
+- Changed backup resolution to allow a saved local backup directory or
+  `CAPSULE_BACKUP_DIR` override instead of always using the database directory.
+- Bumped the app version to 0.7.6.
+
 ## 0.7.5 - 2026-06-30
 
 ### Added

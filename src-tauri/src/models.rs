@@ -163,6 +163,24 @@ pub struct ConfigMutationResponse {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PathSettingsResponse {
+    pub database_path: String,
+    pub image_media_root: String,
+    pub backup_directory: String,
+    pub settings_path: String,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PathSettingsUpdateRequest {
+    pub database_path: Option<String>,
+    pub image_media_root: Option<String>,
+    pub backup_directory: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TagUsage {
     pub id: i64,
     pub name: String,
