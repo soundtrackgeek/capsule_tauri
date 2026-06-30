@@ -1466,6 +1466,19 @@ export async function getImageDataUrl(
   }
 }
 
+export async function getLocalImagePreviewDataUrl(filePath: string): Promise<string> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<string>("get_local_image_preview_data_url", { filePath });
+    }
+
+    await pause(80);
+    return mockLocalImagePreviewDataUrl(filePath);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
 export async function uploadImage(filePath: string): Promise<ImageUploadResponse> {
   try {
     if (runningInTauri()) {
@@ -2236,6 +2249,25 @@ function mockImageDataUrl(attachmentId: number, variant: ImageVariant) {
   );
 }
 
+function mockLocalImagePreviewDataUrl(filePath: string) {
+  const name = filePath.split(/[\\/]/).filter(Boolean).pop() ?? "Selected image";
+  const hue = filePath.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0) % 360;
+  return svgDataUrl(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240">
+      <defs>
+        <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0" stop-color="hsl(${hue} 52% 70%)"/>
+          <stop offset="1" stop-color="hsl(${(hue + 44) % 360} 44% 42%)"/>
+        </linearGradient>
+      </defs>
+      <rect width="320" height="240" fill="url(#g)"/>
+      <circle cx="80" cy="70" r="28" fill="rgba(255,255,255,.5)"/>
+      <path d="M0 205 82 128l58 48 66-72 114 108v28H0z" fill="rgba(255,255,255,.58)"/>
+      <text x="160" y="222" text-anchor="middle" fill="rgba(20,30,25,.72)" font-family="Segoe UI, sans-serif" font-size="17" font-weight="700">${escapeSvgText(name.slice(0, 28))}</text>
+    </svg>`,
+  );
+}
+
 function mockCoverDataUrl(filename: string, variant: ImageVariant) {
   const hue = filename.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0) % 360;
   return svgDataUrl(
@@ -2252,6 +2284,14 @@ function mockCoverDataUrl(filename: string, variant: ImageVariant) {
 
 function svgDataUrl(svg: string) {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function escapeSvgText(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 function filterMockPeriod(entries: Entry[], input: AnalyticsPeriodRequest) {

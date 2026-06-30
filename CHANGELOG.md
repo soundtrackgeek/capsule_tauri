@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.12 - 2026-06-30
+
+### Added
+
+- Added queued image thumbnail previews in the composer so selected local images
+  can be checked before saving the entry.
+
+### Changed
+
+- Bumped the app version to 0.7.12.
+
 ## 0.7.11 - 2026-06-30
 
 ### Changed

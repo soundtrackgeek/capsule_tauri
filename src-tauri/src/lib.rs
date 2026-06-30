@@ -223,6 +223,16 @@ async fn get_image_data_url(attachment_id: i64, variant: ImageVariant) -> Result
 }
 
 #[tauri::command]
+async fn get_local_image_preview_data_url(file_path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        images::get_local_image_preview_data_url(file_path)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn upload_image(file_path: String) -> Result<ImageUploadResponse, String> {
     tauri::async_runtime::spawn_blocking(move || images::upload_image(file_path))
         .await
@@ -640,6 +650,7 @@ pub fn run() {
             get_image_media_root,
             list_images_for_entries,
             get_image_data_url,
+            get_local_image_preview_data_url,
             upload_image,
             attach_image,
             remove_image,

@@ -196,6 +196,30 @@ pub(crate) fn get_image_data_url_for_database(
     Ok(data_url(&mime_type, &bytes))
 }
 
+pub fn get_local_image_preview_data_url(file_path: String) -> Result<String> {
+    let source_path = PathBuf::from(file_path);
+    let metadata = fs::metadata(&source_path)
+        .with_context(|| format!("image file does not exist: {}", source_path.display()))?;
+    if !metadata.is_file() {
+        return Err(anyhow!(
+            "image path is not a file: {}",
+            source_path.display()
+        ));
+    }
+    if metadata.len() == 0 {
+        return Err(anyhow!("image file is empty: {}", source_path.display()));
+    }
+    if metadata.len() > MAX_UPLOAD_BYTES {
+        return Err(anyhow!("image exceeds the 10 MB upload limit"));
+    }
+
+    let bytes = fs::read(&source_path)
+        .with_context(|| format!("failed to read {}", source_path.display()))?;
+    detect_image_mime(&source_path, &bytes)?;
+    let preview = build_thumbnail_bytes(&bytes, IMAGE_THUMB_SIZE)?;
+    Ok(data_url("image/jpeg", &preview))
+}
+
 pub fn upload_image(file_path: String) -> Result<ImageUploadResponse> {
     upload_image_with_root(file_path, None)
 }
@@ -1160,6 +1184,9 @@ mod tests {
         let source_path = temp_dir.path().join("source.png");
         let image = ImageBuffer::from_pixel(4, 4, Rgb([42_u8, 90, 120]));
         image.save(&source_path).expect("png");
+        let preview_data_url =
+            get_local_image_preview_data_url(db::path_to_string(&source_path)).expect("preview");
+        assert!(preview_data_url.starts_with("data:image/jpeg;base64,"));
 
         let upload =
             upload_image_for_database(&db_path, &source_path, &media_root).expect("upload");

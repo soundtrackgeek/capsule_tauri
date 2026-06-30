@@ -73,6 +73,7 @@ import {
   getGamificationOverview,
   getEntry,
   getImageDataUrl,
+  getLocalImagePreviewDataUrl,
   getPathSettings,
   getRandomEntry,
   getSyncOverview,
@@ -399,6 +400,10 @@ function configBooleanValue(
   }
 
   return defaultValue;
+}
+
+function fileNameFromPath(path: string) {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
 function App() {
@@ -3836,6 +3841,18 @@ function ComposerView({
                     <X size={14} />
                   </button>
                 </div>
+                {imageDraft.path.trim() && (
+                  <div className="composer-queued-image-preview">
+                    <LocalImagePreview
+                      altText={imageDraft.altText || imageDraft.caption || fileNameFromPath(imageDraft.path)}
+                      filePath={imageDraft.path}
+                    />
+                    <div>
+                      <h4>{fileNameFromPath(imageDraft.path)}</h4>
+                      <p>{imageDraft.path}</p>
+                    </div>
+                  </div>
+                )}
                 <label className="field">
                   <span>File</span>
                   <div className="path-input-row">
@@ -4427,7 +4444,7 @@ function SettingsView({
         title="Application"
       >
         <dl className="detail-list">
-          <Detail label="Version" value="0.7.11" />
+          <Detail label="Version" value="0.7.12" />
           <Detail label="Mode" value="Backups and data tools" />
           <Detail label="Writes" value="Backup guarded" />
         </dl>
@@ -5688,6 +5705,53 @@ type DataUrlImageProps = {
   variant: ImageVariant;
   className: string;
 };
+
+function LocalImagePreview({ filePath, altText }: { filePath: string; altText: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const normalized = filePath.trim();
+    setSrc(null);
+    setFailed(false);
+    if (!normalized) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    getLocalImagePreviewDataUrl(normalized)
+      .then((dataUrl) => {
+        if (!cancelled) {
+          setSrc(dataUrl);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFailed(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filePath]);
+
+  if (failed) {
+    return (
+      <div className="composer-preview-thumb composer-preview-placeholder">
+        <FileImage size={20} />
+      </div>
+    );
+  }
+
+  if (!src) {
+    return <div className="composer-preview-thumb composer-preview-placeholder skeleton" />;
+  }
+
+  return <img alt={altText || "Queued image preview"} className="composer-preview-thumb" src={src} />;
+}
 
 function DataUrlImage({ attachment, variant, className }: DataUrlImageProps) {
   const [src, setSrc] = useState<string | null>(null);
