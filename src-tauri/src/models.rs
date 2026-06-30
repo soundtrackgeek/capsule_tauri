@@ -513,6 +513,7 @@ pub struct PluginOverviewResponse {
     pub warnings: Vec<String>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginMutationRequest {
@@ -520,6 +521,7 @@ pub struct PluginMutationRequest {
     pub enabled: bool,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginMutationResponse {

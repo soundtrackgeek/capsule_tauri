@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.9 - 2026-06-30
+
+### Changed
+
+- Unregistered the plugin enable/disable IPC command and removed the native
+  toggle helper while keeping legacy plugin-prefixed media and location tables
+  available for existing app data.
+- Bumped the app version to 0.7.9.
+
+### Removed
+
+- Removed the Plugins navigation item, Plugin Registry view, and browser mock
+  plugin toggle helpers from the UI.
+
 ## 0.7.8 - 2026-06-30
 
 ### Added

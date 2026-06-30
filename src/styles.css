@@ -80,7 +80,6 @@ body {
 :root[data-theme="dark"] .thread-entry-row,
 :root[data-theme="dark"] .media-panel,
 :root[data-theme="dark"] .media-tile,
-:root[data-theme="dark"] .plugin-card,
 :root[data-theme="dark"] .quest-card,
 :root[data-theme="dark"] .suggestion-card,
 :root[data-theme="dark"] .toolbar-panel,
@@ -1445,7 +1444,6 @@ button:active:not(:disabled) {
 }
 
 .capability-grid,
-.plugin-grid,
 .quest-list,
 .data-list {
   display: grid;
@@ -1457,12 +1455,7 @@ button:active:not(:disabled) {
   margin-top: 16px;
 }
 
-.plugin-grid {
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-}
-
 .capability-card,
-.plugin-card,
 .quest-card,
 .suggestion-card {
   border: 1px solid #e1e7e2;

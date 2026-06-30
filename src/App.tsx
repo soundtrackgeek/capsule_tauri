@@ -32,7 +32,6 @@ import {
   Paperclip,
   Pin,
   PinOff,
-  Plug,
   Plus,
   RefreshCw,
   Save,
@@ -75,7 +74,6 @@ import {
   getEntry,
   getImageDataUrl,
   getPathSettings,
-  getPluginOverview,
   getRandomEntry,
   getSyncOverview,
   getWritingCalendar,
@@ -102,7 +100,6 @@ import {
   setCapsuleConfigValue,
   setLocationConfig,
   setPathSettings,
-  setPluginEnabled,
   starEntry,
   suggestAiMetadata,
   unhideEntry,
@@ -150,7 +147,6 @@ import type {
   PathSettingsResponse,
   PathSettingsUpdateRequest,
   Phase6Capability,
-  PluginOverviewResponse,
   SearchRequest,
   SearchResponse,
   SyncOverviewResponse,
@@ -173,7 +169,6 @@ type ActiveView =
   | "analytics"
   | "calendar"
   | "covers"
-  | "plugins"
   | "gamification"
   | "composer"
   | "writer"
@@ -281,7 +276,6 @@ const navItems: Array<{ id: ActiveView; label: string; icon: ReactNode }> = [
   { id: "analytics", label: "Analytics", icon: <BarChart3 size={18} /> },
   { id: "calendar", label: "Calendar", icon: <CalendarDays size={18} /> },
   { id: "covers", label: "Cover Wall", icon: <Images size={18} /> },
-  { id: "plugins", label: "Plugins", icon: <Plug size={18} /> },
   { id: "gamification", label: "Profile", icon: <Trophy size={18} /> },
   { id: "composer", label: "New Entry", icon: <Plus size={18} /> },
   { id: "writer", label: "Writer", icon: <Sparkles size={18} /> },
@@ -413,7 +407,6 @@ function App() {
   const [aiSuggestion, setAiSuggestion] = useState<AiMetadataSuggestionResponse | null>(null);
   const [aiSuggestionIdentifier, setAiSuggestionIdentifier] = useState("");
   const [syncOverview, setSyncOverview] = useState<SyncOverviewResponse | null>(null);
-  const [pluginOverview, setPluginOverview] = useState<PluginOverviewResponse | null>(null);
   const [gamificationOverview, setGamificationOverview] =
     useState<GamificationOverviewResponse | null>(null);
   const [imageEntryResponse, setImageEntryResponse] = useState<EntryListResponse | null>(null);
@@ -461,8 +454,6 @@ function App() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggesting, setAiSuggesting] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
-  const [pluginsLoading, setPluginsLoading] = useState(false);
-  const [pluginMutating, setPluginMutating] = useState(false);
   const [gamificationLoading, setGamificationLoading] = useState(false);
   const [questMutating, setQuestMutating] = useState(false);
   const [imagesLoading, setImagesLoading] = useState(false);
@@ -641,25 +632,6 @@ function App() {
       setError(syncError instanceof Error ? syncError.message : "Unable to load sync overview");
     } finally {
       setSyncLoading(false);
-    }
-  }, [status?.readable]);
-
-  const loadPluginOverview = useCallback(async () => {
-    if (!status?.readable) {
-      setPluginOverview(null);
-      return;
-    }
-
-    setPluginsLoading(true);
-    setError(null);
-    try {
-      setPluginOverview(await getPluginOverview());
-    } catch (pluginError) {
-      setError(
-        pluginError instanceof Error ? pluginError.message : "Unable to load plugin overview",
-      );
-    } finally {
-      setPluginsLoading(false);
     }
   }, [status?.readable]);
 
@@ -954,12 +926,6 @@ function App() {
       void loadSyncOverview();
     }
   }, [activeView, loadSyncOverview]);
-
-  useEffect(() => {
-    if (activeView === "plugins") {
-      void loadPluginOverview();
-    }
-  }, [activeView, loadPluginOverview]);
 
   useEffect(() => {
     if (activeView === "gamification") {
@@ -1343,33 +1309,6 @@ function App() {
     }
   }, [aiSuggestionIdentifier, recentEntries, selectedEntry?.uuid]);
 
-  const handleSetPluginEnabled = useCallback(
-    async (pluginName: string, enabled: boolean) => {
-      setPluginMutating(true);
-      setError(null);
-      setNotice(null);
-      try {
-        const response = await setPluginEnabled({ pluginName, enabled });
-        setPluginOverview((current) =>
-          current
-            ? { ...current, plugins: response.plugins }
-            : { plugins: response.plugins, capabilities: [], warnings: [] },
-        );
-        setNotice(
-          `${response.plugin.label} ${enabled ? "enabled" : "disabled"} with backup: ${response.audit.backupPath}`,
-        );
-        await refresh();
-      } catch (pluginError) {
-        setError(
-          pluginError instanceof Error ? pluginError.message : "Unable to update plugin state",
-        );
-      } finally {
-        setPluginMutating(false);
-      }
-    },
-    [refresh],
-  );
-
   const handleClaimQuest = useCallback(
     async (quest: GamificationQuest) => {
       setQuestMutating(true);
@@ -1685,7 +1624,6 @@ function App() {
     analytics: "Analytics",
     calendar: "Writing Calendar",
     covers: "Cover Wall",
-    plugins: "Plugins",
     gamification: "Profile",
     composer: composerMode === "edit" ? "Edit Entry" : "New Entry",
     writer: "Writer Mode",
@@ -1976,17 +1914,6 @@ function App() {
               setCoverLimit(60);
               setCoverFilters(next);
             }}
-            status={status}
-          />
-        )}
-
-        {activeView === "plugins" && (
-          <PluginsView
-            loading={pluginsLoading}
-            mutating={pluginMutating}
-            onRefresh={loadPluginOverview}
-            onToggle={handleSetPluginEnabled}
-            overview={pluginOverview}
             status={status}
           />
         )}
@@ -4872,69 +4799,6 @@ function SyncView({ status, overview, loading, onRefresh }: SyncViewProps) {
   );
 }
 
-type PluginsViewProps = {
-  status: DatabaseStatus | null;
-  overview: PluginOverviewResponse | null;
-  loading: boolean;
-  mutating: boolean;
-  onRefresh: () => void;
-  onToggle: (pluginName: string, enabled: boolean) => void;
-};
-
-function PluginsView({ status, overview, loading, mutating, onRefresh, onToggle }: PluginsViewProps) {
-  if (!status?.readable) {
-    return <UnavailableState icon={<Plug size={24} />} label="Plugins need a readable database." status={status} />;
-  }
-
-  return (
-    <section className="phase6-workspace">
-      <Panel
-        icon={<Plug size={20} />}
-        title="Plugin Registry"
-        action={
-          <button className="secondary-button secondary-button--small" onClick={onRefresh} type="button">
-            <RefreshCw size={15} />
-            {loading ? "Loading" : "Refresh"}
-          </button>
-        }
-      >
-        <CapabilityGrid capabilities={overview?.capabilities ?? []} />
-        <WarningList warnings={overview?.warnings ?? []} />
-      </Panel>
-
-      <div className="plugin-grid">
-        {(overview?.plugins ?? []).map((plugin) => (
-          <article className="data-row data-row--stacked plugin-card" key={plugin.key}>
-            <div className="metadata-heading-row">
-              <div>
-                <h4>{plugin.label}</h4>
-                <p>{plugin.tableName ?? "No module table"} / {plugin.source}</p>
-              </div>
-              <StatusPill tone={plugin.enabled ? "good" : "neutral"}>
-                {plugin.enabled ? "Enabled" : "Disabled"}
-              </StatusPill>
-            </div>
-            <dl className="detail-list detail-list--compact">
-              <Detail label="Rows" value={plugin.rowCount} />
-              <Detail label="Version" value={plugin.installedVersion ?? "None"} />
-              <Detail label="Updated" value={formatDateTime(plugin.updatedAt)} />
-              <Detail label="Screen" value={plugin.implemented ? "Implemented" : "State only"} />
-            </dl>
-            <button
-              className={plugin.enabled ? "secondary-button" : "primary-button"}
-              disabled={mutating}
-              onClick={() => onToggle(plugin.key, !plugin.enabled)}
-              type="button"
-            >
-              {plugin.enabled ? "Disable" : "Enable"}
-            </button>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 type GamificationViewProps = {
   status: DatabaseStatus | null;
   overview: GamificationOverviewResponse | null;
@@ -5137,9 +5001,9 @@ function AboutView() {
     <section className="about-panel">
       <h3>Capsule Tauri</h3>
       <p>
-        Phase 6 adds capability-gated AI, sync, plugin, and gamification
+        Phase 6 adds capability-gated AI, sync, and gamification
         surfaces over the local Capsule database. Cloud and bridge-driven paths
-        stay explicit, and plugin/quest writes keep the backup guard.
+        stay explicit, and quest writes keep the backup guard.
       </p>
       <p>Entry delete now requires an explicit warning and keeps the legacy ID resequencing path.</p>
     </section>

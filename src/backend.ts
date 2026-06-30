@@ -49,9 +49,6 @@ import type {
   MoodDeleteRequest,
   MoodMutationResponse,
   MoodRenameRequest,
-  PluginMutationRequest,
-  PluginMutationResponse,
-  PluginOverviewResponse,
   PathSettingsResponse,
   PathSettingsUpdateRequest,
   RandomEntryFilters,
@@ -230,17 +227,6 @@ const phase6Capabilities = {
       detail: "Mobile import needs the legacy bridge and explicit user action.",
     },
   ],
-  plugins: [
-    {
-      key: "plugin-state",
-      label: "Plugin state",
-      available: true,
-      configured: true,
-      requiresCloud: false,
-      readOnly: false,
-      detail: "Plugin activation is guarded by a verified backup.",
-    },
-  ],
   gamification: [
     {
       key: "quest-claim",
@@ -252,57 +238,6 @@ const phase6Capabilities = {
       detail: "Completed quests can be claimed with backup-guarded XP events.",
     },
   ],
-};
-
-let mockPluginOverview: PluginOverviewResponse = {
-  plugins: [
-    {
-      key: "coding_ideas",
-      label: "Coding Ideas",
-      enabled: true,
-      installedVersion: "1.6.0",
-      source: "catalog",
-      updatedAt: "2026-02-27 12:08",
-      implemented: true,
-      tableName: "plugin_coding_ideas",
-      rowCount: 12,
-    },
-    {
-      key: "dream_log",
-      label: "Dream Log",
-      enabled: false,
-      installedVersion: "2.1.0",
-      source: "catalog",
-      updatedAt: "2026-02-24 09:52",
-      implemented: true,
-      tableName: "plugin_dreams",
-      rowCount: 4,
-    },
-    {
-      key: "post_ideas",
-      label: "Post Ideas",
-      enabled: true,
-      installedVersion: "1.1.0",
-      source: "catalog",
-      updatedAt: "2026-04-10 14:17",
-      implemented: true,
-      tableName: "plugin_post_ideas",
-      rowCount: 8,
-    },
-    {
-      key: "writing_ideas",
-      label: "Writing Ideas",
-      enabled: false,
-      installedVersion: null,
-      source: "not-installed",
-      updatedAt: null,
-      implemented: true,
-      tableName: "plugin_writing_ideas",
-      rowCount: 0,
-    },
-  ],
-  capabilities: phase6Capabilities.plugins,
-  warnings: [],
 };
 
 let mockGamificationQuests: GamificationQuest[] = [
@@ -1356,55 +1291,6 @@ export async function getSyncOverview(): Promise<SyncOverviewResponse> {
       ],
       capabilities: phase6Capabilities.sync,
       warnings: ["Bridge execution is disabled in browser mock mode."],
-    };
-  } catch (error) {
-    throw normalizeError(error);
-  }
-}
-
-export async function getPluginOverview(): Promise<PluginOverviewResponse> {
-  try {
-    if (runningInTauri()) {
-      return await invoke<PluginOverviewResponse>("get_plugin_overview");
-    }
-
-    await pause(140);
-    return mockPluginOverview;
-  } catch (error) {
-    throw normalizeError(error);
-  }
-}
-
-export async function setPluginEnabled(
-  input: PluginMutationRequest,
-): Promise<PluginMutationResponse> {
-  try {
-    if (runningInTauri()) {
-      return await invoke<PluginMutationResponse>("set_plugin_enabled", { input });
-    }
-
-    await pause(220);
-    mockPluginOverview = {
-      ...mockPluginOverview,
-      plugins: mockPluginOverview.plugins.map((plugin) =>
-        plugin.key === input.pluginName
-          ? {
-              ...plugin,
-              enabled: input.enabled,
-              source: plugin.source === "not-installed" ? "tauri" : plugin.source,
-              updatedAt: new Date().toISOString(),
-            }
-          : plugin,
-      ),
-    };
-    const plugin = mockPluginOverview.plugins.find((item) => item.key === input.pluginName);
-    if (!plugin) {
-      throw new Error(`Plugin not found: ${input.pluginName}`);
-    }
-    return {
-      plugin,
-      plugins: mockPluginOverview.plugins,
-      audit: mockAudit(input.enabled ? "plugin.enable" : "plugin.disable"),
     };
   } catch (error) {
     throw normalizeError(error);

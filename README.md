@@ -4,7 +4,7 @@ Capsule Tauri is a local-first desktop journal for Capsule built with Tauri 2,
 React, TypeScript, Vite, Rust, and SQLite.
 
 Phase 6 provides images, location-aware browsing, analytics, a visual cover
-wall, and capability-gated AI/sync/plugin/gamification surfaces over the active
+wall, and capability-gated AI/sync/gamification surfaces over the active
 Capsule database:
 
 - Tauri 2 desktop configuration.
@@ -70,15 +70,16 @@ Capsule database:
   cloud requests.
 - Sync overview for shared-folder status, recent sync history, tombstone counts,
   and GitHub Gist import readiness without running bridge actions implicitly.
-- Plugin registry screen for implemented plugin modules, row counts, and
-  backup-guarded enable/disable state changes in `plugin_state`.
+- Legacy plugin-prefixed media and location tables remain supported for Capsule
+  compatibility, while plugin registry navigation and activation toggles are not
+  exposed in the UI.
 - Gamification profile screen with XP totals, derived level, recent XP events,
   badges, quest progress, and backup-guarded quest claiming.
 - Rust tests for backup naming, database status inspection, read-only entry
   queries, backup-guarded mutations, entry history, search, thread operations,
   restore, tag/mood tools, library CRUD, export generation, image operations,
-  analytics, calendar aggregation, cover indexing, Phase 6 read models, plugin
-  toggles, and quest claiming.
+  analytics, calendar aggregation, cover indexing, Phase 6 read models, and
+  quest claiming.
 
 The database resolver checks an explicit `CAPSULE_DB_PATH` first. When that is
 not set, it uses the saved local database path from Settings, then prefers the

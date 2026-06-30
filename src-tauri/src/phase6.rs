@@ -15,12 +15,15 @@ use crate::{
         AiConversationSummary, AiMetadataSuggestionRequest, AiMetadataSuggestionResponse,
         AiOverviewResponse, AiTimeCapsuleSummary, EmbeddingModelSummary, GamificationBadge,
         GamificationOverviewResponse, GamificationProfileSummary, GamificationQuest,
-        GamificationXpEvent, Phase6Capability, PluginInfo, PluginMutationRequest,
-        PluginMutationResponse, PluginOverviewResponse, QuestClaimRequest, QuestClaimResponse,
-        SyncHistoryItem, SyncOverviewResponse, SyncStatusSummary, SyncTombstoneCount,
+        GamificationXpEvent, Phase6Capability, PluginInfo, PluginOverviewResponse,
+        QuestClaimRequest, QuestClaimResponse, SyncHistoryItem, SyncOverviewResponse,
+        SyncStatusSummary, SyncTombstoneCount,
     },
     settings,
 };
+
+#[cfg(test)]
+use crate::models::{PluginMutationRequest, PluginMutationResponse};
 
 const RECENT_LIMIT: i64 = 10;
 
@@ -278,7 +281,6 @@ pub(crate) fn get_plugin_overview_for_database(db_path: &Path) -> Result<PluginO
     let connection = db::open_read_only_connection(db_path)?;
     let tables = detected_tables(&connection)?;
     let plugins = list_plugins(&connection, &tables)?;
-    let active_count = plugins.iter().filter(|plugin| plugin.enabled).count();
 
     Ok(PluginOverviewResponse {
         capabilities: vec![
@@ -286,51 +288,26 @@ pub(crate) fn get_plugin_overview_for_database(db_path: &Path) -> Result<PluginO
                 "plugin-state",
                 "Plugin state",
                 tables.contains("plugin_state"),
+                tables.contains("plugin_state"),
+                false,
                 true,
-                false,
-                false,
-                "Reads and toggles Capsule plugin activation through the plugin_state table with backups.",
+                "Reads legacy Capsule plugin activation state for compatibility; enable/disable writes are not exposed.",
             ),
             capability(
                 "plugin-screens",
                 "Plugin screens",
-                true,
-                active_count > 0,
+                false,
+                false,
                 false,
                 true,
-                "Shows implemented plugin modules, state, and row counts without running plugin code.",
+                "Plugin registry screens are hidden while legacy plugin-prefixed tables remain readable.",
             ),
         ],
         plugins,
-        warnings: Vec::new(),
-    })
-}
-
-pub fn set_plugin_enabled(input: PluginMutationRequest) -> Result<PluginMutationResponse> {
-    let operation = if input.enabled {
-        "plugin.enable"
-    } else {
-        "plugin.disable"
-    };
-    let plugin_name = normalize_key(&input.plugin_name, "Plugin name")?;
-    let enabled = input.enabled;
-    let guarded = backup::with_database_backup(operation, move |db_path| {
-        set_plugin_enabled_inner(db_path, &plugin_name, enabled)?;
-        let connection = db::open_read_only_connection(db_path)?;
-        let tables = detected_tables(&connection)?;
-        let plugins = list_plugins(&connection, &tables)?;
-        let plugin = plugins
-            .iter()
-            .find(|plugin| plugin.key == plugin_name)
-            .cloned()
-            .ok_or_else(|| anyhow!("Plugin '{plugin_name}' was not found after update."))?;
-        Ok((plugin, plugins))
-    })?;
-
-    Ok(PluginMutationResponse {
-        plugin: guarded.value.0,
-        plugins: guarded.value.1,
-        audit: guarded.audit,
+        warnings: vec![
+            "Plugin management UI is disabled; media and location compatibility tables remain supported."
+                .to_string(),
+        ],
     })
 }
 
@@ -690,6 +667,7 @@ fn load_plugin_state(
         .collect())
 }
 
+#[cfg(test)]
 fn set_plugin_enabled_inner(db_path: &Path, plugin_name: &str, enabled: bool) -> Result<()> {
     let mut connection = db::open_read_write_connection(db_path)?;
     let tx = connection.transaction()?;
@@ -926,6 +904,7 @@ fn ai_provider_and_model(db_path: &Path) -> (Option<String>, Option<String>) {
     (provider, model)
 }
 
+#[cfg(test)]
 fn ensure_plugin_schema(connection: &Connection) -> Result<()> {
     connection.execute_batch(
         "
@@ -1228,6 +1207,7 @@ fn current_timestamp_seconds() -> String {
     Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
+#[cfg(test)]
 fn bool_to_int(value: bool) -> i64 {
     if value {
         1

@@ -24,11 +24,11 @@ use models::{
     LibraryListResponse, LibraryPromptInput, LibraryPromptMutationResponse, LibraryPromptUpdate,
     LibraryTemplateInput, LibraryTemplateMutationResponse, LibraryTemplateUpdate,
     LocationConfigUpdateRequest, MoodCatalogResponse, MoodDeleteRequest, MoodMutationResponse,
-    MoodRenameRequest, PathSettingsResponse, PathSettingsUpdateRequest, PluginMutationRequest,
-    PluginMutationResponse, PluginOverviewResponse, QuestClaimRequest, QuestClaimResponse,
-    RandomEntryFilters, SearchRequest, SearchResponse, SyncOverviewResponse, TagCatalogResponse,
-    TagDeleteRequest, TagMergeRequest, TagMutationResponse, TagRenameRequest, ThreadListResponse,
-    ThreadMetadataUpdate, ThreadMutationResponse, WritingCalendarResponse,
+    MoodRenameRequest, PathSettingsResponse, PathSettingsUpdateRequest, PluginOverviewResponse,
+    QuestClaimRequest, QuestClaimResponse, RandomEntryFilters, SearchRequest, SearchResponse,
+    SyncOverviewResponse, TagCatalogResponse, TagDeleteRequest, TagMergeRequest,
+    TagMutationResponse, TagRenameRequest, ThreadListResponse, ThreadMetadataUpdate,
+    ThreadMutationResponse, WritingCalendarResponse,
 };
 
 #[tauri::command]
@@ -582,16 +582,6 @@ async fn get_plugin_overview() -> Result<PluginOverviewResponse, String> {
 }
 
 #[tauri::command]
-async fn set_plugin_enabled(
-    input: PluginMutationRequest,
-) -> Result<PluginMutationResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || phase6::set_plugin_enabled(input))
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 async fn get_gamification_overview() -> Result<GamificationOverviewResponse, String> {
     tauri::async_runtime::spawn_blocking(phase6::get_gamification_overview)
         .await
@@ -675,7 +665,6 @@ pub fn run() {
             suggest_ai_metadata,
             get_sync_overview,
             get_plugin_overview,
-            set_plugin_enabled,
             get_gamification_overview,
             claim_quest
         ])
