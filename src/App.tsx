@@ -99,6 +99,7 @@ import {
   restoreBackup,
   searchEntries,
   setCapsuleConfigValue,
+  setLocationConfig,
   setPathSettings,
   setPluginEnabled,
   starEntry,
@@ -242,6 +243,12 @@ type UiSettings = {
   sidebarMode: "comfortable" | "compact";
 };
 
+type LocationCaptureDraft = {
+  autoCapture: boolean;
+  useDefaultLocation: boolean;
+  defaultLocationName: string;
+};
+
 type ImageUploadDraft = {
   path: string;
   caption: string;
@@ -351,6 +358,31 @@ function formatWeatherTemperature(location: NonNullable<Entry["location"]>) {
   }
 
   return null;
+}
+
+function configStringValue(config: CapsuleConfigResponse | null, key: string) {
+  return config?.values.find((item) => item.key === key)?.value ?? "";
+}
+
+function configBooleanValue(
+  config: CapsuleConfigResponse | null,
+  key: string,
+  defaultValue: boolean,
+) {
+  const rawValue = configStringValue(config, key).trim().toLowerCase();
+  if (!rawValue) {
+    return defaultValue;
+  }
+
+  if (["true", "1", "yes", "on"].includes(rawValue)) {
+    return true;
+  }
+
+  if (["false", "0", "no", "off"].includes(rawValue)) {
+    return false;
+  }
+
+  return defaultValue;
 }
 
 function App() {
@@ -3830,6 +3862,11 @@ function SettingsView({
     backupDirectory: "",
   });
   const [configDraft, setConfigDraft] = useState({ key: "", value: "" });
+  const [locationDraft, setLocationDraft] = useState<LocationCaptureDraft>({
+    autoCapture: true,
+    useDefaultLocation: false,
+    defaultLocationName: "",
+  });
   const [tagDraft, setTagDraft] = useState({ from: "", to: "", source: "", target: "", deleteName: "" });
   const [moodDraft, setMoodDraft] = useState({ from: "", to: "", deleteName: "" });
   const [templateDraft, setTemplateDraft] = useState({
@@ -3860,6 +3897,18 @@ function SettingsView({
     pathSettings?.imageMediaRoot,
     status?.dbPath,
   ]);
+
+  useEffect(() => {
+    setLocationDraft({
+      autoCapture: configBooleanValue(config, "location.auto_capture", true),
+      useDefaultLocation: configBooleanValue(config, "location.use_default_location", false),
+      defaultLocationName: configStringValue(config, "location.default_location_name"),
+    });
+  }, [config]);
+
+  const normalizedDefaultLocationName = locationDraft.defaultLocationName.trim();
+  const fixedLocationReady = locationDraft.useDefaultLocation && Boolean(normalizedDefaultLocationName);
+  const locationMode = !locationDraft.autoCapture ? "Off" : fixedLocationReady ? "Fixed" : "IP lookup";
 
   return (
     <section className="settings-grid" aria-label="Settings">
@@ -3992,7 +4041,7 @@ function SettingsView({
         title="Application"
       >
         <dl className="detail-list">
-          <Detail label="Version" value="0.7.6" />
+          <Detail label="Version" value="0.7.7" />
           <Detail label="Mode" value="Backups and data tools" />
           <Detail label="Writes" value="Backup guarded" />
         </dl>
@@ -4029,6 +4078,108 @@ function SettingsView({
             </select>
           </label>
         </div>
+      </Panel>
+
+      <Panel
+        action={<StatusPill tone={locationMode === "Fixed" ? "good" : "neutral"}>{locationMode}</StatusPill>}
+        icon={<MapPin size={20} />}
+        title="Entry Location"
+      >
+        <div className="settings-form-grid settings-form-grid--toggles">
+          <label className="check-row">
+            <input
+              checked={locationDraft.autoCapture}
+              onChange={(event) =>
+                setLocationDraft({
+                  ...locationDraft,
+                  autoCapture: event.target.checked,
+                  useDefaultLocation: event.target.checked ? locationDraft.useDefaultLocation : false,
+                })
+              }
+              type="checkbox"
+            />
+            <span>Auto-capture</span>
+          </label>
+          <label className="check-row">
+            <input
+              checked={locationDraft.useDefaultLocation}
+              disabled={!locationDraft.autoCapture}
+              onChange={(event) =>
+                setLocationDraft({
+                  ...locationDraft,
+                  autoCapture: event.target.checked ? true : locationDraft.autoCapture,
+                  useDefaultLocation: event.target.checked,
+                })
+              }
+              type="checkbox"
+            />
+            <span>Fixed location</span>
+          </label>
+        </div>
+        <div className="settings-form-grid settings-form-grid--location">
+          <label className="field">
+            <span>Place</span>
+            <input
+              disabled={!locationDraft.autoCapture || !locationDraft.useDefaultLocation}
+              onChange={(event) =>
+                setLocationDraft({ ...locationDraft, defaultLocationName: event.target.value })
+              }
+              placeholder="Tromso, Norway"
+              value={locationDraft.defaultLocationName}
+            />
+          </label>
+          <button
+            className="primary-button"
+            disabled={dataToolMutating || (locationDraft.useDefaultLocation && !normalizedDefaultLocationName)}
+            onClick={() =>
+              onRunMutation(async () => {
+                const response = await setLocationConfig({
+                  autoCapture: locationDraft.autoCapture,
+                  useDefaultLocation: locationDraft.useDefaultLocation,
+                  defaultLocationName: normalizedDefaultLocationName || null,
+                });
+                return `Saved location settings. Backup: ${response.backupPath ?? "new config"}`;
+              })
+            }
+            type="button"
+          >
+            <Save size={17} />
+            Save
+          </button>
+          <button
+            className="secondary-button"
+            disabled={dataToolMutating}
+            onClick={() =>
+              onRunMutation(async () => {
+                const response = await setLocationConfig({
+                  autoCapture: true,
+                  useDefaultLocation: false,
+                  defaultLocationName: null,
+                });
+                setLocationDraft({
+                  autoCapture: true,
+                  useDefaultLocation: false,
+                  defaultLocationName: "",
+                });
+                return `Set location capture to IP lookup. Backup: ${response.backupPath ?? "new config"}`;
+              })
+            }
+            type="button"
+          >
+            IP lookup
+          </button>
+        </div>
+        <dl className="detail-list detail-list--compact path-settings-meta">
+          <Detail
+            label="Saved"
+            value={
+              configBooleanValue(config, "location.use_default_location", false)
+                ? configStringValue(config, "location.default_location_name") || "Fixed"
+                : "IP lookup"
+            }
+          />
+          <Detail label="Weather" value={configStringValue(config, "location.weather_provider") || "open_meteo"} />
+        </dl>
       </Panel>
 
       <Panel icon={<FileText size={20} />} title="Capsule Config">

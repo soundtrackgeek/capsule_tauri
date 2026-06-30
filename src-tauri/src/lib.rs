@@ -22,12 +22,13 @@ use models::{
     ImageAttachRequest, ImageEntriesListResponse, ImageEntryListResponse, ImageMutationResponse,
     ImageUploadResponse, ImageVariant, LibraryListResponse, LibraryPromptInput,
     LibraryPromptMutationResponse, LibraryPromptUpdate, LibraryTemplateInput,
-    LibraryTemplateMutationResponse, LibraryTemplateUpdate, MoodCatalogResponse, MoodDeleteRequest,
-    MoodMutationResponse, MoodRenameRequest, PathSettingsResponse, PathSettingsUpdateRequest,
-    PluginMutationRequest, PluginMutationResponse, PluginOverviewResponse, QuestClaimRequest,
-    QuestClaimResponse, RandomEntryFilters, SearchRequest, SearchResponse, SyncOverviewResponse,
-    TagCatalogResponse, TagDeleteRequest, TagMergeRequest, TagMutationResponse, TagRenameRequest,
-    ThreadListResponse, ThreadMetadataUpdate, ThreadMutationResponse, WritingCalendarResponse,
+    LibraryTemplateMutationResponse, LibraryTemplateUpdate, LocationConfigUpdateRequest,
+    MoodCatalogResponse, MoodDeleteRequest, MoodMutationResponse, MoodRenameRequest,
+    PathSettingsResponse, PathSettingsUpdateRequest, PluginMutationRequest, PluginMutationResponse,
+    PluginOverviewResponse, QuestClaimRequest, QuestClaimResponse, RandomEntryFilters,
+    SearchRequest, SearchResponse, SyncOverviewResponse, TagCatalogResponse, TagDeleteRequest,
+    TagMergeRequest, TagMutationResponse, TagRenameRequest, ThreadListResponse,
+    ThreadMetadataUpdate, ThreadMutationResponse, WritingCalendarResponse,
 };
 
 #[tauri::command]
@@ -367,6 +368,16 @@ async fn delete_capsule_config_value(key: String) -> Result<ConfigMutationRespon
 }
 
 #[tauri::command]
+async fn set_location_config(
+    input: LocationConfigUpdateRequest,
+) -> Result<ConfigMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || settings::set_location_config(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn get_path_settings() -> Result<PathSettingsResponse, String> {
     tauri::async_runtime::spawn_blocking(settings::get_path_settings)
         .await
@@ -631,6 +642,7 @@ pub fn run() {
             get_capsule_config,
             set_capsule_config_value,
             delete_capsule_config_value,
+            set_location_config,
             get_path_settings,
             set_path_settings,
             browse_database_path,

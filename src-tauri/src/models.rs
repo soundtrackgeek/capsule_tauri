@@ -161,6 +161,14 @@ pub struct ConfigMutationResponse {
     pub completed_at: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocationConfigUpdateRequest {
+    pub auto_capture: bool,
+    pub use_default_location: bool,
+    pub default_location_name: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PathSettingsResponse {

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.7 - 2026-06-30
+
+### Added
+
+- Added Settings controls for entry location capture, including a fixed default
+  place that new entries use for weather lookups.
+
+### Changed
+
+- Bumped the app version to 0.7.7.
+
 ## 0.7.6 - 2026-06-30
 
 ### Added

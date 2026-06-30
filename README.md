@@ -45,6 +45,8 @@ Capsule database:
 - JSON manifests written next to generated backups.
 - Capsule `config.json` display plus file-backed set/delete actions that create
   config backups before writing.
+- Entry location Settings controls for choosing IP lookup or a fixed default
+  place for new-entry weather capture.
 - Editable Settings paths for the active database file, image media root, and
   backup directory, with native browse buttons.
 - Local theme and sidebar-density settings stored outside the journal database.
@@ -95,11 +97,14 @@ Cover wall assets are local-only and ignored by Git under `local-assets/`; set
 Location auto-capture on entry creation uses the same Capsule configuration keys
 as the existing app: `location.auto_capture`, `location.auto_capture_method`,
 `location.use_default_location`, `location.default_location_name`,
-`location.weather_provider`, and `location.geocoding_cache_hours`. It reads
-`CAPSULE_CONFIG_PATH` first when set, otherwise `config.json` next to the active
-database. The built-in providers match Capsule's current defaults: IP lookup via
-`ip-api.com` with `ipinfo.io` fallback, geocoding via Nominatim, and weather via
-Open-Meteo or MET Norway.
+`location.weather_provider`, and `location.geocoding_cache_hours`. Settings can
+save a fixed default place by writing `location.use_default_location` and
+`location.default_location_name`; new entries then geocode that place and fetch
+weather for it instead of using IP lookup. It reads `CAPSULE_CONFIG_PATH` first
+when set, otherwise `config.json` next to the active database. The built-in
+providers match Capsule's current defaults: IP lookup via `ip-api.com` with
+`ipinfo.io` fallback, geocoding via Nominatim, and weather via Open-Meteo or MET
+Norway.
 
 ## Commands
 

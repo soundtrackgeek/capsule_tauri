@@ -1221,6 +1221,15 @@ button:active:not(:disabled) {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.settings-form-grid--toggles {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+}
+
+.settings-form-grid--location {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
 .settings-form-grid .field--wide {
   grid-column: 1 / -1;
 }

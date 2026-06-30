@@ -96,6 +96,12 @@ export type ConfigMutationResponse = {
   completedAt: string;
 };
 
+export type LocationConfigUpdateRequest = {
+  autoCapture: boolean;
+  useDefaultLocation: boolean;
+  defaultLocationName?: string | null;
+};
+
 export type PathSettingsResponse = {
   databasePath: string;
   imageMediaRoot: string;

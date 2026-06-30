@@ -16,10 +16,10 @@ use crate::{
         ExportEntriesRequest, ExportEntriesResponse, ExportFormat, LibraryListResponse,
         LibraryPrompt, LibraryPromptInput, LibraryPromptMutationResponse, LibraryPromptUpdate,
         LibraryTemplate, LibraryTemplateInput, LibraryTemplateMutationResponse,
-        LibraryTemplateUpdate, MoodCatalogResponse, MoodDeleteRequest, MoodMutationResponse,
-        MoodRenameRequest, MoodUsage, PathSettingsResponse, PathSettingsUpdateRequest,
-        TagCatalogResponse, TagDeleteRequest, TagMergeRequest, TagMutationResponse,
-        TagRenameRequest, TagUsage,
+        LibraryTemplateUpdate, LocationConfigUpdateRequest, MoodCatalogResponse, MoodDeleteRequest,
+        MoodMutationResponse, MoodRenameRequest, MoodUsage, PathSettingsResponse,
+        PathSettingsUpdateRequest, TagCatalogResponse, TagDeleteRequest, TagMergeRequest,
+        TagMutationResponse, TagRenameRequest, TagUsage,
     },
     search,
 };
@@ -75,6 +75,13 @@ pub fn delete_capsule_config_value(key: String) -> Result<ConfigMutationResponse
     mutate_capsule_config("config.delete", |object| {
         let key = normalize_config_key(&key)?;
         object.remove(&key);
+        Ok(())
+    })
+}
+
+pub fn set_location_config(input: LocationConfigUpdateRequest) -> Result<ConfigMutationResponse> {
+    mutate_capsule_config("config.location.set", |object| {
+        apply_location_config(object, input)?;
         Ok(())
     })
 }
@@ -521,6 +528,38 @@ fn config_value_to_string(value: &JsonValue) -> String {
         JsonValue::String(value) => value.clone(),
         other => other.to_string(),
     }
+}
+
+fn apply_location_config(
+    object: &mut Map<String, JsonValue>,
+    input: LocationConfigUpdateRequest,
+) -> Result<()> {
+    let default_location_name = normalize_string(input.default_location_name.as_deref());
+    if input.use_default_location && default_location_name.is_none() {
+        return Err(anyhow!(
+            "Default location is required when fixed location is enabled."
+        ));
+    }
+
+    object.insert(
+        "location.auto_capture".to_string(),
+        JsonValue::Bool(input.auto_capture),
+    );
+    object.insert(
+        "location.use_default_location".to_string(),
+        JsonValue::Bool(input.use_default_location),
+    );
+
+    if input.use_default_location {
+        object.insert(
+            "location.default_location_name".to_string(),
+            JsonValue::String(default_location_name.unwrap_or_default()),
+        );
+    } else {
+        object.remove("location.default_location_name");
+    }
+
+    Ok(())
 }
 
 fn normalize_config_key(value: &str) -> Result<String> {
@@ -1249,6 +1288,63 @@ mod tests {
         MoodDeleteRequest, MoodRenameRequest, TagMergeRequest, TagRenameRequest,
     };
     use rusqlite::Connection;
+
+    #[test]
+    fn location_config_update_writes_capsule_default_location_keys() {
+        let mut object = Map::new();
+
+        apply_location_config(
+            &mut object,
+            LocationConfigUpdateRequest {
+                auto_capture: true,
+                use_default_location: true,
+                default_location_name: Some(" Tromso, Norway ".to_string()),
+            },
+        )
+        .expect("fixed location config");
+
+        assert_eq!(
+            object.get("location.auto_capture"),
+            Some(&JsonValue::Bool(true))
+        );
+        assert_eq!(
+            object.get("location.use_default_location"),
+            Some(&JsonValue::Bool(true))
+        );
+        assert_eq!(
+            object
+                .get("location.default_location_name")
+                .and_then(JsonValue::as_str),
+            Some("Tromso, Norway")
+        );
+
+        apply_location_config(
+            &mut object,
+            LocationConfigUpdateRequest {
+                auto_capture: true,
+                use_default_location: false,
+                default_location_name: Some("Tromso, Norway".to_string()),
+            },
+        )
+        .expect("ip lookup config");
+
+        assert_eq!(
+            object.get("location.use_default_location"),
+            Some(&JsonValue::Bool(false))
+        );
+        assert!(object.get("location.default_location_name").is_none());
+
+        let error = apply_location_config(
+            &mut object,
+            LocationConfigUpdateRequest {
+                auto_capture: true,
+                use_default_location: true,
+                default_location_name: Some(" ".to_string()),
+            },
+        )
+        .expect_err("empty fixed location");
+        assert!(error.to_string().contains("Default location is required"));
+    }
 
     #[test]
     fn tag_merge_combines_links_and_keeps_backup() {

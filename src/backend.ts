@@ -43,6 +43,7 @@ import type {
   LibraryTemplateInput,
   LibraryTemplateMutationResponse,
   LibraryTemplateUpdate,
+  LocationConfigUpdateRequest,
   MoodCatalogResponse,
   MoodDeleteRequest,
   MoodMutationResponse,
@@ -817,6 +818,46 @@ export async function deleteCapsuleConfigValue(
       config: mockConfig,
       backupPath: "C:\\Users\\jtill\\.capsule\\config_backup_20260629_120000.json",
       operation: "config.delete",
+      completedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function setLocationConfig(
+  input: LocationConfigUpdateRequest,
+): Promise<ConfigMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<ConfigMutationResponse>("set_location_config", { input });
+    }
+
+    await pause(180);
+    const nextValues = mockConfig.values.filter(
+      (item) =>
+        ![
+          "location.auto_capture",
+          "location.use_default_location",
+          "location.default_location_name",
+        ].includes(item.key),
+    );
+    nextValues.push({ key: "location.auto_capture", value: String(input.autoCapture) });
+    nextValues.push({
+      key: "location.use_default_location",
+      value: String(input.useDefaultLocation),
+    });
+    if (input.useDefaultLocation && input.defaultLocationName?.trim()) {
+      nextValues.push({
+        key: "location.default_location_name",
+        value: input.defaultLocationName.trim(),
+      });
+    }
+    mockConfig = { ...mockConfig, exists: true, values: nextValues.sort((a, b) => a.key.localeCompare(b.key)) };
+    return {
+      config: mockConfig,
+      backupPath: "C:\\Users\\jtill\\.capsule\\config_backup_20260630_120000.json",
+      operation: "config.location.set",
       completedAt: new Date().toISOString(),
     };
   } catch (error) {
