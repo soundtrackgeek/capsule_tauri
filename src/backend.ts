@@ -703,6 +703,19 @@ export async function browseDirectoryPath(currentPath?: string | null): Promise<
   }
 }
 
+export async function browseImagePath(currentPath?: string | null): Promise<string | null> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<string | null>("browse_image_path", { currentPath });
+    }
+
+    await pause(80);
+    return window.prompt("Image path", currentPath ?? "");
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
 export async function getCapsuleConfig(): Promise<CapsuleConfigResponse> {
   try {
     if (runningInTauri()) {

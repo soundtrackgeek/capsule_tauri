@@ -112,6 +112,7 @@ import {
   uploadImage,
   browseDatabasePath,
   browseDirectoryPath,
+  browseImagePath,
 } from "./backend";
 import { StatusPill } from "./components/StatusPill";
 import { formatBytes, formatDateTime } from "./lib/format";
@@ -252,6 +253,10 @@ type ImageUploadDraft = {
   altText: string;
 };
 
+type ComposerImageDraft = ImageUploadDraft & {
+  id: string;
+};
+
 type PeriodForm = {
   since: string;
   until: string;
@@ -295,6 +300,20 @@ const emptyComposerDraft: ComposerDraft = {
   pinned: false,
   continueFromUuid: "",
 };
+
+const emptyImageUploadDraft: ImageUploadDraft = {
+  path: "",
+  caption: "",
+  altText: "",
+};
+
+function createComposerImageDraft(path = ""): ComposerImageDraft {
+  const id =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `image-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return { ...emptyImageUploadDraft, id, path };
+}
 
 const defaultWriterSettings: WriterSettings = {
   background: "#f7f6f0",
@@ -413,11 +432,8 @@ function App() {
   const [imageLimit, setImageLimit] = useState(40);
   const [selectedImageEntry, setSelectedImageEntry] = useState<Entry | null>(null);
   const [entryImages, setEntryImages] = useState<ImageEntryListResponse | null>(null);
-  const [imageUploadDraft, setImageUploadDraft] = useState<ImageUploadDraft>({
-    path: "",
-    caption: "",
-    altText: "",
-  });
+  const [imageUploadDraft, setImageUploadDraft] =
+    useState<ImageUploadDraft>(emptyImageUploadDraft);
   const [analyticsPeriod, setAnalyticsPeriod] = useState<PeriodForm>({ since: "", until: "" });
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [writingCalendarYear, setWritingCalendarYear] = useState(new Date().getFullYear());
@@ -438,6 +454,10 @@ function App() {
   const [composerMode, setComposerMode] = useState<ComposerMode>("create");
   const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
   const [composerDraft, setComposerDraft] = useState<ComposerDraft>(emptyComposerDraft);
+  const [composerImageDrafts, setComposerImageDrafts] = useState<ComposerImageDraft[]>([]);
+  const [composerEntryImages, setComposerEntryImages] = useState<ImageEntryListResponse | null>(
+    null,
+  );
   const [draftRecovered, setDraftRecovered] = useState(false);
   const [writerSettings, setWriterSettings] = useState<WriterSettings>(defaultWriterSettings);
   const [uiSettings, setUiSettings] = useState<UiSettings>(defaultUiSettings);
@@ -459,6 +479,7 @@ function App() {
   const [imagesLoading, setImagesLoading] = useState(false);
   const [imageDetailLoading, setImageDetailLoading] = useState(false);
   const [imageMutating, setImageMutating] = useState(false);
+  const [composerImagesLoading, setComposerImagesLoading] = useState(false);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [coverLoading, setCoverLoading] = useState(false);
@@ -886,6 +907,40 @@ function App() {
   }, [composerDraft, composerMode]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    if (activeView !== "composer" || composerMode !== "edit" || !editingEntry) {
+      setComposerEntryImages(null);
+      setComposerImagesLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setComposerImagesLoading(true);
+    listEntryImages(editingEntry.uuid)
+      .then((response) => {
+        if (!cancelled) {
+          setComposerEntryImages(response);
+        }
+      })
+      .catch((imageError) => {
+        if (!cancelled) {
+          setError(imageError instanceof Error ? imageError.message : "Unable to load entry images");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setComposerImagesLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView, composerMode, editingEntry]);
+
+  useEffect(() => {
     const rawSettings = window.localStorage.getItem(uiSettingsStorageKey);
     if (!rawSettings) {
       return;
@@ -1126,6 +1181,32 @@ function App() {
     }
   }, []);
 
+  const handleBrowseImagePath = useCallback(async (currentPath: string) => {
+    try {
+      return await browseImagePath(currentPath || null);
+    } catch (browseError) {
+      setError(browseError instanceof Error ? browseError.message : "Unable to browse for image");
+      return null;
+    }
+  }, []);
+
+  const handleAddComposerImageDraft = useCallback(() => {
+    setComposerImageDrafts((current) => [...current, createComposerImageDraft()]);
+  }, []);
+
+  const handleChangeComposerImageDraft = useCallback(
+    (id: string, next: ImageUploadDraft) => {
+      setComposerImageDrafts((current) =>
+        current.map((draft) => (draft.id === id ? { ...next, id } : draft)),
+      );
+    },
+    [],
+  );
+
+  const handleRemoveComposerImageDraft = useCallback((id: string) => {
+    setComposerImageDrafts((current) => current.filter((draft) => draft.id !== id));
+  }, []);
+
   const handleSelectEntry = useCallback(async (entry: Entry) => {
     setSelectedEntry(entry);
     setDetailLoading(true);
@@ -1153,6 +1234,8 @@ function App() {
   const openNewEntry = useCallback(() => {
     setComposerMode("create");
     setEditingEntry(null);
+    setComposerEntryImages(null);
+    setComposerImageDrafts([]);
     setComposerDraft((current) =>
       composerMode === "create" && draftHasContent(current) ? current : emptyComposerDraft,
     );
@@ -1163,6 +1246,8 @@ function App() {
     setComposerMode("edit");
     setEditingEntry(entry);
     setComposerDraft(draftFromEntry(entry));
+    setComposerEntryImages(null);
+    setComposerImageDrafts([]);
     setDraftRecovered(false);
     setActiveView("composer");
   }, []);
@@ -1170,6 +1255,8 @@ function App() {
   const openContinueEntry = useCallback((entry: Entry) => {
     setComposerMode("create");
     setEditingEntry(null);
+    setComposerEntryImages(null);
+    setComposerImageDrafts([]);
     setComposerDraft({
       ...emptyComposerDraft,
       continueFromUuid: entry.uuid,
@@ -1327,6 +1414,34 @@ function App() {
     [loadGamificationOverview, refresh],
   );
 
+  const attachQueuedComposerImages = useCallback(
+    async (entryUuid: string) => {
+      const queuedImages = composerImageDrafts.filter((draft) => draft.path.trim());
+      let latestResponse: ImageMutationResponse | null = null;
+
+      for (const draft of queuedImages) {
+        const upload = await uploadImage(draft.path.trim());
+        latestResponse = await attachImage({
+          identifier: entryUuid,
+          mediaId: upload.asset.id,
+          caption: nullableFromText(draft.caption),
+          altText: nullableFromText(draft.altText),
+        });
+      }
+
+      if (latestResponse) {
+        setComposerEntryImages({
+          entryUuid: latestResponse.entryUuid,
+          images: latestResponse.images,
+          warnings: [],
+        });
+      }
+
+      return queuedImages.length;
+    },
+    [composerImageDrafts],
+  );
+
   const handleSaveEntry = useCallback(async () => {
     if (!composerDraft.text.trim()) {
       setError("Entry text is required.");
@@ -1337,6 +1452,7 @@ function App() {
     setError(null);
     setNotice(null);
     try {
+      let response: EntryMutationResponse;
       if (composerMode === "edit" && editingEntry) {
         const input: EntryUpdate = {
           text: composerDraft.text,
@@ -1349,8 +1465,7 @@ function App() {
           pinned: composerDraft.pinned,
           continueFromUuid: nullableFromText(composerDraft.continueFromUuid),
         };
-        const response = await updateEntry(editingEntry.uuid, input);
-        await applyMutationResponse(response);
+        response = await updateEntry(editingEntry.uuid, input);
       } else {
         const input: EntryCreate = {
           text: composerDraft.text,
@@ -1364,11 +1479,36 @@ function App() {
           pinned: composerDraft.pinned,
           continueFromUuid: nullableFromText(composerDraft.continueFromUuid),
         };
-        const response = await createEntry(input);
+        response = await createEntry(input);
+      }
+
+      let attachedCount = 0;
+      try {
+        attachedCount = await attachQueuedComposerImages(response.entry.uuid);
+      } catch (imageError) {
+        await applyMutationResponse(response);
+        setComposerMode("edit");
+        setEditingEntry(response.entry);
+        setComposerDraft(draftFromEntry(response.entry));
+        window.localStorage.removeItem(draftStorageKey);
+        setDraftRecovered(false);
+        setError(
+          `Entry saved with backup: ${response.audit.backupPath}. Image attachment failed: ${
+            imageError instanceof Error ? imageError.message : "Unable to attach image"
+          }`,
+        );
+        return;
+      }
+      if (composerMode !== "edit") {
         window.localStorage.removeItem(draftStorageKey);
         setComposerDraft(emptyComposerDraft);
         setDraftRecovered(false);
-        await applyMutationResponse(response);
+      }
+      setComposerImageDrafts([]);
+      await applyMutationResponse(response);
+      if (attachedCount > 0) {
+        const noun = attachedCount === 1 ? "image" : "images";
+        setNotice(`Saved with backup: ${response.audit.backupPath}; attached ${attachedCount} ${noun}.`);
       }
       setActiveView("entries");
     } catch (saveError) {
@@ -1376,7 +1516,7 @@ function App() {
     } finally {
       setSavingEntry(false);
     }
-  }, [applyMutationResponse, composerDraft, composerMode, editingEntry]);
+  }, [applyMutationResponse, attachQueuedComposerImages, composerDraft, composerMode, editingEntry]);
 
   const handleEntryAction = useCallback(
     async (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => {
@@ -1541,7 +1681,7 @@ function App() {
         caption: nullableFromText(imageUploadDraft.caption),
         altText: nullableFromText(imageUploadDraft.altText),
       });
-      setImageUploadDraft({ path: "", caption: "", altText: "" });
+      setImageUploadDraft(emptyImageUploadDraft);
       setNotice(
         `Attached image. Upload backup: ${upload.audit.backupPath}; attach backup: ${response.audit.backupPath}`,
       );
@@ -1552,6 +1692,33 @@ function App() {
       setImageMutating(false);
     }
   }, [applyImageMutationResponse, imageUploadDraft, selectedImageEntry]);
+
+  const handleRemoveComposerImage = useCallback(
+    async (attachment: ImageAttachment) => {
+      if (!editingEntry || !window.confirm("Remove this image attachment from the entry?")) {
+        return;
+      }
+
+      setImageMutating(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const response = await removeImage(attachment.attachmentId, editingEntry.uuid);
+        setComposerEntryImages({
+          entryUuid: response.entryUuid,
+          images: response.images,
+          warnings: [],
+        });
+        setNotice(`Removed image with backup: ${response.audit.backupPath}`);
+        await refresh();
+      } catch (imageError) {
+        setError(imageError instanceof Error ? imageError.message : "Unable to remove image");
+      } finally {
+        setImageMutating(false);
+      }
+    },
+    [editingEntry, refresh],
+  );
 
   const handleRemoveImage = useCallback(
     async (attachment: ImageAttachment) => {
@@ -1869,6 +2036,7 @@ function App() {
             loading={imagesLoading}
             mutating={imageMutating}
             onAttach={handleUploadAttachImage}
+            onBrowseImagePath={handleBrowseImagePath}
             onChangeDraft={setImageUploadDraft}
             onLoadMore={() => setImageLimit((current) => current + 40)}
             onRemoveImage={handleRemoveImage}
@@ -1952,10 +2120,19 @@ function App() {
           <ComposerView
             draft={composerDraft}
             editingEntry={editingEntry}
+            existingImages={composerEntryImages}
+            imageDrafts={composerImageDrafts}
+            imagesLoading={composerImagesLoading}
+            imagesMutating={imageMutating}
             mode={composerMode}
+            onAddImageDraft={handleAddComposerImageDraft}
+            onBrowseImagePath={handleBrowseImagePath}
             onCancel={() => setActiveView("entries")}
+            onChangeImageDraft={handleChangeComposerImageDraft}
             onChange={setComposerDraft}
             onOpenWriter={() => setActiveView("writer")}
+            onRemoveExistingImage={handleRemoveComposerImage}
+            onRemoveImageDraft={handleRemoveComposerImageDraft}
             onSave={handleSaveEntry}
             saving={savingEntry}
             status={status}
@@ -2623,6 +2800,7 @@ type ImagesViewProps = {
   onSelectEntry: (entry: Entry) => void;
   onLoadMore: () => void;
   onChangeDraft: (next: ImageUploadDraft) => void;
+  onBrowseImagePath: (currentPath: string) => Promise<string | null>;
   onAttach: () => void;
   onRemoveImage: (attachment: ImageAttachment) => void;
 };
@@ -2639,6 +2817,7 @@ function ImagesView({
   onSelectEntry,
   onLoadMore,
   onChangeDraft,
+  onBrowseImagePath,
   onAttach,
   onRemoveImage,
 }: ImagesViewProps) {
@@ -2711,11 +2890,26 @@ function ImagesView({
             <div className="upload-strip">
               <label className="field field--wide">
                 <span>Local image path</span>
-                <input
-                  onChange={(event) => onChangeDraft({ ...draft, path: event.target.value })}
-                  placeholder="C:\\Users\\jtill\\OneDrive\\_capsule\\images\\photo.jpg"
-                  value={draft.path}
-                />
+                <div className="path-input-row">
+                  <input
+                    onChange={(event) => onChangeDraft({ ...draft, path: event.target.value })}
+                    placeholder="C:\\Users\\jtill\\OneDrive\\_capsule\\images\\photo.jpg"
+                    value={draft.path}
+                  />
+                  <button
+                    className="icon-button"
+                    onClick={async () => {
+                      const selected = await onBrowseImagePath(draft.path);
+                      if (selected) {
+                        onChangeDraft({ ...draft, path: selected });
+                      }
+                    }}
+                    title="Browse image"
+                    type="button"
+                  >
+                    <FolderOpen size={16} />
+                  </button>
+                </div>
               </label>
               <label className="field">
                 <span>Caption</span>
@@ -3423,11 +3617,20 @@ type ComposerViewProps = {
   mode: ComposerMode;
   editingEntry: Entry | null;
   draft: ComposerDraft;
+  imageDrafts: ComposerImageDraft[];
+  existingImages: ImageEntryListResponse | null;
   onChange: (next: ComposerDraft) => void;
+  onAddImageDraft: () => void;
+  onChangeImageDraft: (id: string, next: ImageUploadDraft) => void;
+  onRemoveImageDraft: (id: string) => void;
+  onBrowseImagePath: (currentPath: string) => Promise<string | null>;
+  onRemoveExistingImage: (attachment: ImageAttachment) => void;
   onSave: () => void;
   onCancel: () => void;
   onOpenWriter: () => void;
   saving: boolean;
+  imagesLoading: boolean;
+  imagesMutating: boolean;
 };
 
 function ComposerView({
@@ -3435,11 +3638,20 @@ function ComposerView({
   mode,
   editingEntry,
   draft,
+  imageDrafts,
+  existingImages,
   onChange,
+  onAddImageDraft,
+  onChangeImageDraft,
+  onRemoveImageDraft,
+  onBrowseImagePath,
+  onRemoveExistingImage,
   onSave,
   onCancel,
   onOpenWriter,
   saving,
+  imagesLoading,
+  imagesMutating,
 }: ComposerViewProps) {
   if (status && (!status.dbExists || !status.readable)) {
     return (
@@ -3569,6 +3781,150 @@ function ComposerView({
               />
               <span>Pinned</span>
             </label>
+          </div>
+        </Panel>
+
+        <Panel
+          action={
+            <button
+              className="icon-button icon-button--small"
+              onClick={onAddImageDraft}
+              title="Add image"
+              type="button"
+            >
+              <Plus size={15} />
+            </button>
+          }
+          icon={<Paperclip size={20} />}
+          title="Images"
+        >
+          <div className="composer-image-panel">
+            {imageDrafts.length === 0 && (
+              <button
+                className="secondary-button secondary-button--full"
+                onClick={onAddImageDraft}
+                type="button"
+              >
+                <Plus size={16} />
+                Add image
+              </button>
+            )}
+
+            {imageDrafts.map((imageDraft, index) => (
+              <div className="composer-image-draft" key={imageDraft.id}>
+                <div className="composer-image-row-heading">
+                  <span>Image {index + 1}</span>
+                  <button
+                    className="icon-button icon-button--small"
+                    onClick={() => onRemoveImageDraft(imageDraft.id)}
+                    title="Remove queued image"
+                    type="button"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                <label className="field">
+                  <span>File</span>
+                  <div className="path-input-row">
+                    <input
+                      onChange={(event) =>
+                        onChangeImageDraft(imageDraft.id, {
+                          ...imageDraft,
+                          path: event.target.value,
+                        })
+                      }
+                      placeholder="C:\\Users\\jtill\\Pictures\\photo.jpg"
+                      value={imageDraft.path}
+                    />
+                    <button
+                      className="icon-button"
+                      onClick={async () => {
+                        const selected = await onBrowseImagePath(imageDraft.path);
+                        if (selected) {
+                          onChangeImageDraft(imageDraft.id, { ...imageDraft, path: selected });
+                        }
+                      }}
+                      title="Browse image"
+                      type="button"
+                    >
+                      <FolderOpen size={16} />
+                    </button>
+                  </div>
+                </label>
+                <div className="composer-image-meta-row">
+                  <label className="field">
+                    <span>Caption</span>
+                    <input
+                      onChange={(event) =>
+                        onChangeImageDraft(imageDraft.id, {
+                          ...imageDraft,
+                          caption: event.target.value,
+                        })
+                      }
+                      value={imageDraft.caption}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Alt text</span>
+                    <input
+                      onChange={(event) =>
+                        onChangeImageDraft(imageDraft.id, {
+                          ...imageDraft,
+                          altText: event.target.value,
+                        })
+                      }
+                      value={imageDraft.altText}
+                    />
+                  </label>
+                </div>
+              </div>
+            ))}
+
+            {mode === "edit" && (
+              <div className="composer-existing-images">
+                <div className="composer-image-row-heading">
+                  <span>Attached</span>
+                  <StatusPill tone="neutral">
+                    {imagesLoading ? "Loading" : `${existingImages?.images.length ?? 0}`}
+                  </StatusPill>
+                </div>
+                {existingImages?.warnings.map((warning) => (
+                  <div className="inline-warning" key={warning}>
+                    <TriangleAlert size={15} />
+                    {warning}
+                  </div>
+                ))}
+                {imagesLoading && <SkeletonList compact />}
+                {!imagesLoading && (existingImages?.images.length ?? 0) === 0 && (
+                  <div className="empty-state empty-state--compact">No attached images.</div>
+                )}
+                {!imagesLoading &&
+                  existingImages?.images.map((attachment) => (
+                    <article className="composer-attached-image" key={attachment.attachmentId}>
+                      <DataUrlImage
+                        attachment={attachment}
+                        className="composer-image-thumb"
+                        variant="thumb"
+                      />
+                      <div>
+                        <h4>{attachment.caption || attachment.altText || attachment.hash.slice(0, 12)}</h4>
+                        <p>
+                          {attachment.width} x {attachment.height} / {formatBytes(attachment.bytes)}
+                        </p>
+                      </div>
+                      <button
+                        className="icon-button icon-button--small"
+                        disabled={imagesMutating}
+                        onClick={() => onRemoveExistingImage(attachment)}
+                        title="Remove attachment"
+                        type="button"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </article>
+                  ))}
+              </div>
+            )}
           </div>
         </Panel>
 
@@ -4058,7 +4414,7 @@ function SettingsView({
         title="Application"
       >
         <dl className="detail-list">
-          <Detail label="Version" value="0.7.8" />
+          <Detail label="Version" value="0.7.10" />
           <Detail label="Mode" value="Backups and data tools" />
           <Detail label="Writes" value="Backup guarded" />
         </dl>

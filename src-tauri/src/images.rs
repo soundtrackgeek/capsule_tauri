@@ -408,7 +408,9 @@ fn upload_image_inner(
     let hash = sha256_hex(&bytes);
     let storage_key = format!("{}/{}.{}", &hash[..2], hash, extension);
     let roots = media_roots_for_database(db_path, media_root_override);
-    let media_root = first_existing_or_default_root(&roots)
+    let media_root = roots
+        .first()
+        .cloned()
         .ok_or_else(|| anyhow!("could not resolve a media root for image upload"))?;
     write_media_bytes(&media_root, &storage_key, &bytes)?;
     let thumbnail = build_thumbnail_bytes(&bytes, IMAGE_THUMB_SIZE)?;
@@ -1164,6 +1166,18 @@ mod tests {
         assert!(PathBuf::from(&upload.audit.backup_path).exists());
         assert_eq!(upload.audit.operation, "image.upload");
         assert_eq!(upload.asset.mime_type, "image/png");
+        assert_eq!(
+            upload.asset.storage_key,
+            format!("{}/{}.png", &upload.asset.hash[..2], upload.asset.hash)
+        );
+        assert!(media_root.join(&upload.asset.storage_key).exists());
+        assert!(media_root
+            .join(format!(
+                "thumb/{}/{}.jpg",
+                &upload.asset.hash[..2],
+                upload.asset.hash
+            ))
+            .exists());
 
         let attach = attach_image_for_database(
             &db_path,

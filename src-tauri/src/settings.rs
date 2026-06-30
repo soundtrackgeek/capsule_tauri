@@ -163,6 +163,17 @@ pub fn browse_directory_path(current_path: Option<String>) -> Result<Option<Stri
     Ok(dialog.pick_folder().map(|path| db::path_to_string(&path)))
 }
 
+pub fn browse_image_path(current_path: Option<String>) -> Result<Option<String>> {
+    let mut dialog = rfd::FileDialog::new()
+        .set_title("Select image")
+        .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
+        .add_filter("All files", &["*"]);
+    if let Some(directory) = dialog_start_directory(current_path.as_deref(), true) {
+        dialog = dialog.set_directory(directory);
+    }
+    Ok(dialog.pick_file().map(|path| db::path_to_string(&path)))
+}
+
 pub fn list_tags() -> Result<TagCatalogResponse> {
     list_tags_for_database(&db::resolve_database_path())
 }

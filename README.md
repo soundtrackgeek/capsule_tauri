@@ -24,7 +24,7 @@ Capsule database:
 - Backup-guarded star, unstar, pin, unpin, hide, unhide, and confirmed delete
   entry actions.
 - Full-page markdown composer with metadata fields, continuation UUID support,
-  writing stats, and local draft recovery.
+  queued local image attachments, writing stats, and local draft recovery.
 - Distraction-free Writer Mode with local display preferences.
 - Entry history review for legacy Capsule edit snapshots.
 - Keyword search using `entries_fts` when available, with a compatibility
@@ -58,8 +58,9 @@ Capsule database:
 - Markdown and JSON exports for selected entries and current search result sets.
 - Image attachment browsing with thumbnail/full-size rendering from the local
   image media root.
-- Backup-guarded image upload from local file paths, entry attachment, removal,
-  and sync tombstone recording.
+- Backup-guarded image upload from local file paths, including native image
+  file picking in the Images page and composer, entry attachment, removal, and
+  sync tombstone recording.
 - Analytics dashboard with overview counts, monthly trend, tag/mood/location
   breakdowns, weather breakdowns, top words, and streaks.
 - Writing Calendar heatmap for active days, words, images, and mood metadata.
@@ -93,6 +94,10 @@ config, then the default `C:\Users\jtill\OneDrive\_capsule\images`. Backup
 storage resolves `CAPSULE_BACKUP_DIR` first, then the saved local backup path
 from Settings, then the active database directory. Saved local paths are stored
 outside the journal database in the app path settings file shown in Settings.
+Uploaded originals use Capsule's legacy image key layout
+`<hash-prefix>/<sha256>.<ext>` and thumbnails use
+`thumb/<hash-prefix>/<sha256>.jpg`, with attachment metadata stored in
+`plugin_media_assets` and `plugin_entry_media` for old Capsule compatibility.
 Cover wall assets are local-only and ignored by Git under `local-assets/`; set
 `CAPSULE_COVERS_ROOT` to point at a different cover folder.
 

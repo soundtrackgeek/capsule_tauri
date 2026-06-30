@@ -420,6 +420,14 @@ async fn browse_directory_path(current_path: Option<String>) -> Result<Option<St
 }
 
 #[tauri::command]
+async fn browse_image_path(current_path: Option<String>) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || settings::browse_image_path(current_path))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn list_tags() -> Result<TagCatalogResponse, String> {
     tauri::async_runtime::spawn_blocking(settings::list_tags)
         .await
@@ -646,6 +654,7 @@ pub fn run() {
             set_path_settings,
             browse_database_path,
             browse_directory_path,
+            browse_image_path,
             list_tags,
             rename_tag,
             merge_tag,

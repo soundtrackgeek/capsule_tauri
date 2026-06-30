@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.10 - 2026-06-30
+
+### Added
+
+- Added native image file picking and queued image attachments to the new-entry
+  and edit-entry composer flows.
+- Added edit-composer attached image browsing/removal while preserving
+  Capsule-compatible `plugin_media_assets` and `plugin_entry_media` storage.
+
+### Changed
+
+- Bumped the app version to 0.7.10.
+
 ## 0.7.9 - 2026-06-30
 
 ### Changed
