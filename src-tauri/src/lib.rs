@@ -9,6 +9,7 @@ mod search;
 mod security;
 mod settings;
 mod stats;
+mod sync;
 mod threads;
 
 use models::{
@@ -26,9 +27,9 @@ use models::{
     LibraryTemplateUpdate, LocationConfigUpdateRequest, MoodCatalogResponse, MoodDeleteRequest,
     MoodMutationResponse, MoodRenameRequest, PathSettingsResponse, PathSettingsUpdateRequest,
     PluginOverviewResponse, QuestClaimRequest, QuestClaimResponse, RandomEntryFilters,
-    SearchRequest, SearchResponse, SyncOverviewResponse, TagCatalogResponse, TagDeleteRequest,
-    TagMergeRequest, TagMutationResponse, TagRenameRequest, ThreadListResponse,
-    ThreadMetadataUpdate, ThreadMutationResponse, WritingCalendarResponse,
+    SearchRequest, SearchResponse, SyncOverviewResponse, SyncRunRequest, SyncRunResponse,
+    TagCatalogResponse, TagDeleteRequest, TagMergeRequest, TagMutationResponse, TagRenameRequest,
+    ThreadListResponse, ThreadMetadataUpdate, ThreadMutationResponse, WritingCalendarResponse,
 };
 
 #[tauri::command]
@@ -610,6 +611,14 @@ async fn get_sync_overview() -> Result<SyncOverviewResponse, String> {
 }
 
 #[tauri::command]
+async fn run_sync(input: Option<SyncRunRequest>) -> Result<SyncRunResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || sync::run_sync(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn get_plugin_overview() -> Result<PluginOverviewResponse, String> {
     tauri::async_runtime::spawn_blocking(phase6::get_plugin_overview)
         .await
@@ -704,6 +713,7 @@ pub fn run() {
             get_ai_overview,
             suggest_ai_metadata,
             get_sync_overview,
+            run_sync,
             get_plugin_overview,
             get_gamification_overview,
             claim_quest

@@ -1,0 +1,3533 @@
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
+
+use anyhow::{anyhow, Context, Result};
+use chrono::{Local, Utc};
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::{json, Map, Value as JsonValue};
+
+use crate::{
+    backup, db,
+    models::{SyncRunRequest, SyncRunResponse},
+};
+
+const MAIN_SYNC_FILE: &str = "capsule_sync.json";
+const THREADS_SYNC_FILE: &str = "capsule_threads_sync.json";
+const AI_CHATS_SYNC_FILE: &str = "capsule_ai_chats_sync.json";
+const SYNC_RETRY_LIMIT: usize = 3;
+const SYNC_HISTORY_RETENTION_LIMIT: i64 = 200;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileSignature {
+    exists: bool,
+    len: Option<u64>,
+    modified: Option<SystemTime>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SyncCounts {
+    imported: i64,
+    updated: i64,
+    deleted: i64,
+    exported: i64,
+    conflicts: Vec<String>,
+    parts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct MainSyncPayload {
+    #[serde(default)]
+    version: Option<i64>,
+    #[serde(default)]
+    entries: Vec<SyncEntry>,
+    #[serde(default)]
+    deleted_uuids: Vec<String>,
+    #[serde(flatten)]
+    extra: Map<String, JsonValue>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct SyncEntry {
+    #[serde(default)]
+    id: Option<i64>,
+    #[serde(default)]
+    uuid: Option<String>,
+    #[serde(default)]
+    created_at: String,
+    #[serde(default)]
+    updated_at: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    summary: Option<String>,
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    content_format: Option<String>,
+    #[serde(default)]
+    mood: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    starred: bool,
+    #[serde(default)]
+    pinned: bool,
+    #[serde(default)]
+    hidden: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct ImageSyncPayload {
+    #[serde(default)]
+    assets: Vec<ImageAssetPayload>,
+    #[serde(default)]
+    attachments: Vec<ImageAttachmentPayload>,
+    #[serde(default)]
+    deleted_attachments: Vec<DeletedImageAttachment>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct ImageAssetPayload {
+    #[serde(default)]
+    hash: String,
+    #[serde(default)]
+    mime_type: String,
+    #[serde(default)]
+    bytes: i64,
+    #[serde(default)]
+    width: i64,
+    #[serde(default)]
+    height: i64,
+    #[serde(default)]
+    storage_backend: String,
+    #[serde(default)]
+    storage_key: String,
+    #[serde(default)]
+    created_at: String,
+    #[serde(default)]
+    deleted_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct ImageAttachmentPayload {
+    #[serde(default)]
+    entry_uuid: String,
+    #[serde(default)]
+    asset_hash: String,
+    #[serde(default)]
+    position: i64,
+    #[serde(default)]
+    caption: Option<String>,
+    #[serde(default)]
+    alt_text: Option<String>,
+    #[serde(default)]
+    created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct DeletedImageAttachment {
+    #[serde(default)]
+    entry_uuid: String,
+    #[serde(default)]
+    asset_hash: String,
+    #[serde(default)]
+    position: i64,
+    #[serde(default)]
+    caption: Option<String>,
+    #[serde(default)]
+    alt_text: Option<String>,
+    #[serde(default)]
+    deleted_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct LocationSyncPayload {
+    #[serde(default)]
+    supported: bool,
+    #[serde(default)]
+    locations: Vec<LocationPayload>,
+    #[serde(default)]
+    deleted_locations: Vec<DeletedLocation>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct LocationPayload {
+    #[serde(default)]
+    entry_uuid: String,
+    #[serde(default)]
+    latitude: f64,
+    #[serde(default)]
+    longitude: f64,
+    #[serde(default)]
+    place_name: Option<String>,
+    #[serde(default)]
+    place_details: Option<String>,
+    #[serde(default)]
+    source: String,
+    #[serde(default)]
+    weather_temp_c: Option<f64>,
+    #[serde(default)]
+    weather_temp_f: Option<f64>,
+    #[serde(default)]
+    weather_condition: Option<String>,
+    #[serde(default)]
+    weather_icon: Option<String>,
+    #[serde(default)]
+    weather_humidity: Option<i64>,
+    #[serde(default)]
+    weather_wind_kph: Option<f64>,
+    #[serde(default)]
+    weather_fetched_at: Option<String>,
+    #[serde(default)]
+    created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct DeletedLocation {
+    #[serde(default)]
+    entry_uuid: String,
+    #[serde(default)]
+    deleted_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct LibrarySyncPayload {
+    #[serde(default)]
+    templates: Vec<LibraryTemplatePayload>,
+    #[serde(default)]
+    prompts: Vec<LibraryPromptPayload>,
+    #[serde(default)]
+    deleted_templates: Vec<DeletedLibraryItem>,
+    #[serde(default)]
+    deleted_prompts: Vec<DeletedLibraryItem>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct LibraryTemplatePayload {
+    #[serde(default)]
+    slug: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    intro_text: String,
+    #[serde(default)]
+    sections: Vec<String>,
+    #[serde(default = "default_true")]
+    is_active: bool,
+    #[serde(default)]
+    created_at: String,
+    #[serde(default)]
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct LibraryPromptPayload {
+    #[serde(default)]
+    slug: String,
+    #[serde(default)]
+    prompt_text: String,
+    #[serde(default)]
+    category: String,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default = "default_true")]
+    is_active: bool,
+    #[serde(default)]
+    created_at: String,
+    #[serde(default)]
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct DeletedLibraryItem {
+    #[serde(default)]
+    slug: String,
+    #[serde(default)]
+    deleted_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct ThreadSyncPayload {
+    #[serde(default = "thread_sync_version")]
+    version: i64,
+    #[serde(default)]
+    continuations: Vec<ThreadContinuation>,
+    #[serde(default)]
+    deleted_continuations: Vec<DeletedContinuation>,
+    #[serde(default)]
+    titles: Vec<ThreadTitle>,
+    #[serde(default)]
+    deleted_titles: Vec<DeletedThreadText>,
+    #[serde(default)]
+    summaries: Vec<ThreadSummary>,
+    #[serde(default)]
+    deleted_summaries: Vec<DeletedThreadText>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct ThreadContinuation {
+    #[serde(default)]
+    child_entry_uuid: String,
+    #[serde(default)]
+    parent_entry_uuid: String,
+    #[serde(default)]
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct DeletedContinuation {
+    #[serde(default)]
+    child_entry_uuid: String,
+    #[serde(default)]
+    deleted_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct ThreadTitle {
+    #[serde(default)]
+    thread_root_uuid: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct ThreadSummary {
+    #[serde(default)]
+    thread_root_uuid: String,
+    #[serde(default)]
+    summary: String,
+    #[serde(default)]
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct DeletedThreadText {
+    #[serde(default)]
+    thread_root_uuid: String,
+    #[serde(default)]
+    deleted_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct AiChatSyncPayload {
+    #[serde(default = "ai_chat_sync_version")]
+    version: i64,
+    #[serde(default)]
+    conversations: Vec<AiConversationPayload>,
+    #[serde(default)]
+    messages: Vec<AiMessagePayload>,
+    #[serde(default)]
+    deleted_conversations: Vec<DeletedAiConversation>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct AiConversationPayload {
+    #[serde(default)]
+    uuid: String,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    preview: Option<String>,
+    #[serde(default)]
+    cloud_provider: String,
+    #[serde(default)]
+    scope: String,
+    #[serde(default)]
+    scope_identifiers: JsonValue,
+    #[serde(default)]
+    context_limit: Option<i64>,
+    #[serde(default)]
+    since: Option<String>,
+    #[serde(default)]
+    until: Option<String>,
+    #[serde(default)]
+    created_at: String,
+    #[serde(default)]
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct AiMessagePayload {
+    #[serde(default)]
+    uuid: String,
+    #[serde(default)]
+    conversation_uuid: String,
+    #[serde(default)]
+    role: String,
+    #[serde(default)]
+    content: String,
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    created_at: String,
+    #[serde(default)]
+    updated_at: String,
+    #[serde(default)]
+    sort_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct DeletedAiConversation {
+    #[serde(default)]
+    conversation_uuid: String,
+    #[serde(default)]
+    deleted_at: String,
+}
+
+#[derive(Debug)]
+enum SyncAttempt {
+    Complete(SyncRunResponse),
+    Retry,
+}
+
+pub fn run_sync(input: Option<SyncRunRequest>) -> Result<SyncRunResponse> {
+    let sync_dir = resolve_sync_dir(input.and_then(|input| normalize_string(input.sync_path)))?;
+    fs::create_dir_all(&sync_dir)
+        .with_context(|| format!("failed to create {}", sync_dir.display()))?;
+    let sync_file = sync_dir.join(MAIN_SYNC_FILE);
+    let db_path = db::resolve_database_path();
+
+    let guarded = backup::with_database_backup_for_database(&db_path, "sync.run", move |path| {
+        match run_sync_with_retries(path, &sync_dir) {
+            Ok(response) => Ok(response),
+            Err(error) => {
+                if let Err(status_error) = record_sync_error(path, &sync_file, &error.to_string()) {
+                    eprintln!("[Sync] Failed to record sync error: {status_error}");
+                }
+                Err(error)
+            }
+        }
+    })?;
+
+    Ok(guarded.value)
+}
+
+fn resolve_sync_dir(override_path: Option<String>) -> Result<PathBuf> {
+    if let Some(path) = override_path {
+        return Ok(PathBuf::from(path));
+    }
+    if let Ok(path) = std::env::var("CAPSULE_SYNC_PATH") {
+        if let Some(path) = normalize_string(Some(path)) {
+            return Ok(PathBuf::from(path));
+        }
+    }
+    if let Some(path) = db::read_local_path_settings().sync_path {
+        return Ok(PathBuf::from(path));
+    }
+    Err(anyhow!(
+        "No sync path configured. Set a sync folder in Settings first."
+    ))
+}
+
+fn run_sync_with_retries(db_path: &Path, sync_dir: &Path) -> Result<SyncRunResponse> {
+    let mut last_error = None;
+    for attempt in 0..SYNC_RETRY_LIMIT {
+        match run_sync_once(db_path, sync_dir, attempt + 1)? {
+            SyncAttempt::Complete(response) => return Ok(response),
+            SyncAttempt::Retry => {
+                last_error = Some("Sync file changed during merge; retrying with the latest file.");
+                continue;
+            }
+        }
+    }
+    Err(anyhow!(
+        "{}",
+        last_error.unwrap_or("Sync file kept changing during merge.")
+    ))
+}
+
+fn run_sync_once(db_path: &Path, sync_dir: &Path, attempt: usize) -> Result<SyncAttempt> {
+    let sync_file = sync_dir.join(MAIN_SYNC_FILE);
+    let threads_sync_file = sync_dir.join(THREADS_SYNC_FILE);
+    let ai_chat_sync_file = sync_dir.join(AI_CHATS_SYNC_FILE);
+    let starting_signature = file_signature(&sync_file)?;
+
+    let remote_main = read_main_payload(&sync_file)?;
+    let remote_threads = read_json_file::<ThreadSyncPayload>(&threads_sync_file)?;
+    let remote_ai_chats = read_json_file::<AiChatSyncPayload>(&ai_chat_sync_file)?;
+    let remote_images = parse_extra_payload::<ImageSyncPayload>(&remote_main.extra, "images")?;
+    let remote_locations =
+        parse_extra_payload::<LocationSyncPayload>(&remote_main.extra, "locations")?;
+    let remote_library = parse_extra_payload::<LibrarySyncPayload>(&remote_main.extra, "library")?;
+
+    let mut counts = SyncCounts::default();
+    let (main_payload, thread_payload, ai_payload) = {
+        let mut connection = db::open_read_write_connection(db_path)?;
+        ensure_sync_schema(&connection)?;
+        let tx = connection.transaction()?;
+
+        apply_remote_entry_deletes(&tx, &remote_main.deleted_uuids, &mut counts)?;
+        apply_remote_entries(&tx, &remote_main.entries, &mut counts)?;
+        if let Some(payload) = remote_images.as_ref() {
+            apply_images_payload(&tx, payload, &mut counts)?;
+        }
+        if let Some(payload) = remote_locations.as_ref() {
+            apply_locations_payload(&tx, payload, &mut counts)?;
+        }
+        if let Some(payload) = remote_library.as_ref() {
+            apply_library_payload(&tx, payload, &mut counts)?;
+        }
+        apply_threads_payload(&tx, &remote_threads, &mut counts)?;
+        apply_ai_chats_payload(&tx, &remote_ai_chats, &mut counts)?;
+
+        let mut extra = remote_main.extra;
+        extra.insert(
+            "images".to_string(),
+            serde_json::to_value(build_images_payload(&tx)?)?,
+        );
+        extra.insert(
+            "locations".to_string(),
+            serde_json::to_value(build_locations_payload(&tx)?)?,
+        );
+        extra.insert(
+            "library".to_string(),
+            serde_json::to_value(build_library_payload(&tx)?)?,
+        );
+        let main_payload = build_main_payload(&tx, extra, remote_main.deleted_uuids)?;
+        let thread_payload = build_threads_payload(&tx)?;
+        let ai_payload = build_ai_chats_payload(&tx)?;
+        counts.exported = main_payload.entries.len() as i64;
+        tx.commit()?;
+        (main_payload, thread_payload, ai_payload)
+    };
+
+    if attempt < SYNC_RETRY_LIMIT && file_signature(&sync_file)? != starting_signature {
+        return Ok(SyncAttempt::Retry);
+    }
+
+    write_json_replace(&sync_file, &main_payload)?;
+    write_json_replace(&threads_sync_file, &thread_payload)?;
+    write_json_replace(&ai_chat_sync_file, &ai_payload)?;
+
+    let completed_at = current_timestamp_seconds();
+    let summary = sync_summary(&counts);
+    record_sync_success(
+        db_path,
+        &sync_file,
+        &counts,
+        &summary,
+        &completed_at,
+        counts.conflicts.last().cloned(),
+    )?;
+
+    Ok(SyncAttempt::Complete(SyncRunResponse {
+        sync_path: db::path_to_string(sync_dir),
+        sync_file_path: db::path_to_string(&sync_file),
+        imported_count: counts.imported,
+        updated_count: counts.updated,
+        deleted_count: counts.deleted,
+        exported_count: counts.exported,
+        conflict_count: counts.conflicts.len() as i64,
+        summary,
+        completed_at,
+    }))
+}
+
+fn read_main_payload(path: &Path) -> Result<MainSyncPayload> {
+    if !path.exists() {
+        return Ok(MainSyncPayload {
+            version: Some(4),
+            ..MainSyncPayload::default()
+        });
+    }
+    let raw = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let value: JsonValue = serde_json::from_slice(&raw)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    if let JsonValue::Array(entries) = value {
+        return Ok(MainSyncPayload {
+            version: Some(1),
+            entries: entries
+                .into_iter()
+                .filter_map(|value| serde_json::from_value::<SyncEntry>(value).ok())
+                .collect(),
+            ..MainSyncPayload::default()
+        });
+    }
+    serde_json::from_value::<MainSyncPayload>(value)
+        .with_context(|| format!("failed to parse {}", path.display()))
+}
+
+fn parse_extra_payload<T>(extra: &Map<String, JsonValue>, key: &str) -> Result<Option<T>>
+where
+    T: DeserializeOwned,
+{
+    match extra.get(key) {
+        Some(value) => Ok(Some(
+            serde_json::from_value::<T>(value.clone())
+                .with_context(|| format!("invalid {key} sync payload"))?,
+        )),
+        None => Ok(None),
+    }
+}
+
+fn read_json_file<T>(path: &Path) -> Result<T>
+where
+    T: for<'de> Deserialize<'de> + Default,
+{
+    if !path.exists() {
+        return Ok(T::default());
+    }
+    let raw = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    serde_json::from_slice(&raw).with_context(|| format!("failed to parse {}", path.display()))
+}
+
+fn write_json_replace<T>(path: &Path, value: &T) -> Result<()>
+where
+    T: Serialize,
+{
+    let tmp_path = path.with_extension(format!(
+        "tmp.{}.{}",
+        std::process::id(),
+        Utc::now()
+            .timestamp_nanos_opt()
+            .unwrap_or_else(|| Utc::now().timestamp_micros() * 1_000)
+    ));
+    fs::write(&tmp_path, serde_json::to_vec_pretty(value)?)
+        .with_context(|| format!("failed to write {}", tmp_path.display()))?;
+    if path.exists() {
+        fs::remove_file(path).with_context(|| format!("failed to replace {}", path.display()))?;
+    }
+    fs::rename(&tmp_path, path).with_context(|| {
+        format!(
+            "failed to move {} to {}",
+            tmp_path.display(),
+            path.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn file_signature(path: &Path) -> Result<FileSignature> {
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(FileSignature {
+            exists: true,
+            len: Some(metadata.len()),
+            modified: metadata.modified().ok(),
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(FileSignature {
+            exists: false,
+            len: None,
+            modified: None,
+        }),
+        Err(error) => Err(error).with_context(|| format!("failed to inspect {}", path.display())),
+    }
+}
+
+fn ensure_sync_schema(connection: &Connection) -> Result<()> {
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS sync_tombstones (
+            uuid TEXT PRIMARY KEY,
+            deleted_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sync_status (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            last_successful_sync_at TEXT,
+            last_sync_file_path TEXT,
+            last_sync_file_size_bytes INTEGER,
+            last_sync_imported INTEGER NOT NULL DEFAULT 0,
+            last_sync_updated INTEGER NOT NULL DEFAULT 0,
+            last_sync_deleted INTEGER NOT NULL DEFAULT 0,
+            last_sync_total INTEGER NOT NULL DEFAULT 0,
+            last_sync_summary TEXT,
+            last_conflict_count INTEGER NOT NULL DEFAULT 0,
+            last_conflict_summary TEXT,
+            last_sync_error TEXT
+        );
+        INSERT OR IGNORE INTO sync_status (
+            id, last_sync_imported, last_sync_updated, last_sync_deleted,
+            last_sync_total, last_conflict_count
+        ) VALUES (1, 0, 0, 0, 0, 0);
+        CREATE TABLE IF NOT EXISTS sync_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('success', 'failed')),
+            sync_file_path TEXT,
+            imported_count INTEGER NOT NULL DEFAULT 0,
+            updated_count INTEGER NOT NULL DEFAULT 0,
+            deleted_count INTEGER NOT NULL DEFAULT 0,
+            exported_count INTEGER NOT NULL DEFAULT 0,
+            conflict_count INTEGER NOT NULL DEFAULT 0,
+            summary TEXT,
+            details TEXT,
+            error TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_sync_history_timestamp
+            ON sync_history(timestamp DESC, id DESC);
+        CREATE TABLE IF NOT EXISTS entry_continuations (
+            child_entry_uuid TEXT PRIMARY KEY,
+            parent_entry_uuid TEXT NOT NULL,
+            updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS entry_thread_titles (
+            thread_root_uuid TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS entry_thread_summaries (
+            thread_root_uuid TEXT PRIMARY KEY,
+            summary TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sync_entry_continuation_tombstones (
+            child_entry_uuid TEXT PRIMARY KEY,
+            deleted_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sync_entry_thread_title_tombstones (
+            thread_root_uuid TEXT PRIMARY KEY,
+            deleted_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sync_entry_thread_summary_tombstones (
+            thread_root_uuid TEXT PRIMARY KEY,
+            deleted_at TEXT NOT NULL
+        );
+        ",
+    )?;
+    if table_exists(connection, "ai_conversations")? {
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS sync_ai_conversation_tombstones (
+                conversation_uuid TEXT PRIMARY KEY,
+                deleted_at TEXT NOT NULL
+            )",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn apply_remote_entry_deletes(
+    connection: &Connection,
+    remote_deleted_uuids: &[String],
+    counts: &mut SyncCounts,
+) -> Result<()> {
+    let now = current_timestamp_minutes();
+    let mut seen = HashSet::new();
+    for uuid in remote_deleted_uuids
+        .iter()
+        .filter_map(|uuid| normalize_string(Some(uuid.clone())))
+        .filter(|uuid| seen.insert(uuid.clone()))
+    {
+        let entry_id = connection
+            .query_row("SELECT id FROM entries WHERE uuid = ?1", [&uuid], |row| {
+                row.get::<_, i64>(0)
+            })
+            .optional()?;
+        if let Some(entry_id) = entry_id {
+            delete_entry_for_sync(connection, entry_id, &uuid, &now)?;
+            counts.deleted += 1;
+        } else {
+            record_entry_tombstone(connection, &uuid, &now)?;
+        }
+    }
+    Ok(())
+}
+
+fn apply_remote_entries(
+    connection: &Connection,
+    entries: &[SyncEntry],
+    counts: &mut SyncCounts,
+) -> Result<()> {
+    let mut items = entries.to_vec();
+    items.sort_by(|left, right| {
+        normalized_timestamp(left.updated_at.as_deref(), &left.created_at)
+            .cmp(&normalized_timestamp(
+                right.updated_at.as_deref(),
+                &right.created_at,
+            ))
+            .then_with(|| left.uuid.cmp(&right.uuid))
+    });
+
+    for item in items {
+        let Some(uuid) = normalize_string(item.uuid.clone()) else {
+            continue;
+        };
+        let created_at = normalized_timestamp(Some(&item.created_at), &current_timestamp_minutes());
+        let updated_at = normalized_timestamp(item.updated_at.as_deref(), &created_at);
+        let text = item.text.replace("\r\n", "\n").replace('\r', "\n");
+        if text.trim().is_empty() {
+            continue;
+        }
+
+        if entry_tombstone_at(connection, &uuid)?.is_some() {
+            counts.conflicts.push(format!(
+                "Kept local deletion for {uuid}; remote entry still existed in the sync file."
+            ));
+            continue;
+        }
+
+        let existing = connection
+            .query_row(
+                "SELECT id, created_at, updated_at, text, content_format, title, summary, mood,
+                        starred, pinned, hidden
+                 FROM entries
+                 WHERE uuid = ?1",
+                [&uuid],
+                |row| {
+                    Ok(ExistingEntry {
+                        id: row.get(0)?,
+                        created_at: row.get(1)?,
+                        updated_at: row.get(2)?,
+                        text: row.get(3)?,
+                        content_format: row.get(4)?,
+                        title: row.get(5)?,
+                        summary: row.get(6)?,
+                        mood: row.get(7)?,
+                        starred: row.get::<_, i64>(8)? != 0,
+                        pinned: row.get::<_, i64>(9)? != 0,
+                        hidden: row.get::<_, i64>(10)? != 0,
+                    })
+                },
+            )
+            .optional()?;
+
+        let content_format = normalize_content_format(item.content_format.as_deref());
+        let title = normalize_optional_text(item.title.as_deref());
+        let summary = normalize_optional_text(item.summary.as_deref());
+        let mood = normalize_optional_text(item.mood.as_deref());
+        let tags = normalize_tags(item.tags);
+
+        if let Some(existing) = existing {
+            let local_updated_at =
+                normalized_timestamp(existing.updated_at.as_deref(), &existing.created_at);
+            if updated_at < local_updated_at {
+                counts.conflicts.push(format!(
+                    "Kept local changes for {uuid} because the remote version was older."
+                ));
+                continue;
+            }
+            let local_tags = load_entry_tags(connection, existing.id)?;
+            if entry_changed(
+                &existing,
+                &text,
+                &content_format,
+                title.as_deref(),
+                summary.as_deref(),
+                mood.as_deref(),
+                item.starred,
+                item.pinned,
+                item.hidden,
+                &tags,
+                &local_tags,
+            ) {
+                update_entry_for_sync(
+                    connection,
+                    existing.id,
+                    &text,
+                    &content_format,
+                    title.as_deref(),
+                    summary.as_deref(),
+                    mood.as_deref(),
+                    item.starred,
+                    item.pinned,
+                    item.hidden,
+                    &updated_at,
+                )?;
+                replace_entry_tags(connection, existing.id, &tags)?;
+                counts.updated += 1;
+            }
+        } else if !entry_exists_by_created_text(connection, &created_at, &text)? {
+            let entry_id = insert_entry_for_sync(
+                connection,
+                &uuid,
+                &created_at,
+                &updated_at,
+                &text,
+                &content_format,
+                title.as_deref(),
+                summary.as_deref(),
+                mood.as_deref(),
+                item.starred,
+                item.pinned,
+                item.hidden,
+            )?;
+            replace_entry_tags(connection, entry_id, &tags)?;
+            counts.imported += 1;
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct ExistingEntry {
+    id: i64,
+    created_at: String,
+    updated_at: Option<String>,
+    text: String,
+    content_format: String,
+    title: Option<String>,
+    summary: Option<String>,
+    mood: Option<String>,
+    starred: bool,
+    pinned: bool,
+    hidden: bool,
+}
+
+fn entry_changed(
+    existing: &ExistingEntry,
+    text: &str,
+    content_format: &str,
+    title: Option<&str>,
+    summary: Option<&str>,
+    mood: Option<&str>,
+    starred: bool,
+    pinned: bool,
+    hidden: bool,
+    tags: &[String],
+    local_tags: &[String],
+) -> bool {
+    existing.text != text
+        || normalize_content_format(Some(&existing.content_format)) != content_format
+        || existing.title.as_deref() != title
+        || existing.summary.as_deref() != summary
+        || existing.mood.as_deref() != mood
+        || existing.starred != starred
+        || existing.pinned != pinned
+        || existing.hidden != hidden
+        || local_tags != tags
+}
+
+fn insert_entry_for_sync(
+    connection: &Connection,
+    uuid: &str,
+    created_at: &str,
+    updated_at: &str,
+    text: &str,
+    content_format: &str,
+    title: Option<&str>,
+    summary: Option<&str>,
+    mood: Option<&str>,
+    starred: bool,
+    pinned: bool,
+    hidden: bool,
+) -> Result<i64> {
+    let text_plain = build_text_plain(text);
+    connection.execute(
+        "INSERT INTO entries
+            (uuid, created_at, updated_at, text, text_plain, content_format,
+             title, summary, mood, starred, pinned, hidden)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![
+            uuid,
+            created_at,
+            updated_at,
+            text,
+            text_plain,
+            content_format,
+            title,
+            summary,
+            mood,
+            bool_to_int(starred),
+            bool_to_int(pinned),
+            bool_to_int(hidden),
+        ],
+    )?;
+    let entry_id = connection.last_insert_rowid();
+    refresh_fts_for_entry(connection, entry_id, &text_plain)?;
+    Ok(entry_id)
+}
+
+fn update_entry_for_sync(
+    connection: &Connection,
+    entry_id: i64,
+    text: &str,
+    content_format: &str,
+    title: Option<&str>,
+    summary: Option<&str>,
+    mood: Option<&str>,
+    starred: bool,
+    pinned: bool,
+    hidden: bool,
+    updated_at: &str,
+) -> Result<()> {
+    let text_plain = build_text_plain(text);
+    connection.execute(
+        "UPDATE entries
+         SET text = ?1,
+             text_plain = ?2,
+             content_format = ?3,
+             title = ?4,
+             summary = ?5,
+             mood = ?6,
+             starred = ?7,
+             pinned = ?8,
+             hidden = ?9,
+             updated_at = ?10
+         WHERE id = ?11",
+        params![
+            text,
+            text_plain,
+            content_format,
+            title,
+            summary,
+            mood,
+            bool_to_int(starred),
+            bool_to_int(pinned),
+            bool_to_int(hidden),
+            updated_at,
+            entry_id,
+        ],
+    )?;
+    refresh_fts_for_entry(connection, entry_id, &text_plain)?;
+    Ok(())
+}
+
+fn delete_entry_for_sync(
+    connection: &Connection,
+    entry_id: i64,
+    uuid: &str,
+    deleted_at: &str,
+) -> Result<()> {
+    record_entry_tombstone(connection, uuid, deleted_at)?;
+    delete_if_table_exists(connection, "entry_tags", "entry_id", entry_id)?;
+    delete_by_uuid_if_table_exists(connection, "entry_continuations", "child_entry_uuid", uuid)?;
+    delete_by_uuid_if_table_exists(connection, "entry_continuations", "parent_entry_uuid", uuid)?;
+    delete_by_uuid_if_table_exists(connection, "entry_thread_titles", "thread_root_uuid", uuid)?;
+    delete_by_uuid_if_table_exists(
+        connection,
+        "entry_thread_summaries",
+        "thread_root_uuid",
+        uuid,
+    )?;
+    delete_by_uuid_if_table_exists(connection, "plugin_entry_locations", "entry_uuid", uuid)?;
+    delete_by_uuid_if_table_exists(connection, "plugin_entry_media", "entry_uuid", uuid)?;
+    connection.execute("DELETE FROM entries WHERE id = ?1", [entry_id])?;
+    rebuild_entries_fts(connection)?;
+    Ok(())
+}
+
+fn record_entry_tombstone(connection: &Connection, uuid: &str, deleted_at: &str) -> Result<()> {
+    connection.execute(
+        "INSERT INTO sync_tombstones (uuid, deleted_at)
+         VALUES (?1, ?2)
+         ON CONFLICT(uuid)
+         DO UPDATE SET deleted_at = excluded.deleted_at",
+        params![uuid, deleted_at],
+    )?;
+    Ok(())
+}
+
+fn entry_tombstone_at(connection: &Connection, uuid: &str) -> Result<Option<String>> {
+    connection
+        .query_row(
+            "SELECT deleted_at FROM sync_tombstones WHERE uuid = ?1",
+            [uuid],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn entry_exists_by_created_text(
+    connection: &Connection,
+    created_at: &str,
+    text: &str,
+) -> Result<bool> {
+    Ok(connection
+        .query_row(
+            "SELECT 1 FROM entries WHERE created_at = ?1 AND text = ?2 LIMIT 1",
+            params![created_at, text],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+fn replace_entry_tags(connection: &Connection, entry_id: i64, tags: &[String]) -> Result<()> {
+    if !table_exists(connection, "tags")? || !table_exists(connection, "entry_tags")? {
+        return Ok(());
+    }
+    connection.execute("DELETE FROM entry_tags WHERE entry_id = ?1", [entry_id])?;
+    for tag in tags {
+        connection.execute("INSERT OR IGNORE INTO tags (name) VALUES (?1)", [tag])?;
+        if let Some(tag_id) = connection
+            .query_row("SELECT id FROM tags WHERE name = ?1", [tag], |row| {
+                row.get::<_, i64>(0)
+            })
+            .optional()?
+        {
+            connection.execute(
+                "INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?1, ?2)",
+                params![entry_id, tag_id],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn load_entry_tags(connection: &Connection, entry_id: i64) -> Result<Vec<String>> {
+    if !table_exists(connection, "tags")? || !table_exists(connection, "entry_tags")? {
+        return Ok(Vec::new());
+    }
+    let mut statement = connection.prepare(
+        "SELECT t.name
+         FROM tags t
+         JOIN entry_tags et ON et.tag_id = t.id
+         WHERE et.entry_id = ?1
+         ORDER BY lower(t.name) ASC",
+    )?;
+    let rows = statement.query_map([entry_id], |row| row.get::<_, String>(0))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn refresh_fts_for_entry(connection: &Connection, entry_id: i64, text_plain: &str) -> Result<()> {
+    if !table_exists(connection, "entries_fts")? {
+        return Ok(());
+    }
+    connection
+        .execute("DELETE FROM entries_fts WHERE rowid = ?1", [entry_id])
+        .ok();
+    connection
+        .execute(
+            "INSERT INTO entries_fts(rowid, text) VALUES (?1, ?2)",
+            params![entry_id, text_plain],
+        )
+        .ok();
+    Ok(())
+}
+
+fn rebuild_entries_fts(connection: &Connection) -> Result<()> {
+    if !table_exists(connection, "entries_fts")? {
+        return Ok(());
+    }
+    connection.execute("DELETE FROM entries_fts", [])?;
+    connection
+        .execute(
+            "INSERT INTO entries_fts(rowid, text)
+             SELECT id, COALESCE(NULLIF(text_plain, ''), text, '') FROM entries",
+            [],
+        )
+        .ok();
+    Ok(())
+}
+
+fn build_main_payload(
+    connection: &Connection,
+    mut extra: Map<String, JsonValue>,
+    remote_deleted_uuids: Vec<String>,
+) -> Result<MainSyncPayload> {
+    for reserved in ["version", "entries", "deleted_uuids"] {
+        extra.remove(reserved);
+    }
+    let mut statement = connection.prepare(
+        "SELECT id, uuid, created_at, updated_at, title, summary, text, content_format,
+                mood, starred, pinned, hidden
+         FROM entries
+         ORDER BY datetime(created_at) ASC, id ASC",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(SyncEntry {
+            id: row.get(0)?,
+            uuid: row.get(1)?,
+            created_at: row.get(2)?,
+            updated_at: row.get(3)?,
+            title: row.get(4)?,
+            summary: row.get(5)?,
+            text: row.get(6)?,
+            content_format: row.get(7)?,
+            mood: row.get(8)?,
+            tags: Vec::new(),
+            starred: row.get::<_, i64>(9)? != 0,
+            pinned: row.get::<_, i64>(10)? != 0,
+            hidden: row.get::<_, i64>(11)? != 0,
+        })
+    })?;
+    let mut entries = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    for entry in entries.iter_mut() {
+        if let Some(id) = entry.id {
+            entry.tags = load_entry_tags(connection, id)?;
+        }
+    }
+
+    let mut deleted = remote_deleted_uuids
+        .into_iter()
+        .filter_map(|uuid| normalize_string(Some(uuid)))
+        .collect::<HashSet<_>>();
+    if table_exists(connection, "sync_tombstones")? {
+        let mut statement = connection.prepare("SELECT uuid FROM sync_tombstones")?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        for row in rows {
+            deleted.insert(row?);
+        }
+    }
+    let mut deleted_uuids = deleted.into_iter().collect::<Vec<_>>();
+    deleted_uuids.sort();
+
+    Ok(MainSyncPayload {
+        version: Some(4),
+        entries,
+        deleted_uuids,
+        extra,
+    })
+}
+
+fn ensure_image_sync_schema(connection: &Connection) -> Result<()> {
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS plugin_media_assets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            hash TEXT NOT NULL UNIQUE,
+            mime_type TEXT NOT NULL,
+            bytes INTEGER NOT NULL,
+            width INTEGER NOT NULL,
+            height INTEGER NOT NULL,
+            storage_backend TEXT NOT NULL,
+            storage_key TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            deleted_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS plugin_entry_media (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_uuid TEXT NOT NULL,
+            media_id INTEGER NOT NULL,
+            position INTEGER NOT NULL DEFAULT 0,
+            caption TEXT,
+            alt_text TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (entry_uuid) REFERENCES entries(uuid) ON DELETE CASCADE,
+            FOREIGN KEY (media_id) REFERENCES plugin_media_assets(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS sync_image_tombstones (
+            entry_uuid TEXT NOT NULL,
+            asset_hash TEXT NOT NULL,
+            position INTEGER NOT NULL DEFAULT 0,
+            caption TEXT,
+            alt_text TEXT,
+            deleted_at TEXT NOT NULL,
+            PRIMARY KEY (entry_uuid, asset_hash, position, caption, alt_text)
+        );
+        CREATE INDEX IF NOT EXISTS idx_plugin_media_assets_hash ON plugin_media_assets(hash);
+        CREATE INDEX IF NOT EXISTS idx_plugin_entry_media_entry_uuid ON plugin_entry_media(entry_uuid);
+        CREATE INDEX IF NOT EXISTS idx_plugin_entry_media_media_id ON plugin_entry_media(media_id);
+        CREATE INDEX IF NOT EXISTS idx_plugin_entry_media_position ON plugin_entry_media(entry_uuid, position);
+        ",
+    )?;
+    Ok(())
+}
+
+fn apply_images_payload(
+    connection: &Connection,
+    payload: &ImageSyncPayload,
+    counts: &mut SyncCounts,
+) -> Result<()> {
+    if payload.assets.is_empty()
+        && payload.attachments.is_empty()
+        && payload.deleted_attachments.is_empty()
+    {
+        return Ok(());
+    }
+
+    ensure_image_sync_schema(connection)?;
+    let now = current_timestamp_minutes();
+    let mut assets_added = 0;
+    let mut attachments_added = 0;
+    let mut attachments_removed = 0;
+
+    for asset in payload.assets.iter() {
+        let Some(hash) = normalize_string(Some(asset.hash.clone())) else {
+            continue;
+        };
+        let Some(mime_type) = normalize_string(Some(asset.mime_type.clone())) else {
+            continue;
+        };
+        let Some(storage_backend) = normalize_string(Some(asset.storage_backend.clone())) else {
+            continue;
+        };
+        let Some(storage_key) = normalize_string(Some(asset.storage_key.clone())) else {
+            continue;
+        };
+        if asset.bytes <= 0 || asset.width <= 0 || asset.height <= 0 {
+            continue;
+        }
+        let created_at = normalized_timestamp(Some(&asset.created_at), &now);
+        let deleted_at = asset
+            .deleted_at
+            .as_deref()
+            .and_then(|value| normalize_optional_text(Some(value)));
+
+        let existing = connection
+            .query_row(
+                "SELECT id, deleted_at FROM plugin_media_assets WHERE hash = ?1",
+                [&hash],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .optional()?;
+
+        if existing.is_none() {
+            connection.execute(
+                "INSERT INTO plugin_media_assets
+                    (hash, mime_type, bytes, width, height, storage_backend, storage_key, created_at, deleted_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    hash,
+                    mime_type,
+                    asset.bytes,
+                    asset.width,
+                    asset.height,
+                    storage_backend,
+                    storage_key,
+                    created_at,
+                    deleted_at
+                ],
+            )?;
+            assets_added += 1;
+        } else {
+            let merged_deleted_at = match (existing.and_then(|item| item.1), deleted_at.clone()) {
+                (Some(local), None) => Some(local),
+                (_, remote) => remote,
+            };
+            connection.execute(
+                "UPDATE plugin_media_assets
+                 SET mime_type = ?1, bytes = ?2, width = ?3, height = ?4,
+                     storage_backend = ?5, storage_key = ?6, created_at = ?7, deleted_at = ?8
+                 WHERE hash = ?9",
+                params![
+                    mime_type,
+                    asset.bytes,
+                    asset.width,
+                    asset.height,
+                    storage_backend,
+                    storage_key,
+                    created_at,
+                    merged_deleted_at,
+                    hash
+                ],
+            )?;
+        }
+    }
+
+    for deleted in payload.deleted_attachments.iter() {
+        let Some(entry_uuid) = normalize_string(Some(deleted.entry_uuid.clone())) else {
+            continue;
+        };
+        let Some(asset_hash) = normalize_string(Some(deleted.asset_hash.clone())) else {
+            continue;
+        };
+        let position = deleted.position.max(0);
+        let caption = normalize_string(deleted.caption.clone()).unwrap_or_default();
+        let alt_text = normalize_string(deleted.alt_text.clone()).unwrap_or_default();
+        let deleted_at = normalized_timestamp(Some(&deleted.deleted_at), &now);
+
+        connection.execute(
+            "INSERT INTO sync_image_tombstones
+                (entry_uuid, asset_hash, position, caption, alt_text, deleted_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(entry_uuid, asset_hash, position, caption, alt_text)
+             DO UPDATE SET deleted_at =
+                CASE WHEN excluded.deleted_at > deleted_at THEN excluded.deleted_at ELSE deleted_at END",
+            params![entry_uuid, asset_hash, position, caption, alt_text, deleted_at],
+        )?;
+
+        let mut statement = connection.prepare(
+            "SELECT em.id, em.media_id
+             FROM plugin_entry_media em
+             JOIN plugin_media_assets ma ON ma.id = em.media_id
+             WHERE em.entry_uuid = ?1
+               AND ma.hash = ?2
+               AND em.position = ?3
+               AND COALESCE(em.caption, '') = ?4
+               AND COALESCE(em.alt_text, '') = ?5",
+        )?;
+        let rows = statement
+            .query_map(
+                params![entry_uuid, asset_hash, position, caption, alt_text],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        for (attachment_id, media_id) in rows {
+            connection.execute(
+                "DELETE FROM plugin_entry_media WHERE id = ?1",
+                [attachment_id],
+            )?;
+            let remaining = connection.query_row(
+                "SELECT COUNT(*) FROM plugin_entry_media WHERE media_id = ?1",
+                [media_id],
+                |row| row.get::<_, i64>(0),
+            )?;
+            if remaining == 0 {
+                connection.execute(
+                    "UPDATE plugin_media_assets SET deleted_at = ?1 WHERE id = ?2",
+                    params![deleted_at, media_id],
+                )?;
+            }
+            attachments_removed += 1;
+        }
+    }
+
+    for attachment in payload.attachments.iter() {
+        let Some(entry_uuid) = normalize_string(Some(attachment.entry_uuid.clone())) else {
+            continue;
+        };
+        let Some(asset_hash) = normalize_string(Some(attachment.asset_hash.clone())) else {
+            continue;
+        };
+        if !entry_exists(connection, &entry_uuid)? {
+            continue;
+        }
+        let Some(media_id) = connection
+            .query_row(
+                "SELECT id FROM plugin_media_assets WHERE hash = ?1",
+                [&asset_hash],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+        else {
+            continue;
+        };
+        let position = attachment.position.max(0);
+        let caption = normalize_string(attachment.caption.clone()).unwrap_or_default();
+        let alt_text = normalize_string(attachment.alt_text.clone()).unwrap_or_default();
+        let created_at = normalized_timestamp(Some(&attachment.created_at), &now);
+
+        let tombstoned = connection
+            .query_row(
+                "SELECT 1 FROM sync_image_tombstones
+                 WHERE entry_uuid = ?1 AND asset_hash = ?2 AND position = ?3
+                   AND caption = ?4 AND alt_text = ?5",
+                params![entry_uuid, asset_hash, position, caption, alt_text],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if tombstoned {
+            continue;
+        }
+
+        let deleted_asset = connection
+            .query_row(
+                "SELECT id, deleted_at FROM plugin_media_assets
+                 WHERE hash = ?1 AND deleted_at IS NOT NULL",
+                [&asset_hash],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        if let Some((deleted_media_id, asset_deleted_at)) = deleted_asset {
+            let existing_link = connection
+                .query_row(
+                    "SELECT 1 FROM plugin_entry_media WHERE entry_uuid = ?1 AND media_id = ?2",
+                    params![entry_uuid, deleted_media_id],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            if !existing_link {
+                connection.execute(
+                    "INSERT OR IGNORE INTO sync_image_tombstones
+                        (entry_uuid, asset_hash, position, caption, alt_text, deleted_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        entry_uuid,
+                        asset_hash,
+                        position,
+                        caption,
+                        alt_text,
+                        asset_deleted_at
+                    ],
+                )?;
+                continue;
+            }
+        }
+
+        let existing_attachment = connection
+            .query_row(
+                "SELECT 1
+                 FROM plugin_entry_media em
+                 JOIN plugin_media_assets ma ON ma.id = em.media_id
+                 WHERE em.entry_uuid = ?1
+                   AND ma.hash = ?2
+                   AND em.position = ?3
+                   AND COALESCE(em.caption, '') = ?4
+                   AND COALESCE(em.alt_text, '') = ?5",
+                params![entry_uuid, asset_hash, position, caption, alt_text],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if existing_attachment {
+            continue;
+        }
+
+        connection.execute(
+            "INSERT INTO plugin_entry_media (entry_uuid, media_id, position, caption, alt_text, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![entry_uuid, media_id, position, caption, alt_text, created_at],
+        )?;
+        attachments_added += 1;
+    }
+
+    if assets_added + attachments_added + attachments_removed > 0 {
+        counts.parts.push(format!(
+            "images: {assets_added} assets, {attachments_added} links, {attachments_removed} removed"
+        ));
+    }
+    Ok(())
+}
+
+fn build_images_payload(connection: &Connection) -> Result<ImageSyncPayload> {
+    if !table_exists(connection, "plugin_media_assets")?
+        || !table_exists(connection, "plugin_entry_media")?
+    {
+        return Ok(ImageSyncPayload::default());
+    }
+    ensure_image_sync_schema(connection)?;
+
+    let mut asset_statement = connection.prepare(
+        "SELECT DISTINCT ma.hash, ma.mime_type, ma.bytes, ma.width, ma.height,
+                ma.storage_backend, ma.storage_key, ma.created_at, ma.deleted_at
+         FROM plugin_media_assets ma
+         JOIN plugin_entry_media em ON em.media_id = ma.id
+         ORDER BY ma.hash ASC",
+    )?;
+    let assets = asset_statement
+        .query_map([], |row| {
+            Ok(ImageAssetPayload {
+                hash: row.get(0)?,
+                mime_type: row.get(1)?,
+                bytes: row.get(2)?,
+                width: row.get(3)?,
+                height: row.get(4)?,
+                storage_backend: row.get(5)?,
+                storage_key: row.get(6)?,
+                created_at: row.get(7)?,
+                deleted_at: row.get(8)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let mut attachment_statement = connection.prepare(
+        "SELECT em.entry_uuid, ma.hash, em.position, em.caption, em.alt_text, em.created_at
+         FROM plugin_entry_media em
+         JOIN plugin_media_assets ma ON ma.id = em.media_id
+         ORDER BY em.entry_uuid ASC, em.position ASC, em.id ASC",
+    )?;
+    let attachments = attachment_statement
+        .query_map([], |row| {
+            Ok(ImageAttachmentPayload {
+                entry_uuid: row.get(0)?,
+                asset_hash: row.get(1)?,
+                position: row.get(2)?,
+                caption: row.get(3)?,
+                alt_text: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let mut deleted_statement = connection.prepare(
+        "SELECT entry_uuid, asset_hash, position, COALESCE(caption, ''), COALESCE(alt_text, ''), deleted_at
+         FROM sync_image_tombstones
+         ORDER BY deleted_at ASC, entry_uuid ASC, asset_hash ASC, position ASC",
+    )?;
+    let deleted_attachments = deleted_statement
+        .query_map([], |row| {
+            Ok(DeletedImageAttachment {
+                entry_uuid: row.get(0)?,
+                asset_hash: row.get(1)?,
+                position: row.get(2)?,
+                caption: Some(row.get(3)?),
+                alt_text: Some(row.get(4)?),
+                deleted_at: row.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    Ok(ImageSyncPayload {
+        assets,
+        attachments,
+        deleted_attachments,
+    })
+}
+
+fn ensure_location_sync_schema(connection: &Connection) -> Result<()> {
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS plugin_entry_locations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_uuid TEXT NOT NULL UNIQUE,
+            latitude REAL NOT NULL,
+            longitude REAL NOT NULL,
+            place_name TEXT,
+            place_details TEXT,
+            source TEXT NOT NULL DEFAULT 'auto',
+            weather_temp_c REAL,
+            weather_temp_f REAL,
+            weather_condition TEXT,
+            weather_icon TEXT,
+            weather_humidity INTEGER,
+            weather_wind_kph REAL,
+            weather_fetched_at TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (entry_uuid) REFERENCES entries(uuid) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS sync_location_tombstones (
+            entry_uuid TEXT NOT NULL PRIMARY KEY,
+            deleted_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_plugin_entry_locations_entry_uuid
+            ON plugin_entry_locations(entry_uuid);
+        ",
+    )?;
+    Ok(())
+}
+
+fn apply_locations_payload(
+    connection: &Connection,
+    payload: &LocationSyncPayload,
+    counts: &mut SyncCounts,
+) -> Result<()> {
+    if !payload.supported && payload.locations.is_empty() && payload.deleted_locations.is_empty() {
+        return Ok(());
+    }
+
+    ensure_location_sync_schema(connection)?;
+    let now = current_timestamp_minutes();
+    let mut added = 0;
+    let mut updated = 0;
+    let mut removed = 0;
+
+    for deleted in payload.deleted_locations.iter() {
+        let Some(entry_uuid) = normalize_string(Some(deleted.entry_uuid.clone())) else {
+            continue;
+        };
+        let deleted_at = normalized_timestamp(Some(&deleted.deleted_at), &now);
+        let existing_created_at = connection
+            .query_row(
+                "SELECT created_at FROM plugin_entry_locations WHERE entry_uuid = ?1",
+                [&entry_uuid],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if existing_created_at
+            .as_deref()
+            .is_some_and(|created_at| created_at > deleted_at.as_str())
+        {
+            continue;
+        }
+        connection.execute(
+            "INSERT OR REPLACE INTO sync_location_tombstones (entry_uuid, deleted_at)
+             VALUES (?1, ?2)",
+            params![entry_uuid, deleted_at],
+        )?;
+        removed += connection.execute(
+            "DELETE FROM plugin_entry_locations WHERE entry_uuid = ?1",
+            [&entry_uuid],
+        )? as i64;
+    }
+
+    for location in payload.locations.iter() {
+        let Some(entry_uuid) = normalize_string(Some(location.entry_uuid.clone())) else {
+            continue;
+        };
+        if !entry_exists(connection, &entry_uuid)? {
+            continue;
+        }
+        if !location.latitude.is_finite() || !location.longitude.is_finite() {
+            continue;
+        }
+        let source =
+            normalize_string(Some(location.source.clone())).unwrap_or_else(|| "auto".to_string());
+        let created_at = normalized_timestamp(Some(&location.created_at), &now);
+        if let Some(tombstone_at) = location_tombstone_at(connection, &entry_uuid)? {
+            if created_at <= tombstone_at {
+                continue;
+            }
+            connection.execute(
+                "DELETE FROM sync_location_tombstones WHERE entry_uuid = ?1",
+                [&entry_uuid],
+            )?;
+        }
+
+        let existing = connection
+            .query_row(
+                "SELECT id, created_at, weather_fetched_at FROM plugin_entry_locations WHERE entry_uuid = ?1",
+                [&entry_uuid],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+
+        if existing.is_none() {
+            connection.execute(
+                "INSERT INTO plugin_entry_locations (
+                    entry_uuid, latitude, longitude, place_name, place_details, source,
+                    weather_temp_c, weather_temp_f, weather_condition, weather_icon,
+                    weather_humidity, weather_wind_kph, weather_fetched_at, created_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                params![
+                    entry_uuid,
+                    location.latitude,
+                    location.longitude,
+                    location.place_name,
+                    location.place_details,
+                    source,
+                    location.weather_temp_c,
+                    location.weather_temp_f,
+                    location.weather_condition,
+                    location.weather_icon,
+                    location.weather_humidity,
+                    location.weather_wind_kph,
+                    location.weather_fetched_at,
+                    created_at
+                ],
+            )?;
+            added += 1;
+        } else if let Some((_, local_created_at, local_weather_at)) = existing {
+            let remote_weather_at = location.weather_fetched_at.as_deref().unwrap_or("");
+            let local_weather_at = local_weather_at.as_deref().unwrap_or("");
+            let should_update = created_at > local_created_at
+                || (created_at == local_created_at && remote_weather_at > local_weather_at);
+            if should_update {
+                connection.execute(
+                    "UPDATE plugin_entry_locations
+                     SET latitude = ?1, longitude = ?2, place_name = ?3, place_details = ?4,
+                         source = ?5, weather_temp_c = ?6, weather_temp_f = ?7,
+                         weather_condition = ?8, weather_icon = ?9, weather_humidity = ?10,
+                         weather_wind_kph = ?11, weather_fetched_at = ?12, created_at = ?13
+                     WHERE entry_uuid = ?14",
+                    params![
+                        location.latitude,
+                        location.longitude,
+                        location.place_name,
+                        location.place_details,
+                        source,
+                        location.weather_temp_c,
+                        location.weather_temp_f,
+                        location.weather_condition,
+                        location.weather_icon,
+                        location.weather_humidity,
+                        location.weather_wind_kph,
+                        location.weather_fetched_at,
+                        created_at,
+                        entry_uuid
+                    ],
+                )?;
+                updated += 1;
+            }
+        }
+    }
+
+    if added + updated + removed > 0 {
+        counts.parts.push(format!(
+            "locations: {added} added, {updated} updated, {removed} removed"
+        ));
+    }
+    Ok(())
+}
+
+fn build_locations_payload(connection: &Connection) -> Result<LocationSyncPayload> {
+    if !table_exists(connection, "plugin_entry_locations")? {
+        return Ok(LocationSyncPayload {
+            supported: false,
+            ..LocationSyncPayload::default()
+        });
+    }
+    ensure_location_sync_schema(connection)?;
+
+    let mut statement = connection.prepare(
+        "SELECT entry_uuid, latitude, longitude, place_name, place_details, source,
+                weather_temp_c, weather_temp_f, weather_condition, weather_icon,
+                weather_humidity, weather_wind_kph, weather_fetched_at, created_at
+         FROM plugin_entry_locations
+         ORDER BY entry_uuid ASC",
+    )?;
+    let locations = statement
+        .query_map([], |row| {
+            Ok(LocationPayload {
+                entry_uuid: row.get(0)?,
+                latitude: row.get(1)?,
+                longitude: row.get(2)?,
+                place_name: row.get(3)?,
+                place_details: row.get(4)?,
+                source: row.get(5)?,
+                weather_temp_c: row.get(6)?,
+                weather_temp_f: row.get(7)?,
+                weather_condition: row.get(8)?,
+                weather_icon: row.get(9)?,
+                weather_humidity: row.get(10)?,
+                weather_wind_kph: row.get(11)?,
+                weather_fetched_at: row.get(12)?,
+                created_at: row.get(13)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let mut deleted_statement = connection.prepare(
+        "SELECT st.entry_uuid, st.deleted_at
+         FROM sync_location_tombstones st
+         WHERE NOT EXISTS (
+            SELECT 1 FROM plugin_entry_locations pel WHERE pel.entry_uuid = st.entry_uuid
+         )
+         ORDER BY st.deleted_at ASC, st.entry_uuid ASC",
+    )?;
+    let deleted_locations = deleted_statement
+        .query_map([], |row| {
+            Ok(DeletedLocation {
+                entry_uuid: row.get(0)?,
+                deleted_at: row.get(1)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    Ok(LocationSyncPayload {
+        supported: true,
+        locations,
+        deleted_locations,
+    })
+}
+
+fn ensure_library_sync_schema(connection: &Connection) -> Result<()> {
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS library_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            description TEXT,
+            intro_text TEXT,
+            sections_json TEXT NOT NULL DEFAULT '[]',
+            is_builtin INTEGER NOT NULL DEFAULT 0 CHECK (is_builtin IN (0, 1)),
+            is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS library_prompts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug TEXT NOT NULL UNIQUE,
+            prompt_text TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'general',
+            tags_json TEXT NOT NULL DEFAULT '[]',
+            is_builtin INTEGER NOT NULL DEFAULT 0 CHECK (is_builtin IN (0, 1)),
+            is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sync_template_tombstones (
+            slug TEXT PRIMARY KEY,
+            deleted_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sync_prompt_tombstones (
+            slug TEXT PRIMARY KEY,
+            deleted_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_library_templates_active ON library_templates(is_active, slug);
+        CREATE INDEX IF NOT EXISTS idx_library_prompts_active ON library_prompts(is_active, slug);
+        ",
+    )?;
+    Ok(())
+}
+
+fn apply_library_payload(
+    connection: &Connection,
+    payload: &LibrarySyncPayload,
+    counts: &mut SyncCounts,
+) -> Result<()> {
+    if payload.templates.is_empty()
+        && payload.prompts.is_empty()
+        && payload.deleted_templates.is_empty()
+        && payload.deleted_prompts.is_empty()
+    {
+        return Ok(());
+    }
+
+    ensure_library_sync_schema(connection)?;
+    let now = current_timestamp_seconds();
+    let mut templates_added = 0;
+    let mut templates_updated = 0;
+    let mut templates_removed = 0;
+    let mut prompts_added = 0;
+    let mut prompts_updated = 0;
+    let mut prompts_removed = 0;
+
+    for item in payload.templates.iter() {
+        let Some(slug) = normalize_slug(&item.slug) else {
+            continue;
+        };
+        let Some(name) = normalize_string(Some(item.name.clone())) else {
+            continue;
+        };
+        let incoming_updated = normalized_timestamp(Some(&item.updated_at), &now);
+        let created_at = normalized_timestamp(Some(&item.created_at), &incoming_updated);
+        let sections_json = serde_json::to_string(&normalized_text_list(&item.sections))?;
+        let current = library_template_row(connection, &slug)?;
+
+        if current.is_none() {
+            connection.execute(
+                "INSERT INTO library_templates
+                    (slug, name, description, intro_text, sections_json, is_builtin, is_active, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7, ?8)",
+                params![
+                    slug,
+                    name,
+                    item.description,
+                    item.intro_text,
+                    sections_json,
+                    bool_to_int(item.is_active),
+                    created_at,
+                    incoming_updated
+                ],
+            )?;
+            connection.execute(
+                "DELETE FROM sync_template_tombstones WHERE slug = ?1",
+                [&slug],
+            )?;
+            templates_added += 1;
+            continue;
+        }
+
+        let Some((is_builtin, local_created, local_updated)) = current else {
+            continue;
+        };
+        if is_builtin {
+            continue;
+        }
+        let local_updated = normalized_timestamp(Some(&local_updated), &local_created);
+        if incoming_updated < local_updated {
+            continue;
+        }
+        connection.execute(
+            "UPDATE library_templates
+             SET name = ?1, description = ?2, intro_text = ?3, sections_json = ?4,
+                 is_active = ?5, updated_at = ?6
+             WHERE slug = ?7",
+            params![
+                name,
+                item.description,
+                item.intro_text,
+                sections_json,
+                bool_to_int(item.is_active),
+                incoming_updated,
+                slug
+            ],
+        )?;
+        connection.execute(
+            "DELETE FROM sync_template_tombstones WHERE slug = ?1",
+            [&slug],
+        )?;
+        templates_updated += 1;
+    }
+
+    for item in payload.prompts.iter() {
+        let Some(slug) = normalize_slug(&item.slug) else {
+            continue;
+        };
+        let Some(prompt_text) = normalize_string(Some(item.prompt_text.clone())) else {
+            continue;
+        };
+        let incoming_updated = normalized_timestamp(Some(&item.updated_at), &now);
+        let created_at = normalized_timestamp(Some(&item.created_at), &incoming_updated);
+        let tags_json = serde_json::to_string(&normalize_tags(item.tags.clone()))?;
+        let category =
+            normalize_string(Some(item.category.clone())).unwrap_or_else(|| "general".to_string());
+        let current = library_prompt_row(connection, &slug)?;
+
+        if current.is_none() {
+            connection.execute(
+                "INSERT INTO library_prompts
+                    (slug, prompt_text, category, tags_json, is_builtin, is_active, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7)",
+                params![
+                    slug,
+                    prompt_text,
+                    category,
+                    tags_json,
+                    bool_to_int(item.is_active),
+                    created_at,
+                    incoming_updated
+                ],
+            )?;
+            connection.execute(
+                "DELETE FROM sync_prompt_tombstones WHERE slug = ?1",
+                [&slug],
+            )?;
+            prompts_added += 1;
+            continue;
+        }
+
+        let Some((is_builtin, local_created, local_updated)) = current else {
+            continue;
+        };
+        if is_builtin {
+            continue;
+        }
+        let local_updated = normalized_timestamp(Some(&local_updated), &local_created);
+        if incoming_updated < local_updated {
+            continue;
+        }
+        connection.execute(
+            "UPDATE library_prompts
+             SET prompt_text = ?1, category = ?2, tags_json = ?3, is_active = ?4, updated_at = ?5
+             WHERE slug = ?6",
+            params![
+                prompt_text,
+                category,
+                tags_json,
+                bool_to_int(item.is_active),
+                incoming_updated,
+                slug
+            ],
+        )?;
+        connection.execute(
+            "DELETE FROM sync_prompt_tombstones WHERE slug = ?1",
+            [&slug],
+        )?;
+        prompts_updated += 1;
+    }
+
+    for item in payload.deleted_templates.iter() {
+        let Some(slug) = normalize_slug(&item.slug) else {
+            continue;
+        };
+        let deleted_at = normalized_timestamp(Some(&item.deleted_at), &now);
+        if let Some((is_builtin, local_created, local_updated)) =
+            library_template_row(connection, &slug)?
+        {
+            let local_updated = normalized_timestamp(Some(&local_updated), &local_created);
+            if !is_builtin && deleted_at >= local_updated {
+                templates_removed += connection
+                    .execute("DELETE FROM library_templates WHERE slug = ?1", [&slug])?
+                    as i64;
+            }
+        }
+        connection.execute(
+            "INSERT OR REPLACE INTO sync_template_tombstones (slug, deleted_at) VALUES (?1, ?2)",
+            params![slug, deleted_at],
+        )?;
+    }
+
+    for item in payload.deleted_prompts.iter() {
+        let Some(slug) = normalize_slug(&item.slug) else {
+            continue;
+        };
+        let deleted_at = normalized_timestamp(Some(&item.deleted_at), &now);
+        if let Some((is_builtin, local_created, local_updated)) =
+            library_prompt_row(connection, &slug)?
+        {
+            let local_updated = normalized_timestamp(Some(&local_updated), &local_created);
+            if !is_builtin && deleted_at >= local_updated {
+                prompts_removed += connection
+                    .execute("DELETE FROM library_prompts WHERE slug = ?1", [&slug])?
+                    as i64;
+            }
+        }
+        connection.execute(
+            "INSERT OR REPLACE INTO sync_prompt_tombstones (slug, deleted_at) VALUES (?1, ?2)",
+            params![slug, deleted_at],
+        )?;
+    }
+
+    let changed = templates_added
+        + templates_updated
+        + templates_removed
+        + prompts_added
+        + prompts_updated
+        + prompts_removed;
+    if changed > 0 {
+        counts.parts.push(format!(
+            "library: {templates_added}/{templates_updated}/{templates_removed} templates, {prompts_added}/{prompts_updated}/{prompts_removed} prompts"
+        ));
+    }
+    Ok(())
+}
+
+fn build_library_payload(connection: &Connection) -> Result<LibrarySyncPayload> {
+    if !table_exists(connection, "library_templates")?
+        && !table_exists(connection, "library_prompts")?
+    {
+        return Ok(LibrarySyncPayload::default());
+    }
+    ensure_library_sync_schema(connection)?;
+
+    let mut template_statement = connection.prepare(
+        "SELECT slug, name, COALESCE(description, ''), COALESCE(intro_text, ''),
+                sections_json, is_active, created_at, updated_at
+         FROM library_templates
+         WHERE is_builtin = 0
+         ORDER BY lower(slug) ASC",
+    )?;
+    let templates = template_statement
+        .query_map([], |row| {
+            Ok(LibraryTemplatePayload {
+                slug: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                intro_text: row.get(3)?,
+                sections: json_string_list(row.get::<_, String>(4)?),
+                is_active: row.get::<_, i64>(5)? != 0,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let mut prompt_statement = connection.prepare(
+        "SELECT slug, prompt_text, category, tags_json, is_active, created_at, updated_at
+         FROM library_prompts
+         WHERE is_builtin = 0
+         ORDER BY lower(slug) ASC",
+    )?;
+    let prompts = prompt_statement
+        .query_map([], |row| {
+            Ok(LibraryPromptPayload {
+                slug: row.get(0)?,
+                prompt_text: row.get(1)?,
+                category: row.get(2)?,
+                tags: json_string_list(row.get::<_, String>(3)?),
+                is_active: row.get::<_, i64>(4)? != 0,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let deleted_templates = query_deleted_library_items(
+        connection,
+        "SELECT slug, deleted_at FROM sync_template_tombstones ORDER BY deleted_at ASC, slug ASC",
+    )?;
+    let deleted_prompts = query_deleted_library_items(
+        connection,
+        "SELECT slug, deleted_at FROM sync_prompt_tombstones ORDER BY deleted_at ASC, slug ASC",
+    )?;
+
+    Ok(LibrarySyncPayload {
+        templates,
+        prompts,
+        deleted_templates,
+        deleted_prompts,
+    })
+}
+
+fn apply_threads_payload(
+    connection: &Connection,
+    payload: &ThreadSyncPayload,
+    counts: &mut SyncCounts,
+) -> Result<()> {
+    let mut deleted_continuations = payload.deleted_continuations.clone();
+    deleted_continuations.sort_by(|left, right| {
+        normalized_timestamp(Some(&left.deleted_at), "")
+            .cmp(&normalized_timestamp(Some(&right.deleted_at), ""))
+    });
+    for item in deleted_continuations {
+        let Some(child_uuid) = normalize_string(Some(item.child_entry_uuid)) else {
+            continue;
+        };
+        let deleted_at = normalized_timestamp(Some(&item.deleted_at), &current_timestamp_minutes());
+        let existing = continuation_row(connection, &child_uuid)?;
+        if let Some(existing) = existing {
+            let local_updated = normalized_timestamp(existing.updated_at.as_deref(), "");
+            if deleted_at >= local_updated {
+                connection.execute(
+                    "DELETE FROM entry_continuations WHERE child_entry_uuid = ?1",
+                    [&child_uuid],
+                )?;
+                record_continuation_tombstone(connection, &child_uuid, &deleted_at)?;
+                counts.deleted += 1;
+            }
+        } else {
+            record_continuation_tombstone(connection, &child_uuid, &deleted_at)?;
+        }
+    }
+
+    let mut continuations = payload.continuations.clone();
+    continuations.sort_by(|left, right| {
+        normalized_timestamp(Some(&left.updated_at), "")
+            .cmp(&normalized_timestamp(Some(&right.updated_at), ""))
+            .then_with(|| left.child_entry_uuid.cmp(&right.child_entry_uuid))
+    });
+    for item in continuations {
+        let Some(child_uuid) = normalize_string(Some(item.child_entry_uuid)) else {
+            continue;
+        };
+        let Some(parent_uuid) = normalize_string(Some(item.parent_entry_uuid)) else {
+            continue;
+        };
+        if child_uuid == parent_uuid
+            || !entry_uuid_exists(connection, &child_uuid)?
+            || !entry_uuid_exists(connection, &parent_uuid)?
+            || continuation_would_cycle(connection, &child_uuid, &parent_uuid)?
+        {
+            continue;
+        }
+        let updated_at = normalized_timestamp(Some(&item.updated_at), &current_timestamp_minutes());
+        if let Some(tombstone_at) = continuation_tombstone_at(connection, &child_uuid)? {
+            if tombstone_at >= updated_at {
+                continue;
+            }
+        }
+        let before = continuation_row(connection, &child_uuid)?;
+        if before
+            .as_ref()
+            .map(|row| normalized_timestamp(row.updated_at.as_deref(), "") > updated_at)
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        connection.execute(
+            "INSERT INTO entry_continuations (child_entry_uuid, parent_entry_uuid, updated_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(child_entry_uuid)
+             DO UPDATE SET parent_entry_uuid = excluded.parent_entry_uuid,
+                           updated_at = excluded.updated_at",
+            params![child_uuid, parent_uuid, updated_at],
+        )?;
+        connection.execute(
+            "DELETE FROM sync_entry_continuation_tombstones WHERE child_entry_uuid = ?1",
+            [&child_uuid],
+        )?;
+        if let Some(before) = before {
+            if before.parent_uuid != parent_uuid {
+                counts.updated += 1;
+            }
+        } else {
+            counts.imported += 1;
+        }
+    }
+
+    apply_thread_text_deletes(
+        connection,
+        "entry_thread_titles",
+        "title",
+        "sync_entry_thread_title_tombstones",
+        &payload.deleted_titles,
+        counts,
+    )?;
+    apply_thread_text_deletes(
+        connection,
+        "entry_thread_summaries",
+        "summary",
+        "sync_entry_thread_summary_tombstones",
+        &payload.deleted_summaries,
+        counts,
+    )?;
+    apply_thread_titles(connection, &payload.titles, counts)?;
+    apply_thread_summaries(connection, &payload.summaries, counts)?;
+    Ok(())
+}
+
+#[derive(Debug)]
+struct ExistingContinuation {
+    parent_uuid: String,
+    updated_at: Option<String>,
+}
+
+fn continuation_row(
+    connection: &Connection,
+    child_uuid: &str,
+) -> Result<Option<ExistingContinuation>> {
+    connection
+        .query_row(
+            "SELECT parent_entry_uuid, updated_at
+             FROM entry_continuations
+             WHERE child_entry_uuid = ?1",
+            [child_uuid],
+            |row| {
+                Ok(ExistingContinuation {
+                    parent_uuid: row.get(0)?,
+                    updated_at: row.get(1)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn record_continuation_tombstone(
+    connection: &Connection,
+    child_uuid: &str,
+    deleted_at: &str,
+) -> Result<()> {
+    connection.execute(
+        "INSERT INTO sync_entry_continuation_tombstones (child_entry_uuid, deleted_at)
+         VALUES (?1, ?2)
+         ON CONFLICT(child_entry_uuid)
+         DO UPDATE SET deleted_at = excluded.deleted_at",
+        params![child_uuid, deleted_at],
+    )?;
+    Ok(())
+}
+
+fn continuation_tombstone_at(connection: &Connection, child_uuid: &str) -> Result<Option<String>> {
+    connection
+        .query_row(
+            "SELECT deleted_at FROM sync_entry_continuation_tombstones WHERE child_entry_uuid = ?1",
+            [child_uuid],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn apply_thread_text_deletes(
+    connection: &Connection,
+    table: &str,
+    value_column: &str,
+    tombstone_table: &str,
+    items: &[DeletedThreadText],
+    counts: &mut SyncCounts,
+) -> Result<()> {
+    for item in items {
+        let Some(root_uuid) = normalize_string(Some(item.thread_root_uuid.clone())) else {
+            continue;
+        };
+        if !entry_uuid_exists(connection, &root_uuid)? {
+            continue;
+        }
+        let deleted_at = normalized_timestamp(Some(&item.deleted_at), &current_timestamp_minutes());
+        let local_updated_at = thread_text_updated_at(connection, table, &root_uuid)?;
+        if let Some(local_updated_at) = local_updated_at {
+            if deleted_at >= normalized_timestamp(Some(&local_updated_at), "") {
+                connection.execute(
+                    &format!("DELETE FROM {table} WHERE thread_root_uuid = ?1"),
+                    [&root_uuid],
+                )?;
+                record_thread_text_tombstone(connection, tombstone_table, &root_uuid, &deleted_at)?;
+                counts.deleted += 1;
+            }
+        } else {
+            let _ = value_column;
+            record_thread_text_tombstone(connection, tombstone_table, &root_uuid, &deleted_at)?;
+        }
+    }
+    Ok(())
+}
+
+fn apply_thread_titles(
+    connection: &Connection,
+    items: &[ThreadTitle],
+    counts: &mut SyncCounts,
+) -> Result<()> {
+    for item in items {
+        apply_thread_text_upsert(
+            connection,
+            "entry_thread_titles",
+            "title",
+            "sync_entry_thread_title_tombstones",
+            &item.thread_root_uuid,
+            &item.title,
+            &item.updated_at,
+            counts,
+        )?;
+    }
+    Ok(())
+}
+
+fn apply_thread_summaries(
+    connection: &Connection,
+    items: &[ThreadSummary],
+    counts: &mut SyncCounts,
+) -> Result<()> {
+    for item in items {
+        apply_thread_text_upsert(
+            connection,
+            "entry_thread_summaries",
+            "summary",
+            "sync_entry_thread_summary_tombstones",
+            &item.thread_root_uuid,
+            &item.summary,
+            &item.updated_at,
+            counts,
+        )?;
+    }
+    Ok(())
+}
+
+fn apply_thread_text_upsert(
+    connection: &Connection,
+    table: &str,
+    value_column: &str,
+    tombstone_table: &str,
+    root_uuid: &str,
+    value: &str,
+    updated_at: &str,
+    counts: &mut SyncCounts,
+) -> Result<()> {
+    let Some(root_uuid) = normalize_string(Some(root_uuid.to_string())) else {
+        return Ok(());
+    };
+    let Some(value) = normalize_string(Some(value.to_string())) else {
+        return Ok(());
+    };
+    if !entry_can_have_thread_text(connection, &root_uuid)? {
+        return Ok(());
+    }
+    let updated_at = normalized_timestamp(Some(updated_at), &current_timestamp_minutes());
+    if let Some(tombstone_at) = thread_text_tombstone_at(connection, tombstone_table, &root_uuid)? {
+        if tombstone_at >= updated_at {
+            return Ok(());
+        }
+    }
+    let local_updated_at = thread_text_updated_at(connection, table, &root_uuid)?;
+    if local_updated_at
+        .as_ref()
+        .map(|local| normalized_timestamp(Some(local), "") > updated_at)
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    connection.execute(
+        &format!(
+            "INSERT INTO {table} (thread_root_uuid, {value_column}, updated_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(thread_root_uuid)
+             DO UPDATE SET {value_column} = excluded.{value_column},
+                           updated_at = excluded.updated_at"
+        ),
+        params![root_uuid, value, updated_at],
+    )?;
+    connection.execute(
+        &format!("DELETE FROM {tombstone_table} WHERE thread_root_uuid = ?1"),
+        [&root_uuid],
+    )?;
+    if local_updated_at.is_some() {
+        counts.updated += 1;
+    } else {
+        counts.imported += 1;
+    }
+    Ok(())
+}
+
+fn build_threads_payload(connection: &Connection) -> Result<ThreadSyncPayload> {
+    let continuations = query_payload_rows(connection, "entry_continuations", |row| {
+        Ok(ThreadContinuation {
+            child_entry_uuid: row.get(0)?,
+            parent_entry_uuid: row.get(1)?,
+            updated_at: normalized_timestamp(row.get::<_, Option<String>>(2)?.as_deref(), ""),
+        })
+    })?;
+    let deleted_continuations =
+        query_payload_rows(connection, "sync_entry_continuation_tombstones", |row| {
+            Ok(DeletedContinuation {
+                child_entry_uuid: row.get(0)?,
+                deleted_at: normalized_timestamp(row.get::<_, Option<String>>(1)?.as_deref(), ""),
+            })
+        })?;
+    let titles = query_payload_rows(connection, "entry_thread_titles", |row| {
+        Ok(ThreadTitle {
+            thread_root_uuid: row.get(0)?,
+            title: row.get(1)?,
+            updated_at: normalized_timestamp(row.get::<_, Option<String>>(2)?.as_deref(), ""),
+        })
+    })?;
+    let deleted_titles =
+        query_payload_rows(connection, "sync_entry_thread_title_tombstones", |row| {
+            Ok(DeletedThreadText {
+                thread_root_uuid: row.get(0)?,
+                deleted_at: normalized_timestamp(row.get::<_, Option<String>>(1)?.as_deref(), ""),
+            })
+        })?;
+    let summaries = query_payload_rows(connection, "entry_thread_summaries", |row| {
+        Ok(ThreadSummary {
+            thread_root_uuid: row.get(0)?,
+            summary: row.get(1)?,
+            updated_at: normalized_timestamp(row.get::<_, Option<String>>(2)?.as_deref(), ""),
+        })
+    })?;
+    let deleted_summaries =
+        query_payload_rows(connection, "sync_entry_thread_summary_tombstones", |row| {
+            Ok(DeletedThreadText {
+                thread_root_uuid: row.get(0)?,
+                deleted_at: normalized_timestamp(row.get::<_, Option<String>>(1)?.as_deref(), ""),
+            })
+        })?;
+
+    Ok(ThreadSyncPayload {
+        version: thread_sync_version(),
+        continuations,
+        deleted_continuations,
+        titles,
+        deleted_titles,
+        summaries,
+        deleted_summaries,
+    })
+}
+
+fn query_payload_rows<T>(
+    connection: &Connection,
+    table: &str,
+    map: impl Fn(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+) -> Result<Vec<T>> {
+    if !table_exists(connection, table)? {
+        return Ok(Vec::new());
+    }
+    let sql = match table {
+        "entry_continuations" => {
+            "SELECT child_entry_uuid, parent_entry_uuid, updated_at FROM entry_continuations ORDER BY updated_at ASC, child_entry_uuid ASC"
+        }
+        "sync_entry_continuation_tombstones" => {
+            "SELECT child_entry_uuid, deleted_at FROM sync_entry_continuation_tombstones ORDER BY deleted_at ASC, child_entry_uuid ASC"
+        }
+        "entry_thread_titles" => {
+            "SELECT thread_root_uuid, title, updated_at FROM entry_thread_titles ORDER BY updated_at ASC, thread_root_uuid ASC"
+        }
+        "sync_entry_thread_title_tombstones" => {
+            "SELECT thread_root_uuid, deleted_at FROM sync_entry_thread_title_tombstones ORDER BY deleted_at ASC, thread_root_uuid ASC"
+        }
+        "entry_thread_summaries" => {
+            "SELECT thread_root_uuid, summary, updated_at FROM entry_thread_summaries ORDER BY updated_at ASC, thread_root_uuid ASC"
+        }
+        "sync_entry_thread_summary_tombstones" => {
+            "SELECT thread_root_uuid, deleted_at FROM sync_entry_thread_summary_tombstones ORDER BY deleted_at ASC, thread_root_uuid ASC"
+        }
+        _ => return Err(anyhow!("unsupported sync payload table: {table}")),
+    };
+    let mut statement = connection.prepare(sql)?;
+    let rows = statement.query_map([], map)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn apply_ai_chats_payload(
+    connection: &Connection,
+    payload: &AiChatSyncPayload,
+    counts: &mut SyncCounts,
+) -> Result<()> {
+    if !table_exists(connection, "ai_conversations")?
+        || !table_exists(connection, "ai_conversation_messages")?
+    {
+        return Ok(());
+    }
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS sync_ai_conversation_tombstones (
+            conversation_uuid TEXT PRIMARY KEY,
+            deleted_at TEXT NOT NULL
+        )",
+        [],
+    )?;
+
+    for item in payload.deleted_conversations.iter() {
+        let Some(conversation_uuid) = normalize_string(Some(item.conversation_uuid.clone())) else {
+            continue;
+        };
+        let deleted_at = normalized_timestamp(Some(&item.deleted_at), &current_timestamp_seconds());
+        let local = connection
+            .query_row(
+                "SELECT id, updated_at FROM ai_conversations WHERE uuid = ?1",
+                [&conversation_uuid],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        if let Some((conversation_id, local_updated_at)) = local {
+            if deleted_at >= normalized_timestamp(Some(&local_updated_at), "") {
+                delete_ai_conversation(
+                    connection,
+                    conversation_id,
+                    &conversation_uuid,
+                    &deleted_at,
+                )?;
+                counts.deleted += 1;
+            }
+        } else {
+            record_ai_conversation_tombstone(connection, &conversation_uuid, &deleted_at)?;
+        }
+    }
+
+    for item in payload.conversations.iter() {
+        let Some(conversation_uuid) = normalize_string(Some(item.uuid.clone())) else {
+            continue;
+        };
+        let created_at = normalized_timestamp(Some(&item.created_at), &current_timestamp_seconds());
+        let updated_at = normalized_timestamp(Some(&item.updated_at), &created_at);
+        if let Some(tombstone_at) = ai_conversation_tombstone_at(connection, &conversation_uuid)? {
+            if tombstone_at >= updated_at {
+                continue;
+            }
+        }
+        let existing = connection
+            .query_row(
+                "SELECT id, updated_at FROM ai_conversations WHERE uuid = ?1",
+                [&conversation_uuid],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        let title = normalize_optional_text(item.title.as_deref())
+            .unwrap_or_else(|| "New chat".to_string());
+        let preview = normalize_optional_text(item.preview.as_deref()).unwrap_or_default();
+        let cloud_provider = normalize_string(Some(item.cloud_provider.clone()))
+            .unwrap_or_else(|| "gemini".to_string())
+            .to_lowercase();
+        let scope =
+            normalize_string(Some(item.scope.clone())).unwrap_or_else(|| "search".to_string());
+        let scope_identifiers = scope_identifiers_to_string(&item.scope_identifiers);
+        if let Some((conversation_id, local_updated_at)) = existing {
+            if updated_at > normalized_timestamp(Some(&local_updated_at), &created_at) {
+                connection.execute(
+                    "UPDATE ai_conversations
+                     SET title = ?1,
+                         preview = ?2,
+                         cloud_provider = ?3,
+                         scope = ?4,
+                         scope_identifiers = ?5,
+                         context_limit = ?6,
+                         since = ?7,
+                         until = ?8,
+                         created_at = ?9,
+                         updated_at = ?10
+                     WHERE id = ?11",
+                    params![
+                        title,
+                        preview,
+                        cloud_provider,
+                        scope,
+                        scope_identifiers,
+                        item.context_limit,
+                        item.since,
+                        item.until,
+                        created_at,
+                        updated_at,
+                        conversation_id,
+                    ],
+                )?;
+                counts.updated += 1;
+            }
+        } else {
+            connection.execute(
+                "INSERT INTO ai_conversations (
+                    uuid, title, preview, cloud_provider, scope, scope_identifiers,
+                    context_limit, since, until, created_at, updated_at, last_message_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![
+                    conversation_uuid,
+                    title,
+                    preview,
+                    cloud_provider,
+                    scope,
+                    scope_identifiers,
+                    item.context_limit,
+                    item.since,
+                    item.until,
+                    created_at,
+                    updated_at,
+                    updated_at,
+                ],
+            )?;
+            counts.imported += 1;
+        }
+        connection.execute(
+            "DELETE FROM sync_ai_conversation_tombstones WHERE conversation_uuid = ?1",
+            [&conversation_uuid],
+        )?;
+    }
+
+    let conversation_id_by_uuid = ai_conversation_id_by_uuid(connection)?;
+    let mut affected_conversations = HashSet::new();
+    let mut messages = payload.messages.clone();
+    messages.sort_by(|left, right| {
+        left.sort_key
+            .cmp(&right.sort_key)
+            .then_with(|| left.created_at.cmp(&right.created_at))
+            .then_with(|| left.uuid.cmp(&right.uuid))
+    });
+    for item in messages {
+        let Some(message_uuid) = normalize_string(Some(item.uuid)) else {
+            continue;
+        };
+        let Some(conversation_uuid) = normalize_string(Some(item.conversation_uuid)) else {
+            continue;
+        };
+        let Some(conversation_id) = conversation_id_by_uuid.get(&conversation_uuid).copied() else {
+            continue;
+        };
+        let created_at = normalized_timestamp(Some(&item.created_at), &current_timestamp_seconds());
+        let updated_at = normalized_timestamp(Some(&item.updated_at), &created_at);
+        if let Some(tombstone_at) = ai_conversation_tombstone_at(connection, &conversation_uuid)? {
+            if tombstone_at >= updated_at {
+                continue;
+            }
+        }
+        let role = normalize_ai_role(&item.role);
+        let status = normalize_ai_status(&item.status);
+        let sort_key = normalize_string(item.sort_key)
+            .unwrap_or_else(|| format!("{created_at}:{message_uuid}"));
+        let existing = connection
+            .query_row(
+                "SELECT id, updated_at FROM ai_conversation_messages WHERE uuid = ?1",
+                [&message_uuid],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        if let Some((message_id, local_updated_at)) = existing {
+            if updated_at > normalized_timestamp(Some(&local_updated_at), &created_at) {
+                connection.execute(
+                    "UPDATE ai_conversation_messages
+                     SET conversation_id = ?1,
+                         role = ?2,
+                         content = ?3,
+                         status = ?4,
+                         created_at = ?5,
+                         updated_at = ?6,
+                         sort_key = ?7
+                     WHERE id = ?8",
+                    params![
+                        conversation_id,
+                        role,
+                        item.content,
+                        status,
+                        created_at,
+                        updated_at,
+                        sort_key,
+                        message_id,
+                    ],
+                )?;
+                affected_conversations.insert(conversation_id);
+            }
+        } else {
+            connection.execute(
+                "INSERT INTO ai_conversation_messages (
+                    conversation_id, uuid, role, content, status, created_at, updated_at, sort_key
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    conversation_id,
+                    message_uuid,
+                    role,
+                    item.content,
+                    status,
+                    created_at,
+                    updated_at,
+                    sort_key,
+                ],
+            )?;
+            affected_conversations.insert(conversation_id);
+        }
+    }
+    for conversation_id in affected_conversations {
+        refresh_ai_conversation_summary(connection, conversation_id)?;
+    }
+    Ok(())
+}
+
+fn build_ai_chats_payload(connection: &Connection) -> Result<AiChatSyncPayload> {
+    if !table_exists(connection, "ai_conversations")?
+        || !table_exists(connection, "ai_conversation_messages")?
+    {
+        return Ok(AiChatSyncPayload {
+            version: ai_chat_sync_version(),
+            ..AiChatSyncPayload::default()
+        });
+    }
+    let mut conversation_statement = connection.prepare(
+        "SELECT uuid, title, preview, cloud_provider, scope, scope_identifiers,
+                context_limit, since, until, created_at, updated_at
+         FROM ai_conversations
+         WHERE COALESCE(uuid, '') != ''
+         ORDER BY updated_at ASC, uuid ASC",
+    )?;
+    let conversations = conversation_statement
+        .query_map([], |row| {
+            let scope_identifiers: String = row.get(5)?;
+            Ok(AiConversationPayload {
+                uuid: row.get(0)?,
+                title: row.get(1)?,
+                preview: row.get(2)?,
+                cloud_provider: row.get(3)?,
+                scope: row.get(4)?,
+                scope_identifiers: serde_json::from_str(&scope_identifiers)
+                    .unwrap_or_else(|_| json!([])),
+                context_limit: row.get(6)?,
+                since: row.get(7)?,
+                until: row.get(8)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let mut message_statement = connection.prepare(
+        "SELECT m.uuid, c.uuid, m.role, m.content, m.status, m.created_at, m.updated_at, m.sort_key
+         FROM ai_conversation_messages m
+         JOIN ai_conversations c ON c.id = m.conversation_id
+         WHERE COALESCE(m.uuid, '') != '' AND COALESCE(c.uuid, '') != ''
+         ORDER BY c.updated_at ASC, COALESCE(m.sort_key, m.created_at) ASC, m.uuid ASC",
+    )?;
+    let messages = message_statement
+        .query_map([], |row| {
+            Ok(AiMessagePayload {
+                uuid: row.get(0)?,
+                conversation_uuid: row.get(1)?,
+                role: row.get(2)?,
+                content: row.get(3)?,
+                status: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+                sort_key: row.get(7)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let deleted_conversations = if table_exists(connection, "sync_ai_conversation_tombstones")? {
+        let mut statement = connection.prepare(
+            "SELECT conversation_uuid, deleted_at
+             FROM sync_ai_conversation_tombstones
+             ORDER BY deleted_at ASC, conversation_uuid ASC",
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(DeletedAiConversation {
+                    conversation_uuid: row.get(0)?,
+                    deleted_at: row.get(1)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    } else {
+        Vec::new()
+    };
+
+    Ok(AiChatSyncPayload {
+        version: ai_chat_sync_version(),
+        conversations,
+        messages,
+        deleted_conversations,
+    })
+}
+
+fn delete_ai_conversation(
+    connection: &Connection,
+    conversation_id: i64,
+    conversation_uuid: &str,
+    deleted_at: &str,
+) -> Result<()> {
+    connection.execute(
+        "DELETE FROM ai_conversation_messages WHERE conversation_id = ?1",
+        [conversation_id],
+    )?;
+    connection.execute(
+        "DELETE FROM ai_conversations WHERE id = ?1",
+        [conversation_id],
+    )?;
+    record_ai_conversation_tombstone(connection, conversation_uuid, deleted_at)?;
+    Ok(())
+}
+
+fn record_ai_conversation_tombstone(
+    connection: &Connection,
+    conversation_uuid: &str,
+    deleted_at: &str,
+) -> Result<()> {
+    connection.execute(
+        "INSERT INTO sync_ai_conversation_tombstones (conversation_uuid, deleted_at)
+         VALUES (?1, ?2)
+         ON CONFLICT(conversation_uuid)
+         DO UPDATE SET deleted_at = excluded.deleted_at",
+        params![conversation_uuid, deleted_at],
+    )?;
+    Ok(())
+}
+
+fn ai_conversation_tombstone_at(
+    connection: &Connection,
+    conversation_uuid: &str,
+) -> Result<Option<String>> {
+    connection
+        .query_row(
+            "SELECT deleted_at
+             FROM sync_ai_conversation_tombstones
+             WHERE conversation_uuid = ?1",
+            [conversation_uuid],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn ai_conversation_id_by_uuid(connection: &Connection) -> Result<HashMap<String, i64>> {
+    let mut statement = connection.prepare("SELECT uuid, id FROM ai_conversations")?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
+    Ok(rows
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .into_iter()
+        .collect())
+}
+
+fn refresh_ai_conversation_summary(connection: &Connection, conversation_id: i64) -> Result<()> {
+    let mut statement = connection.prepare(
+        "SELECT role, content, created_at, updated_at
+         FROM ai_conversation_messages
+         WHERE conversation_id = ?1
+         ORDER BY COALESCE(sort_key, created_at) ASC, id ASC",
+    )?;
+    let rows = statement
+        .query_map([conversation_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let title = rows
+        .iter()
+        .find(|(role, _, _, _)| role == "user")
+        .or_else(|| rows.first())
+        .map(|(_, content, _, _)| truncate_for_display(content, 80))
+        .unwrap_or_else(|| "New chat".to_string());
+    let preview = rows
+        .last()
+        .map(|(_, content, _, _)| truncate_for_display(content, 160))
+        .unwrap_or_default();
+    let last_message_at = rows
+        .iter()
+        .map(|(_, _, created_at, updated_at)| {
+            normalized_timestamp(
+                Some(updated_at),
+                &normalized_timestamp(Some(created_at), ""),
+            )
+        })
+        .max()
+        .unwrap_or_else(current_timestamp_seconds);
+    connection.execute(
+        "UPDATE ai_conversations
+         SET title = ?1,
+             preview = ?2,
+             last_message_at = ?3,
+             updated_at = CASE WHEN updated_at > ?3 THEN updated_at ELSE ?3 END
+         WHERE id = ?4",
+        params![title, preview, last_message_at, conversation_id],
+    )?;
+    Ok(())
+}
+
+fn record_sync_success(
+    db_path: &Path,
+    sync_file: &Path,
+    counts: &SyncCounts,
+    summary: &str,
+    timestamp: &str,
+    conflict_summary: Option<String>,
+) -> Result<()> {
+    let connection = db::open_read_write_connection(db_path)?;
+    ensure_sync_schema(&connection)?;
+    let file_size = fs::metadata(sync_file)
+        .ok()
+        .map(|metadata| metadata.len() as i64);
+    connection.execute(
+        "UPDATE sync_status
+         SET last_successful_sync_at = ?1,
+             last_sync_file_path = ?2,
+             last_sync_file_size_bytes = ?3,
+             last_sync_imported = ?4,
+             last_sync_updated = ?5,
+             last_sync_deleted = ?6,
+             last_sync_total = ?7,
+             last_sync_summary = ?8,
+             last_conflict_count = ?9,
+             last_conflict_summary = ?10,
+             last_sync_error = NULL
+         WHERE id = 1",
+        params![
+            timestamp,
+            db::path_to_string(sync_file),
+            file_size,
+            counts.imported,
+            counts.updated,
+            counts.deleted,
+            counts.exported,
+            summary,
+            counts.conflicts.len() as i64,
+            conflict_summary,
+        ],
+    )?;
+    insert_sync_history(
+        &connection,
+        timestamp,
+        "success",
+        Some(sync_file),
+        counts.imported,
+        counts.updated,
+        counts.deleted,
+        counts.exported,
+        counts.conflicts.len() as i64,
+        Some(summary),
+        (!counts.conflicts.is_empty()).then(|| counts.conflicts.join("\n")),
+        None,
+    )?;
+    Ok(())
+}
+
+fn record_sync_error(db_path: &Path, sync_file: &Path, error: &str) -> Result<()> {
+    let connection = db::open_read_write_connection(db_path)?;
+    ensure_sync_schema(&connection)?;
+    connection.execute(
+        "UPDATE sync_status SET last_sync_error = ?1 WHERE id = 1",
+        [error],
+    )?;
+    insert_sync_history(
+        &connection,
+        &current_timestamp_seconds(),
+        "failed",
+        Some(sync_file),
+        0,
+        0,
+        0,
+        0,
+        0,
+        None,
+        None,
+        Some(error),
+    )?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_sync_history(
+    connection: &Connection,
+    timestamp: &str,
+    status: &str,
+    sync_file: Option<&Path>,
+    imported: i64,
+    updated: i64,
+    deleted: i64,
+    exported: i64,
+    conflicts: i64,
+    summary: Option<&str>,
+    details: Option<String>,
+    error: Option<&str>,
+) -> Result<()> {
+    connection.execute(
+        "INSERT INTO sync_history (
+            timestamp, status, sync_file_path, imported_count, updated_count,
+            deleted_count, exported_count, conflict_count, summary, details, error
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            timestamp,
+            status,
+            sync_file.map(db::path_to_string),
+            imported,
+            updated,
+            deleted,
+            exported,
+            conflicts,
+            summary,
+            details,
+            error,
+        ],
+    )?;
+    connection.execute(
+        "DELETE FROM sync_history
+         WHERE id NOT IN (
+            SELECT id FROM sync_history ORDER BY id DESC LIMIT ?1
+         )",
+        [SYNC_HISTORY_RETENTION_LIMIT],
+    )?;
+    Ok(())
+}
+
+fn sync_summary(counts: &SyncCounts) -> String {
+    let mut parts = Vec::new();
+    if counts.imported > 0 {
+        parts.push(format!("{} merged", counts.imported));
+    }
+    if counts.updated > 0 {
+        parts.push(format!("{} updated", counts.updated));
+    }
+    if counts.deleted > 0 {
+        parts.push(format!("{} deleted", counts.deleted));
+    }
+    if !counts.parts.is_empty() {
+        parts.extend(counts.parts.clone());
+    }
+    if parts.is_empty() {
+        "nothing new".to_string()
+    } else {
+        parts.join(", ")
+    }
+}
+
+fn normalize_string(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn normalize_optional_text(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn normalize_tags(values: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut tags = values
+        .into_iter()
+        .filter_map(|tag| normalize_string(Some(tag.to_lowercase())))
+        .filter(|tag| seen.insert(tag.clone()))
+        .collect::<Vec<_>>();
+    tags.sort();
+    tags
+}
+
+fn normalize_slug(value: &str) -> Option<String> {
+    let mut output = String::new();
+    let mut last_was_dash = false;
+    for character in value.trim().to_lowercase().chars() {
+        if character.is_ascii_alphanumeric() {
+            output.push(character);
+            last_was_dash = false;
+        } else if !last_was_dash {
+            output.push('-');
+            last_was_dash = true;
+        }
+    }
+    let output = output.trim_matches('-').to_string();
+    (!output.is_empty()).then_some(output)
+}
+
+fn normalized_text_list(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .filter_map(|value| normalize_string(Some(value.clone())))
+        .collect()
+}
+
+fn json_string_list(raw: String) -> Vec<String> {
+    serde_json::from_str::<Vec<String>>(&raw)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|value| normalize_string(Some(value)))
+        .collect()
+}
+
+fn entry_exists(connection: &Connection, uuid: &str) -> Result<bool> {
+    Ok(connection
+        .query_row(
+            "SELECT 1 FROM entries WHERE uuid = ?1 LIMIT 1",
+            [uuid],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+fn location_tombstone_at(connection: &Connection, entry_uuid: &str) -> Result<Option<String>> {
+    connection
+        .query_row(
+            "SELECT deleted_at FROM sync_location_tombstones WHERE entry_uuid = ?1",
+            [entry_uuid],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn library_template_row(
+    connection: &Connection,
+    slug: &str,
+) -> Result<Option<(bool, String, String)>> {
+    connection
+        .query_row(
+            "SELECT is_builtin, created_at, updated_at FROM library_templates WHERE slug = ?1",
+            [slug],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)? != 0,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn library_prompt_row(
+    connection: &Connection,
+    slug: &str,
+) -> Result<Option<(bool, String, String)>> {
+    connection
+        .query_row(
+            "SELECT is_builtin, created_at, updated_at FROM library_prompts WHERE slug = ?1",
+            [slug],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)? != 0,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn query_deleted_library_items(
+    connection: &Connection,
+    sql: &str,
+) -> Result<Vec<DeletedLibraryItem>> {
+    let mut statement = connection.prepare(sql)?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(DeletedLibraryItem {
+                slug: row.get(0)?,
+                deleted_at: row.get(1)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(anyhow::Error::from)?;
+    Ok(rows)
+}
+
+fn normalize_content_format(value: Option<&str>) -> String {
+    match value.unwrap_or("plain").trim().to_lowercase().as_str() {
+        "markdown" => "markdown".to_string(),
+        "html" => "html".to_string(),
+        _ => "plain".to_string(),
+    }
+}
+
+fn normalized_timestamp(value: Option<&str>, fallback: &str) -> String {
+    let raw = value.unwrap_or("").trim();
+    let raw = if raw.is_empty() { fallback.trim() } else { raw };
+    raw.trim_end_matches('Z')
+        .replace('T', " ")
+        .split('.')
+        .next()
+        .unwrap_or(raw)
+        .to_string()
+}
+
+fn build_text_plain(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn bool_to_int(value: bool) -> i64 {
+    if value {
+        1
+    } else {
+        0
+    }
+}
+
+fn current_timestamp_minutes() -> String {
+    Local::now().format("%Y-%m-%d %H:%M").to_string()
+}
+
+fn current_timestamp_seconds() -> String {
+    Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+fn table_exists(connection: &Connection, table_name: &str) -> Result<bool> {
+    Ok(connection
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
+            [table_name],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+fn delete_if_table_exists(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    entry_id: i64,
+) -> Result<()> {
+    if table_exists(connection, table)? {
+        connection.execute(
+            &format!("DELETE FROM {table} WHERE {column} = ?1"),
+            [entry_id],
+        )?;
+    }
+    Ok(())
+}
+
+fn delete_by_uuid_if_table_exists(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    uuid: &str,
+) -> Result<()> {
+    if table_exists(connection, table)? {
+        connection.execute(&format!("DELETE FROM {table} WHERE {column} = ?1"), [uuid])?;
+    }
+    Ok(())
+}
+
+fn entry_uuid_exists(connection: &Connection, uuid: &str) -> Result<bool> {
+    Ok(connection
+        .query_row(
+            "SELECT 1 FROM entries WHERE uuid = ?1 LIMIT 1",
+            [uuid],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+fn continuation_would_cycle(
+    connection: &Connection,
+    child_uuid: &str,
+    parent_uuid: &str,
+) -> Result<bool> {
+    let mut current = Some(parent_uuid.to_string());
+    let mut seen = HashSet::new();
+    while let Some(uuid) = current {
+        if uuid == child_uuid {
+            return Ok(true);
+        }
+        if !seen.insert(uuid.clone()) {
+            return Ok(false);
+        }
+        current = connection
+            .query_row(
+                "SELECT parent_entry_uuid FROM entry_continuations WHERE child_entry_uuid = ?1",
+                [uuid],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+    }
+    Ok(false)
+}
+
+fn thread_text_updated_at(
+    connection: &Connection,
+    table: &str,
+    root_uuid: &str,
+) -> Result<Option<String>> {
+    connection
+        .query_row(
+            &format!("SELECT updated_at FROM {table} WHERE thread_root_uuid = ?1"),
+            [root_uuid],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn thread_text_tombstone_at(
+    connection: &Connection,
+    table: &str,
+    root_uuid: &str,
+) -> Result<Option<String>> {
+    connection
+        .query_row(
+            &format!("SELECT deleted_at FROM {table} WHERE thread_root_uuid = ?1"),
+            [root_uuid],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn record_thread_text_tombstone(
+    connection: &Connection,
+    table: &str,
+    root_uuid: &str,
+    deleted_at: &str,
+) -> Result<()> {
+    connection.execute(
+        &format!(
+            "INSERT INTO {table} (thread_root_uuid, deleted_at)
+             VALUES (?1, ?2)
+             ON CONFLICT(thread_root_uuid)
+             DO UPDATE SET deleted_at = excluded.deleted_at"
+        ),
+        params![root_uuid, deleted_at],
+    )?;
+    Ok(())
+}
+
+fn entry_can_have_thread_text(connection: &Connection, root_uuid: &str) -> Result<bool> {
+    if !entry_uuid_exists(connection, root_uuid)? {
+        return Ok(false);
+    }
+    let has_parent = connection
+        .query_row(
+            "SELECT 1 FROM entry_continuations WHERE child_entry_uuid = ?1 LIMIT 1",
+            [root_uuid],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if has_parent {
+        return Ok(false);
+    }
+    let child_count = connection.query_row(
+        "SELECT COUNT(*) FROM entry_continuations WHERE parent_entry_uuid = ?1",
+        [root_uuid],
+        |row| row.get::<_, i64>(0),
+    )?;
+    Ok(child_count > 0)
+}
+
+fn scope_identifiers_to_string(value: &JsonValue) -> String {
+    match value {
+        JsonValue::String(text) => text.clone(),
+        JsonValue::Array(_) => serde_json::to_string(value).unwrap_or_else(|_| "[]".to_string()),
+        _ => "[]".to_string(),
+    }
+}
+
+fn normalize_ai_role(value: &str) -> String {
+    match value.trim().to_lowercase().as_str() {
+        "assistant" => "assistant".to_string(),
+        "system" => "system".to_string(),
+        _ => "user".to_string(),
+    }
+}
+
+fn normalize_ai_status(value: &str) -> String {
+    match value.trim().to_lowercase().as_str() {
+        "streaming" => "interrupted".to_string(),
+        "error" => "error".to_string(),
+        "interrupted" => "interrupted".to_string(),
+        _ => "complete".to_string(),
+    }
+}
+
+fn truncate_for_display(value: &str, limit: usize) -> String {
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() <= limit {
+        return normalized;
+    }
+    let mut output = normalized
+        .chars()
+        .take(limit.saturating_sub(1))
+        .collect::<String>();
+    output.push_str("...");
+    output
+}
+
+fn thread_sync_version() -> i64 {
+    1
+}
+
+fn ai_chat_sync_version() -> i64 {
+    1
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn create_sync_test_database(path: &Path) -> Result<()> {
+        let connection = Connection::open(path)?;
+        connection.execute_batch(
+            "
+            CREATE TABLE entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uuid TEXT UNIQUE,
+                created_at TEXT NOT NULL,
+                updated_at TEXT,
+                text TEXT NOT NULL,
+                text_plain TEXT,
+                content_format TEXT,
+                title TEXT,
+                summary TEXT,
+                mood TEXT,
+                starred INTEGER NOT NULL DEFAULT 0,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                hidden INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE
+            );
+            CREATE TABLE entry_tags (
+                entry_id INTEGER NOT NULL,
+                tag_id INTEGER NOT NULL,
+                UNIQUE(entry_id, tag_id)
+            );
+            CREATE TABLE entries_fts (text);
+            CREATE TABLE sync_tombstones (
+                uuid TEXT PRIMARY KEY,
+                deleted_at TEXT NOT NULL
+            );
+            INSERT INTO entries
+                (uuid, created_at, updated_at, text, text_plain, content_format, starred, pinned, hidden)
+            VALUES
+                ('entry_remote_deleted', '2026-01-01 09:00', '2026-01-01 09:00',
+                 'Local row', 'Local row', 'plain', 0, 0, 0);
+            INSERT INTO sync_tombstones (uuid, deleted_at)
+            VALUES ('entry_locally_deleted', '2026-01-02 09:00');
+            ",
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn sync_tombstones_delete_rows_and_prevent_remote_resurrection() {
+        let db_dir = tempdir().expect("db tempdir");
+        let sync_dir = tempdir().expect("sync tempdir");
+        let db_path = db_dir.path().join("capsule.db");
+        create_sync_test_database(&db_path).expect("database");
+
+        let remote_payload = json!({
+            "version": 4,
+            "entries": [
+                {
+                    "uuid": "entry_locally_deleted",
+                    "created_at": "2026-01-02 08:00",
+                    "updated_at": "2026-01-02 08:00",
+                    "text": "Remote should not come back",
+                    "content_format": "plain",
+                    "tags": []
+                }
+            ],
+            "deleted_uuids": ["entry_remote_deleted"]
+        });
+        fs::write(
+            sync_dir.path().join(MAIN_SYNC_FILE),
+            serde_json::to_vec_pretty(&remote_payload).expect("json"),
+        )
+        .expect("sync file");
+
+        let response =
+            run_sync_with_retries(&db_path, sync_dir.path()).expect("sync should complete");
+        assert_eq!(response.deleted_count, 1);
+
+        let connection = Connection::open(&db_path).expect("open db");
+        let remote_deleted_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM entries WHERE uuid = 'entry_remote_deleted'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("remote deleted count");
+        assert_eq!(remote_deleted_count, 0);
+
+        let locally_deleted_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM entries WHERE uuid = 'entry_locally_deleted'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("locally deleted count");
+        assert_eq!(locally_deleted_count, 0);
+
+        let output = fs::read(sync_dir.path().join(MAIN_SYNC_FILE)).expect("output sync file");
+        let output_payload: MainSyncPayload =
+            serde_json::from_slice(&output).expect("output payload");
+        assert!(output_payload
+            .deleted_uuids
+            .iter()
+            .any(|uuid| uuid == "entry_remote_deleted"));
+        assert!(output_payload
+            .deleted_uuids
+            .iter()
+            .any(|uuid| uuid == "entry_locally_deleted"));
+    }
+}

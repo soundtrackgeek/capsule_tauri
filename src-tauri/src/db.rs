@@ -24,6 +24,9 @@ pub struct LocalPathSettings {
     pub database_path: Option<String>,
     pub image_media_root: Option<String>,
     pub backup_directory: Option<String>,
+    pub sync_path: Option<String>,
+    pub auto_sync_enabled: Option<bool>,
+    pub auto_sync_interval_minutes: Option<i64>,
 }
 
 pub fn database_status() -> Result<DatabaseStatus> {
@@ -344,6 +347,10 @@ impl LocalPathSettings {
         self.database_path = normalize_path_setting(self.database_path.take());
         self.image_media_root = normalize_path_setting(self.image_media_root.take());
         self.backup_directory = normalize_path_setting(self.backup_directory.take());
+        self.sync_path = normalize_path_setting(self.sync_path.take());
+        self.auto_sync_interval_minutes = self
+            .auto_sync_interval_minutes
+            .map(|minutes| minutes.clamp(1, 24 * 60));
     }
 }
 

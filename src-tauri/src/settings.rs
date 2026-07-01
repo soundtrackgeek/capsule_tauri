@@ -114,14 +114,32 @@ pub fn get_path_settings() -> Result<PathSettingsResponse> {
     {
         warnings.push("CAPSULE_BACKUP_DIR is set and overrides the saved backup path.".to_string());
     }
+    if env::var("CAPSULE_SYNC_PATH")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .is_some()
+    {
+        warnings.push("CAPSULE_SYNC_PATH is set and overrides the saved sync path.".to_string());
+    }
 
     let db_path = db::resolve_database_path();
     let backup_directory = db::backup_directory_for_database(&db_path);
+    let local_settings = db::read_local_path_settings();
+    let sync_path = env::var("CAPSULE_SYNC_PATH")
+        .ok()
+        .and_then(|value| normalize_string(Some(&value)))
+        .or_else(|| local_settings.sync_path.clone());
 
     Ok(PathSettingsResponse {
         database_path: db::path_to_string(&db_path),
         image_media_root: images::get_image_media_root()?,
         backup_directory: db::path_to_string(&backup_directory),
+        sync_path,
+        auto_sync_enabled: local_settings.auto_sync_enabled.unwrap_or(false),
+        auto_sync_interval_minutes: local_settings
+            .auto_sync_interval_minutes
+            .unwrap_or(15)
+            .clamp(1, 24 * 60),
         settings_path: db::path_to_string(&db::local_path_settings_path()),
         warnings,
     })
@@ -132,12 +150,20 @@ pub fn set_path_settings(input: PathSettingsUpdateRequest) -> Result<PathSetting
     settings.database_path = normalize_string(input.database_path.as_deref());
     settings.image_media_root = normalize_string(input.image_media_root.as_deref());
     settings.backup_directory = normalize_string(input.backup_directory.as_deref());
+    settings.sync_path = normalize_string(input.sync_path.as_deref());
+    settings.auto_sync_enabled = input.auto_sync_enabled;
+    settings.auto_sync_interval_minutes = input
+        .auto_sync_interval_minutes
+        .map(|minutes| minutes.clamp(1, 24 * 60));
 
     if let Some(path) = settings.image_media_root.as_deref() {
         fs::create_dir_all(path).with_context(|| format!("failed to create image path {path}"))?;
     }
     if let Some(path) = settings.backup_directory.as_deref() {
         fs::create_dir_all(path).with_context(|| format!("failed to create backup path {path}"))?;
+    }
+    if let Some(path) = settings.sync_path.as_deref() {
+        fs::create_dir_all(path).with_context(|| format!("failed to create sync path {path}"))?;
     }
 
     db::write_local_path_settings(&settings)?;

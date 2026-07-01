@@ -323,6 +323,14 @@ button:active:not(:disabled) {
   justify-content: flex-end;
 }
 
+.panel-action-row,
+.path-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
 .panel-header,
 .section-heading,
 .entry-card-heading,
@@ -386,6 +394,7 @@ button:active:not(:disabled) {
   width: 100%;
 }
 
+.primary-button--small,
 .secondary-button--small {
   min-height: 30px;
   padding: 0 10px;

@@ -1,6 +1,6 @@
 [package]
 name = "capsule-tauri"
-version = "0.7.13"
+version = "0.8.0"
 description = "Capsule desktop app"
 authors = ["Capsule"]
 edition = "2021"

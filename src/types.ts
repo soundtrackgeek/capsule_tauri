@@ -106,6 +106,9 @@ export type PathSettingsResponse = {
   databasePath: string;
   imageMediaRoot: string;
   backupDirectory: string;
+  syncPath: string | null;
+  autoSyncEnabled: boolean;
+  autoSyncIntervalMinutes: number;
   settingsPath: string;
   warnings: string[];
 };
@@ -114,6 +117,9 @@ export type PathSettingsUpdateRequest = {
   databasePath?: string | null;
   imageMediaRoot?: string | null;
   backupDirectory?: string | null;
+  syncPath?: string | null;
+  autoSyncEnabled?: boolean | null;
+  autoSyncIntervalMinutes?: number | null;
 };
 
 export type TagUsage = {
@@ -351,11 +357,32 @@ export type SyncTombstoneCount = {
 };
 
 export type SyncOverviewResponse = {
+  configured: boolean;
+  syncPath: string | null;
+  syncFilePath: string | null;
+  autoSyncEnabled: boolean;
+  autoSyncIntervalMinutes: number;
   status: SyncStatusSummary | null;
   recentHistory: SyncHistoryItem[];
   tombstones: SyncTombstoneCount[];
   capabilities: Phase6Capability[];
   warnings: string[];
+};
+
+export type SyncRunRequest = {
+  syncPath?: string | null;
+};
+
+export type SyncRunResponse = {
+  syncPath: string;
+  syncFilePath: string;
+  importedCount: number;
+  updatedCount: number;
+  deletedCount: number;
+  exportedCount: number;
+  conflictCount: number;
+  summary: string;
+  completedAt: string;
 };
 
 export type PluginInfo = {

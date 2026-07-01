@@ -175,6 +175,9 @@ pub struct PathSettingsResponse {
     pub database_path: String,
     pub image_media_root: String,
     pub backup_directory: String,
+    pub sync_path: Option<String>,
+    pub auto_sync_enabled: bool,
+    pub auto_sync_interval_minutes: i64,
     pub settings_path: String,
     pub warnings: Vec<String>,
 }
@@ -185,6 +188,9 @@ pub struct PathSettingsUpdateRequest {
     pub database_path: Option<String>,
     pub image_media_root: Option<String>,
     pub backup_directory: Option<String>,
+    pub sync_path: Option<String>,
+    pub auto_sync_enabled: Option<bool>,
+    pub auto_sync_interval_minutes: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -484,11 +490,36 @@ pub struct SyncTombstoneCount {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncOverviewResponse {
+    pub configured: bool,
+    pub sync_path: Option<String>,
+    pub sync_file_path: Option<String>,
+    pub auto_sync_enabled: bool,
+    pub auto_sync_interval_minutes: i64,
     pub status: Option<SyncStatusSummary>,
     pub recent_history: Vec<SyncHistoryItem>,
     pub tombstones: Vec<SyncTombstoneCount>,
     pub capabilities: Vec<Phase6Capability>,
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncRunRequest {
+    pub sync_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncRunResponse {
+    pub sync_path: String,
+    pub sync_file_path: String,
+    pub imported_count: i64,
+    pub updated_count: i64,
+    pub deleted_count: i64,
+    pub exported_count: i64,
+    pub conflict_count: i64,
+    pub summary: String,
+    pub completed_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

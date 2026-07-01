@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.0 - 2026-07-01
+
+### Added
+
+- Added native Capsule-compatible shared-folder sync for entries, image
+  metadata, locations, custom library items, thread sidecars, and AI chats using
+  the legacy `capsule_sync.json`, `capsule_threads_sync.json`, and
+  `capsule_ai_chats_sync.json` files.
+- Added Settings controls for the shared sync folder, manual sync runs, and a
+  configurable automatic sync interval.
+
+### Changed
+
+- Changed the Sync page from a read-only status view into a runnable sync
+  surface with configuration details, latest-file retry handling, and tombstone
+  aware merge status.
+- Bumped the app version to 0.8.0.
+
 ## 0.7.13 - 2026-06-30
 
 ### Fixed

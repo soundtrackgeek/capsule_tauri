@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Archive,
   BarChart3,
@@ -97,6 +97,7 @@ import {
   renameTag,
   removeImage,
   restoreBackup,
+  runSync,
   searchEntries,
   setCapsuleConfigValue,
   setLocationConfig,
@@ -481,6 +482,7 @@ function App() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggesting, setAiSuggesting] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
+  const [syncMutating, setSyncMutating] = useState(false);
   const [gamificationLoading, setGamificationLoading] = useState(false);
   const [questMutating, setQuestMutating] = useState(false);
   const [imagesLoading, setImagesLoading] = useState(false);
@@ -502,6 +504,7 @@ function App() {
   const [mutatingEntryUuid, setMutatingEntryUuid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const autoSyncRunningRef = useRef(false);
 
   const statusTone = useMemo(() => {
     if (!status || !status.dbExists || !status.readable) {
@@ -843,10 +846,16 @@ function App() {
     setError(null);
 
     try {
-      const [nextStatus, nextBackups] = await Promise.all([getDatabaseStatus(), listBackups()]);
+      const [nextStatus, nextBackups, nextPathSettings] = await Promise.all([
+        getDatabaseStatus(),
+        listBackups(),
+        getPathSettings(),
+      ]);
       setStatus(nextStatus);
       setBackups(nextBackups.backups);
       setBackupDirectory(nextBackups.backupDirectory);
+      setPathSettingsState(nextPathSettings);
+      setImageMediaRoot(nextPathSettings.imageMediaRoot);
 
       if (nextStatus.readable) {
         const now = new Date();
@@ -1169,6 +1178,65 @@ function App() {
     setBackupDirectory(response.backupDirectory);
     return `Saved local paths: ${response.settingsPath}`;
   }, []);
+
+  const handleRunSync = useCallback(
+    async (silent = false) => {
+      if (!status?.readable) {
+        setError("Sync needs a readable database.");
+        return;
+      }
+
+      setSyncMutating(true);
+      setError(null);
+      if (!silent) {
+        setNotice(null);
+      }
+
+      try {
+        const response = await runSync({});
+        if (!silent) {
+          setNotice(
+            `Sync completed: ${response.summary}. Exported ${response.exportedCount} entries to ${response.syncFilePath}`,
+          );
+        }
+        await Promise.all([refresh(), loadSyncOverview()]);
+      } catch (syncError) {
+        setError(syncError instanceof Error ? syncError.message : "Sync failed");
+      } finally {
+        setSyncMutating(false);
+      }
+    },
+    [loadSyncOverview, refresh, status?.readable],
+  );
+
+  useEffect(() => {
+    if (!status?.readable || !pathSettings?.syncPath || !pathSettings.autoSyncEnabled) {
+      return;
+    }
+
+    const intervalMinutes = Math.min(
+      24 * 60,
+      Math.max(1, Math.round(pathSettings.autoSyncIntervalMinutes || 15)),
+    );
+    const intervalId = window.setInterval(() => {
+      if (autoSyncRunningRef.current) {
+        return;
+      }
+
+      autoSyncRunningRef.current = true;
+      void handleRunSync(true).finally(() => {
+        autoSyncRunningRef.current = false;
+      });
+    }, intervalMinutes * 60 * 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [
+    handleRunSync,
+    pathSettings?.autoSyncEnabled,
+    pathSettings?.autoSyncIntervalMinutes,
+    pathSettings?.syncPath,
+    status?.readable,
+  ]);
 
   const handleBrowseDatabasePath = useCallback(async (currentPath: string) => {
     try {
@@ -2038,7 +2106,9 @@ function App() {
         {activeView === "sync" && (
           <SyncView
             loading={syncLoading}
+            mutating={syncMutating}
             onRefresh={loadSyncOverview}
+            onRunSync={() => void handleRunSync(false)}
             overview={syncOverview}
             status={status}
           />
@@ -2184,10 +2254,12 @@ function App() {
             onBrowseDirectoryPath={handleBrowseDirectoryPath}
             onRefresh={loadDataTools}
             onRunMutation={runDataToolMutation}
+            onRunSync={() => void handleRunSync(false)}
             onSavePathSettings={handleSavePathSettings}
             pathSettings={pathSettings}
             status={status}
             statusTone={statusTone}
+            syncMutating={syncMutating}
             tagCatalog={tagCatalog}
             uiSettings={uiSettings}
             setUiSettings={setUiSettings}
@@ -4235,7 +4307,9 @@ type SettingsViewProps = {
   onBrowseDirectoryPath: (currentPath: string) => Promise<string | null>;
   onRefresh: () => void;
   onRunMutation: (mutation: () => Promise<string>) => Promise<void>;
+  onRunSync: () => void;
   onSavePathSettings: (input: PathSettingsUpdateRequest) => Promise<string>;
+  syncMutating: boolean;
 };
 
 function SettingsView({
@@ -4256,12 +4330,17 @@ function SettingsView({
   onBrowseDirectoryPath,
   onRefresh,
   onRunMutation,
+  onRunSync,
   onSavePathSettings,
+  syncMutating,
 }: SettingsViewProps) {
   const [pathDraft, setPathDraft] = useState({
     databasePath: "",
     imageMediaRoot: "",
     backupDirectory: "",
+    syncPath: "",
+    autoSyncEnabled: false,
+    autoSyncIntervalMinutes: 15,
   });
   const [configDraft, setConfigDraft] = useState({ key: "", value: "" });
   const [locationDraft, setLocationDraft] = useState<LocationCaptureDraft>({
@@ -4290,13 +4369,19 @@ function SettingsView({
       databasePath: pathSettings?.databasePath ?? status?.dbPath ?? "",
       imageMediaRoot: pathSettings?.imageMediaRoot ?? imageMediaRoot,
       backupDirectory: pathSettings?.backupDirectory ?? backupDirectory,
+      syncPath: pathSettings?.syncPath ?? "",
+      autoSyncEnabled: pathSettings?.autoSyncEnabled ?? false,
+      autoSyncIntervalMinutes: pathSettings?.autoSyncIntervalMinutes ?? 15,
     });
   }, [
     backupDirectory,
     imageMediaRoot,
+    pathSettings?.autoSyncEnabled,
+    pathSettings?.autoSyncIntervalMinutes,
     pathSettings?.backupDirectory,
     pathSettings?.databasePath,
     pathSettings?.imageMediaRoot,
+    pathSettings?.syncPath,
     status?.dbPath,
   ]);
 
@@ -4394,23 +4479,91 @@ function SettingsView({
               </button>
             </div>
           </label>
-          <button
-            className="primary-button"
-            disabled={dataToolMutating}
-            onClick={() =>
-              onRunMutation(() =>
-                onSavePathSettings({
-                  databasePath: pathDraft.databasePath,
-                  imageMediaRoot: pathDraft.imageMediaRoot,
-                  backupDirectory: pathDraft.backupDirectory,
-                }),
-              )
-            }
-            type="button"
-          >
-            <Save size={17} />
-            Save paths
-          </button>
+          <label className="field">
+            <span>Sync folder</span>
+            <div className="path-input-row">
+              <input
+                onChange={(event) => setPathDraft({ ...pathDraft, syncPath: event.target.value })}
+                value={pathDraft.syncPath}
+              />
+              <button
+                aria-label="Browse sync folder"
+                className="icon-button"
+                disabled={dataToolMutating}
+                onClick={async () => {
+                  const selected = await onBrowseDirectoryPath(pathDraft.syncPath);
+                  if (selected) {
+                    setPathDraft({ ...pathDraft, syncPath: selected });
+                  }
+                }}
+                title="Browse sync folder"
+                type="button"
+              >
+                <FolderOpen size={17} />
+              </button>
+            </div>
+          </label>
+          <div className="settings-form-grid settings-form-grid--toggles settings-form-grid--sync">
+            <label className="check-row">
+              <input
+                checked={pathDraft.autoSyncEnabled}
+                onChange={(event) =>
+                  setPathDraft({ ...pathDraft, autoSyncEnabled: event.target.checked })
+                }
+                type="checkbox"
+              />
+              <span>Auto sync</span>
+            </label>
+            <label className="field">
+              <span>Interval minutes</span>
+              <input
+                max={1440}
+                min={1}
+                onChange={(event) =>
+                  setPathDraft({
+                    ...pathDraft,
+                    autoSyncIntervalMinutes: Math.min(
+                      1440,
+                      Math.max(1, Number(event.target.value) || 15),
+                    ),
+                  })
+                }
+                type="number"
+                value={pathDraft.autoSyncIntervalMinutes}
+              />
+            </label>
+          </div>
+          <div className="path-action-row">
+            <button
+              className="primary-button"
+              disabled={dataToolMutating}
+              onClick={() =>
+                onRunMutation(() =>
+                  onSavePathSettings({
+                    databasePath: pathDraft.databasePath,
+                    imageMediaRoot: pathDraft.imageMediaRoot,
+                    backupDirectory: pathDraft.backupDirectory,
+                    syncPath: pathDraft.syncPath,
+                    autoSyncEnabled: pathDraft.autoSyncEnabled,
+                    autoSyncIntervalMinutes: pathDraft.autoSyncIntervalMinutes,
+                  }),
+                )
+              }
+              type="button"
+            >
+              <Save size={17} />
+              Save paths
+            </button>
+            <button
+              className="secondary-button"
+              disabled={dataToolMutating || syncMutating || !pathDraft.syncPath.trim()}
+              onClick={onRunSync}
+              type="button"
+            >
+              <RefreshCw size={17} />
+              {syncMutating ? "Syncing" : "Run sync now"}
+            </button>
+          </div>
         </div>
         <dl className="detail-list detail-list--compact detail-list--paths path-settings-meta">
           <Detail label="Settings" value={<code>{pathSettings?.settingsPath ?? "Loading"}</code>} />
@@ -4443,7 +4596,7 @@ function SettingsView({
         title="Application"
       >
         <dl className="detail-list">
-          <Detail label="Version" value="0.7.13" />
+          <Detail label="Version" value="0.8.0" />
           <Detail label="Mode" value="Backups and data tools" />
           <Detail label="Writes" value="Backup guarded" />
         </dl>
@@ -5118,10 +5271,12 @@ type SyncViewProps = {
   status: DatabaseStatus | null;
   overview: SyncOverviewResponse | null;
   loading: boolean;
+  mutating: boolean;
   onRefresh: () => void;
+  onRunSync: () => void;
 };
 
-function SyncView({ status, overview, loading, onRefresh }: SyncViewProps) {
+function SyncView({ status, overview, loading, mutating, onRefresh, onRunSync }: SyncViewProps) {
   if (!status?.readable) {
     return <UnavailableState icon={<Cloud size={24} />} label="Sync needs a readable database." status={status} />;
   }
@@ -5141,13 +5296,35 @@ function SyncView({ status, overview, loading, onRefresh }: SyncViewProps) {
           icon={<Cloud size={20} />}
           title="Sync Status"
           action={
-            <button className="secondary-button secondary-button--small" onClick={onRefresh} type="button">
-              <RefreshCw size={15} />
-              {loading ? "Loading" : "Refresh"}
-            </button>
+            <div className="panel-action-row">
+              <button
+                className="primary-button primary-button--small"
+                disabled={mutating || !overview?.configured}
+                onClick={onRunSync}
+                type="button"
+              >
+                <RefreshCw size={15} />
+                {mutating ? "Syncing" : "Run"}
+              </button>
+              <button className="secondary-button secondary-button--small" onClick={onRefresh} type="button">
+                <RefreshCw size={15} />
+                {loading ? "Loading" : "Refresh"}
+              </button>
+            </div>
           }
         >
           <dl className="detail-list">
+            <Detail label="Configured" value={overview?.configured ? "Yes" : "No"} />
+            <Detail label="Folder" value={overview?.syncPath ?? "Set a sync folder in Settings"} />
+            <Detail label="Sync file" value={overview?.syncFilePath ?? "None"} />
+            <Detail
+              label="Auto sync"
+              value={
+                overview?.autoSyncEnabled
+                  ? `Every ${overview.autoSyncIntervalMinutes} minutes`
+                  : "Off"
+              }
+            />
             <Detail label="Last success" value={formatDateTime(syncStatus?.lastSuccessfulSyncAt)} />
             <Detail label="File" value={syncStatus?.lastSyncFilePath ?? "None"} />
             <Detail label="Size" value={syncStatus?.lastSyncFileSizeBytes ? formatBytes(syncStatus.lastSyncFileSizeBytes) : "None"} />

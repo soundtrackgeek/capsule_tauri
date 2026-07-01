@@ -56,6 +56,8 @@ import type {
   SearchRequest,
   SearchResponse,
   SyncOverviewResponse,
+  SyncRunRequest,
+  SyncRunResponse,
   TagCatalogResponse,
   TagDeleteRequest,
   TagMergeRequest,
@@ -81,6 +83,9 @@ const defaultMockDatabasePath = "C:\\Users\\jtill\\.capsule\\capsule.db";
 const defaultMockBackupDirectory = "C:\\Users\\jtill\\.capsule";
 const mockImageMediaRoot = "C:\\Users\\jtill\\OneDrive\\_capsule\\images";
 const mockPathSettingsPath = "C:\\Users\\jtill\\AppData\\Roaming\\Capsule\\path_settings.json";
+let mockSyncPath = "C:\\Users\\jtill\\OneDrive\\_capsule\\sync";
+let mockAutoSyncEnabled = false;
+let mockAutoSyncIntervalMinutes = 15;
 
 let mockStatus: DatabaseStatus = {
   dbPath: defaultMockDatabasePath,
@@ -213,10 +218,10 @@ const phase6Capabilities = {
       key: "shared-folder-sync",
       label: "Shared-folder sync",
       available: true,
-      configured: false,
+      configured: true,
       requiresCloud: false,
-      readOnly: true,
-      detail: "Status and history are visible; execution remains bridge-gated.",
+      readOnly: false,
+      detail: "Runs Capsule-compatible shared-folder sync directly from Tauri.",
     },
     {
       key: "github-gist-import",
@@ -658,6 +663,11 @@ export async function setPathSettings(
     const databasePath = normalizeNullable(input.databasePath);
     const imageMediaRoot = normalizeNullable(input.imageMediaRoot);
     const backupDirectory = normalizeNullable(input.backupDirectory);
+    const syncPath = normalizeNullable(input.syncPath);
+    const autoSyncInterval = Math.min(
+      24 * 60,
+      Math.max(1, Math.round(input.autoSyncIntervalMinutes ?? mockAutoSyncIntervalMinutes)),
+    );
 
     mockStatus = {
       ...mockStatus,
@@ -671,6 +681,9 @@ export async function setPathSettings(
       ...mockConfig,
       values: upsertConfigValue(mockConfig.values, "images.media_root", imageMediaRoot),
     };
+    mockSyncPath = syncPath ?? "";
+    mockAutoSyncEnabled = Boolean(input.autoSyncEnabled);
+    mockAutoSyncIntervalMinutes = autoSyncInterval;
 
     return mockPathSettings();
   } catch (error) {
@@ -1290,10 +1303,20 @@ export async function getSyncOverview(): Promise<SyncOverviewResponse> {
     }
 
     await pause(140);
+    const capabilities = phase6Capabilities.sync.map((capability) =>
+      capability.key === "shared-folder-sync"
+        ? { ...capability, configured: Boolean(mockSyncPath) }
+        : capability,
+    );
     return {
+      configured: Boolean(mockSyncPath),
+      syncPath: mockSyncPath || null,
+      syncFilePath: mockSyncPath ? `${mockSyncPath}\\capsule_sync.json` : null,
+      autoSyncEnabled: mockAutoSyncEnabled,
+      autoSyncIntervalMinutes: mockAutoSyncIntervalMinutes,
       status: {
         lastSuccessfulSyncAt: "2026-06-29 09:00",
-        lastSyncFilePath: "C:\\Users\\jtill\\.capsule\\mobile_sync.json",
+        lastSyncFilePath: mockSyncPath ? `${mockSyncPath}\\capsule_sync.json` : null,
         lastSyncFileSizeBytes: 42_000,
         lastSyncImported: 1,
         lastSyncUpdated: 2,
@@ -1323,8 +1346,36 @@ export async function getSyncOverview(): Promise<SyncOverviewResponse> {
         { table: "sync_tombstones", count: 2 },
         { table: "sync_image_tombstones", count: 1 },
       ],
-      capabilities: phase6Capabilities.sync,
-      warnings: ["Bridge execution is disabled in browser mock mode."],
+      capabilities,
+      warnings: mockSyncPath ? [] : ["No shared-folder sync path is configured in Settings."],
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function runSync(input?: SyncRunRequest): Promise<SyncRunResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<SyncRunResponse>("run_sync", { input });
+    }
+
+    await pause(260);
+    const syncPath = normalizeNullable(input?.syncPath) ?? mockSyncPath;
+    if (!syncPath) {
+      throw new Error("No sync path configured. Set a sync folder in Settings first.");
+    }
+    const completedAt = new Date().toISOString();
+    return {
+      syncPath,
+      syncFilePath: `${syncPath}\\capsule_sync.json`,
+      importedCount: 0,
+      updatedCount: 1,
+      deletedCount: 0,
+      exportedCount: mockStatus.entryCount ?? 0,
+      conflictCount: 0,
+      summary: "Mock sync completed.",
+      completedAt,
     };
   } catch (error) {
     throw normalizeError(error);
@@ -2250,6 +2301,9 @@ function mockPathSettings(): PathSettingsResponse {
       mockConfig.values.find((item) => item.key === "images.media_root")?.value ??
       mockImageMediaRoot,
     backupDirectory: mockBackups.backupDirectory,
+    syncPath: mockSyncPath || null,
+    autoSyncEnabled: mockAutoSyncEnabled,
+    autoSyncIntervalMinutes: mockAutoSyncIntervalMinutes,
     settingsPath: mockPathSettingsPath,
     warnings: [],
   };

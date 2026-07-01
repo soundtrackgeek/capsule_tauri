@@ -287,6 +287,7 @@ fn bulk_detach_threads_inner(
 
     for child_input in child_inputs {
         let child_uuid = resolve_entry_uuid(&tx, &child_input)?;
+        record_continuation_tombstone_if_linked(&tx, &child_uuid, &current_timestamp())?;
         tx.execute(
             "DELETE FROM entry_continuations WHERE child_entry_uuid = ?1",
             [&child_uuid],
@@ -330,6 +331,11 @@ fn bulk_link_threads_inner(
                            updated_at = excluded.updated_at",
             params![child_uuid, parent_uuid, current_timestamp()],
         )?;
+        tx.execute(
+            "DELETE FROM sync_entry_continuation_tombstones WHERE child_entry_uuid = ?1",
+            [&child_uuid],
+        )
+        .ok();
         affected.push(child_uuid);
     }
 
@@ -351,6 +357,10 @@ fn disband_thread_inner(db_path: &Path, root_uuid: &str) -> Result<Vec<String>> 
     }
 
     let placeholders = placeholders(nodes.len());
+    let now = current_timestamp();
+    for child_uuid in child_uuids_with_continuations(&tx, &nodes)? {
+        record_continuation_tombstone(&tx, &child_uuid, &now)?;
+    }
     tx.execute(
         &format!(
             "DELETE FROM entry_continuations
@@ -418,6 +428,7 @@ fn upsert_thread_text(
                        updated_at = excluded.updated_at"
     );
     connection.execute(&sql, params![root_uuid, value, current_timestamp()])?;
+    delete_thread_text_tombstone(connection, table, root_uuid)?;
     Ok(())
 }
 
@@ -428,8 +439,157 @@ fn delete_thread_text(connection: &Connection, table: &str, root_uuid: &str) -> 
         _ => return Err(anyhow!("Unsupported thread metadata table: {table}")),
     };
     if table_exists(connection, table)? {
+        let existed = connection
+            .query_row(
+                &format!("SELECT 1 FROM {table} WHERE thread_root_uuid = ?1 LIMIT 1"),
+                [root_uuid],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
         connection.execute(
             &format!("DELETE FROM {table} WHERE thread_root_uuid = ?1"),
+            [root_uuid],
+        )?;
+        if existed {
+            record_thread_text_tombstone(connection, table, root_uuid, &current_timestamp())?;
+        }
+    }
+    Ok(())
+}
+
+fn ensure_continuation_tombstones(connection: &Connection) -> Result<()> {
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS sync_entry_continuation_tombstones (
+            child_entry_uuid TEXT PRIMARY KEY,
+            deleted_at TEXT NOT NULL
+        )",
+        [],
+    )?;
+    Ok(())
+}
+
+fn record_continuation_tombstone_if_linked(
+    connection: &Connection,
+    child_uuid: &str,
+    deleted_at: &str,
+) -> Result<()> {
+    let existed = connection
+        .query_row(
+            "SELECT 1 FROM entry_continuations WHERE child_entry_uuid = ?1 LIMIT 1",
+            [child_uuid],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if existed {
+        record_continuation_tombstone(connection, child_uuid, deleted_at)?;
+    }
+    Ok(())
+}
+
+fn record_continuation_tombstone(
+    connection: &Connection,
+    child_uuid: &str,
+    deleted_at: &str,
+) -> Result<()> {
+    ensure_continuation_tombstones(connection)?;
+    connection.execute(
+        "INSERT INTO sync_entry_continuation_tombstones (child_entry_uuid, deleted_at)
+         VALUES (?1, ?2)
+         ON CONFLICT(child_entry_uuid)
+         DO UPDATE SET deleted_at = excluded.deleted_at",
+        params![child_uuid, deleted_at],
+    )?;
+    Ok(())
+}
+
+fn child_uuids_with_continuations(
+    connection: &Connection,
+    nodes: &[String],
+) -> Result<Vec<String>> {
+    if nodes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = placeholders(nodes.len());
+    let sql = format!(
+        "SELECT child_entry_uuid
+         FROM entry_continuations
+         WHERE child_entry_uuid IN ({placeholders})
+            OR parent_entry_uuid IN ({placeholders})"
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(
+        params_from_iter(
+            nodes
+                .iter()
+                .cloned()
+                .chain(nodes.iter().cloned())
+                .map(Value::Text),
+        ),
+        |row| row.get::<_, String>(0),
+    )?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn ensure_thread_text_tombstones(connection: &Connection, table: &str) -> Result<()> {
+    match table {
+        "entry_thread_titles" => connection.execute(
+            "CREATE TABLE IF NOT EXISTS sync_entry_thread_title_tombstones (
+                thread_root_uuid TEXT PRIMARY KEY,
+                deleted_at TEXT NOT NULL
+            )",
+            [],
+        )?,
+        "entry_thread_summaries" => connection.execute(
+            "CREATE TABLE IF NOT EXISTS sync_entry_thread_summary_tombstones (
+                thread_root_uuid TEXT PRIMARY KEY,
+                deleted_at TEXT NOT NULL
+            )",
+            [],
+        )?,
+        _ => return Err(anyhow!("Unsupported thread metadata table: {table}")),
+    };
+    Ok(())
+}
+
+fn record_thread_text_tombstone(
+    connection: &Connection,
+    table: &str,
+    root_uuid: &str,
+    deleted_at: &str,
+) -> Result<()> {
+    ensure_thread_text_tombstones(connection, table)?;
+    let tombstone_table = match table {
+        "entry_thread_titles" => "sync_entry_thread_title_tombstones",
+        "entry_thread_summaries" => "sync_entry_thread_summary_tombstones",
+        _ => return Err(anyhow!("Unsupported thread metadata table: {table}")),
+    };
+    connection.execute(
+        &format!(
+            "INSERT INTO {tombstone_table} (thread_root_uuid, deleted_at)
+             VALUES (?1, ?2)
+             ON CONFLICT(thread_root_uuid)
+             DO UPDATE SET deleted_at = excluded.deleted_at"
+        ),
+        params![root_uuid, deleted_at],
+    )?;
+    Ok(())
+}
+
+fn delete_thread_text_tombstone(
+    connection: &Connection,
+    table: &str,
+    root_uuid: &str,
+) -> Result<()> {
+    let tombstone_table = match table {
+        "entry_thread_titles" => "sync_entry_thread_title_tombstones",
+        "entry_thread_summaries" => "sync_entry_thread_summary_tombstones",
+        _ => return Err(anyhow!("Unsupported thread metadata table: {table}")),
+    };
+    if table_exists(connection, tombstone_table)? {
+        connection.execute(
+            &format!("DELETE FROM {tombstone_table} WHERE thread_root_uuid = ?1"),
             [root_uuid],
         )?;
     }

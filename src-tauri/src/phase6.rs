@@ -186,6 +186,20 @@ pub fn get_sync_overview() -> Result<SyncOverviewResponse> {
 pub(crate) fn get_sync_overview_for_database(db_path: &Path) -> Result<SyncOverviewResponse> {
     let connection = db::open_read_only_connection(db_path)?;
     let tables = detected_tables(&connection)?;
+    let local_settings = db::read_local_path_settings();
+    let sync_path = env::var("CAPSULE_SYNC_PATH")
+        .ok()
+        .and_then(|value| normalized_string(Some(&value)))
+        .or_else(|| local_settings.sync_path.clone());
+    let configured = sync_path.is_some();
+    let sync_file_path = sync_path
+        .as_ref()
+        .map(|path| db::path_to_string(&Path::new(path).join("capsule_sync.json")));
+    let auto_sync_enabled = configured && local_settings.auto_sync_enabled.unwrap_or(false);
+    let auto_sync_interval_minutes = local_settings
+        .auto_sync_interval_minutes
+        .unwrap_or(15)
+        .clamp(1, 24 * 60);
     let status = if tables.contains("sync_status") {
         connection
             .query_row(
@@ -227,16 +241,17 @@ pub(crate) fn get_sync_overview_for_database(db_path: &Path) -> Result<SyncOverv
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    let bridge_configured = python_bridge_configured();
     let mut warnings = Vec::new();
-    if !bridge_configured {
-        warnings.push(
-            "Shared-folder sync and GitHub Gist import remain delegated to the Python bridge; no bridge command is configured."
-                .to_string(),
-        );
+    if !configured {
+        warnings.push("No shared-folder sync path is configured in Settings.".to_string());
     }
 
     Ok(SyncOverviewResponse {
+        configured,
+        sync_path,
+        sync_file_path,
+        auto_sync_enabled,
+        auto_sync_interval_minutes,
         status,
         recent_history,
         tombstones,
@@ -244,17 +259,17 @@ pub(crate) fn get_sync_overview_for_database(db_path: &Path) -> Result<SyncOverv
             capability(
                 "shared-folder-sync",
                 "Shared-folder sync",
-                tables.contains("sync_status") || tables.contains("sync_history"),
-                bridge_configured,
-                false,
                 true,
-                "Tauri displays sync state; executing compatibility sync requires the configured Python bridge.",
+                configured,
+                false,
+                false,
+                "Runs Capsule-compatible shared-folder sync directly from Tauri.",
             ),
             capability(
                 "github-gist-import",
                 "GitHub Gist import",
                 true,
-                bridge_configured,
+                python_bridge_configured(),
                 true,
                 true,
                 "Mobile import is capability-gated and remains bridge-driven.",

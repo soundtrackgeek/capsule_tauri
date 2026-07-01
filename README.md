@@ -49,8 +49,8 @@ Capsule database:
   config backups before writing.
 - Entry location Settings controls for choosing IP lookup or a fixed default
   place for new-entry weather capture.
-- Editable Settings paths for the active database file, image media root, and
-  backup directory, with native browse buttons.
+- Editable Settings paths for the active database file, image media root,
+  backup directory, and shared sync folder, with native browse buttons.
 - Local theme and sidebar-density settings stored outside the journal database.
 - Tag rename, merge, and delete tools guarded by verified database backups.
 - Mood rename and clear tools guarded by verified database backups.
@@ -71,8 +71,13 @@ Capsule database:
 - AI overview for provider/model readiness, persisted conversations, AI Time
   Capsules, embedding models, and local metadata suggestions that do not make
   cloud requests.
-- Sync overview for shared-folder status, recent sync history, tombstone counts,
-  and GitHub Gist import readiness without running bridge actions implicitly.
+- Native Capsule-compatible shared-folder sync using `capsule_sync.json`,
+  `capsule_threads_sync.json`, and `capsule_ai_chats_sync.json`, including entry,
+  image metadata, location, custom library, thread, AI chat, and tombstone
+  merging.
+- Sync controls in Settings for manual runs and configurable automatic sync
+  intervals, plus a Sync page with status, history, tombstone counts, and GitHub
+  Gist import readiness.
 - Legacy plugin-prefixed media and location tables remain supported for Capsule
   compatibility, while plugin registry navigation and activation toggles are not
   exposed in the UI.
@@ -96,6 +101,9 @@ config, then the default `C:\Users\jtill\OneDrive\_capsule\images`. Backup
 storage resolves `CAPSULE_BACKUP_DIR` first, then the saved local backup path
 from Settings, then the active database directory. Saved local paths are stored
 outside the journal database in the app path settings file shown in Settings.
+Shared-folder sync resolves `CAPSULE_SYNC_PATH` first, then the saved sync path
+from Settings, and writes the same three sync files used by the older Capsule
+app.
 Uploaded originals use Capsule's legacy image key layout
 `<hash-prefix>/<sha256>.<ext>` and thumbnails use
 `thumb/<hash-prefix>/<sha256>.jpg`, with attachment metadata stored in
@@ -158,7 +166,13 @@ creates a verified backup first, records a sync tombstone, removes local
 entry-owned relation rows, resequences later numeric IDs, and rebuilds
 `entries_fts` so legacy Capsule ID ordering stays compatible.
 
-AI chat, semantic vector ranking, shared-folder sync execution, and GitHub Gist
-mobile import remain capability-gated. Tauri reads their existing state, but it
-does not send journal data to cloud providers or run bridge-driven workflows
-without explicit bridge configuration and user action.
+Shared-folder sync execution is local and backup-guarded. Manual sync runs only
+from an explicit Settings or Sync-page action, and automatic sync runs only when
+enabled with a saved interval. Sync applies remote delete tombstones before
+upserts, keeps newer local rows when they win by timestamp, rewrites the latest
+sync files after merging, and retries if the shared file changes during a run.
+
+AI chat live requests, semantic vector ranking, and GitHub Gist mobile import
+remain capability-gated. Tauri reads their existing state, but it does not send
+journal data to cloud providers or run bridge-driven workflows without explicit
+bridge configuration and user action.
