@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.11.0 - 2026-07-02
+
+### Added
+
+- Added native window state restoration so Capsule reopens with the last size,
+  position, maximized, or fullscreen state used before closing.
+
+### Changed
+
+- Bumped the app version to 0.11.0.
+
 ## 0.10.1 - 2026-07-02
 
 ### Changed

@@ -8,6 +8,8 @@ wall, and capability-gated AI/sync/gamification surfaces over the active
 Capsule database:
 
 - Tauri 2 desktop configuration.
+- Native window restoration for the last size, position, maximized, and
+  fullscreen state used before closing the app.
 - React + TypeScript + Vite frontend.
 - Browser-only mock backend for `npm run dev`.
 - Read-only database status for the active Capsule database.
