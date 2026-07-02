@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.13.0 - 2026-07-02
+
+### Added
+
+- Added chip-style tag entry in the New Entry and Edit Entry composer, with
+  autocomplete selection, Tab/Enter pill creation, comma paste handling, and
+  removable tag pills.
+
+### Changed
+
+- Bumped the app version to 0.13.0.
+
 ## 0.12.0 - 2026-07-02
 
 ### Added

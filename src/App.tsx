@@ -4177,12 +4177,11 @@ function ComposerView({
               placeholder="focused"
               value={draft.mood}
             />
-            <MetadataAutocompleteInput
+            <TagChipInput
               label="Tags"
-              mode="comma"
               onChange={(tags) => onChange({ ...draft, tags })}
               options={tagOptions}
-              placeholder="work, capsule"
+              placeholder="Add tag"
               value={draft.tags}
             />
             <label className="field">
@@ -4552,6 +4551,258 @@ function MetadataAutocompleteInput({
         type="text"
         value={value}
       />
+      {listOpen && (
+        <div className="autocomplete-list" id={listId} role="listbox">
+          {suggestions.map((option, index) => {
+            const optionId = `${listId}-option-${index}`;
+            const selected = index === safeHighlightedIndex;
+            return (
+              <button
+                aria-selected={selected}
+                className={
+                  selected
+                    ? "autocomplete-option autocomplete-option--active"
+                    : "autocomplete-option"
+                }
+                id={optionId}
+                key={option.value}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  applySuggestion(option);
+                }}
+                role="option"
+                tabIndex={-1}
+                type="button"
+              >
+                <span className="autocomplete-option-label">{metadataOptionLabel(option)}</span>
+                {option.meta && <span className="autocomplete-option-meta">{option.meta}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type TagChipInputProps = {
+  label: string;
+  value: string;
+  placeholder: string;
+  options: MetadataAutocompleteOption[];
+  onChange: (value: string) => void;
+};
+
+function TagChipInput({
+  label,
+  value,
+  placeholder,
+  options,
+  onChange,
+}: TagChipInputProps) {
+  const inputId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState("");
+  const [focused, setFocused] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const labelId = `${inputId}-label`;
+  const listId = `${inputId}-list`;
+  const tagValues = useMemo(() => uniqueTagList(splitFilter(value)), [value]);
+  const normalizedQuery = query.trim().toLowerCase();
+
+  useEffect(() => {
+    setHighlightedIndex(0);
+  }, [normalizedQuery]);
+
+  const suggestions = useMemo(() => {
+    if (!normalizedQuery) {
+      return [];
+    }
+
+    const selectedValues = new Set(tagValues.map((tag) => tag.toLowerCase()));
+
+    return options
+      .filter((option) => {
+        const optionValue = option.value.trim();
+        if (!optionValue) {
+          return false;
+        }
+
+        if (selectedValues.has(optionValue.toLowerCase())) {
+          return false;
+        }
+
+        const normalizedValue = optionValue.toLowerCase();
+        const normalizedLabel = (option.label ?? "").toLowerCase();
+        return (
+          normalizedValue.startsWith(normalizedQuery) ||
+          normalizedLabel.startsWith(normalizedQuery)
+        );
+      })
+      .sort((left, right) => metadataOptionLabel(left).localeCompare(metadataOptionLabel(right)))
+      .slice(0, 8);
+  }, [normalizedQuery, options, tagValues]);
+
+  const listOpen = focused && expanded && suggestions.length > 0;
+  const safeHighlightedIndex = Math.min(highlightedIndex, Math.max(suggestions.length - 1, 0));
+  const activeDescendant = listOpen ? `${listId}-option-${safeHighlightedIndex}` : undefined;
+
+  const emitTags = useCallback(
+    (nextTags: string[]) => onChange(serializeTagList(uniqueTagList(nextTags))),
+    [onChange],
+  );
+
+  const commitTags = useCallback(
+    (nextTags: string[], refocus = true) => {
+      const mergedTags = appendTagValues(tagValues, nextTags);
+      if (mergedTags.length !== tagValues.length) {
+        emitTags(mergedTags);
+      }
+      setQuery("");
+      setExpanded(false);
+      if (refocus) {
+        requestAnimationFrame(() => inputRef.current?.focus());
+      }
+    },
+    [emitTags, tagValues],
+  );
+
+  const commitPendingTag = useCallback(() => {
+    if (!query.trim()) {
+      return false;
+    }
+
+    commitTags(splitFilter(query));
+    return true;
+  }, [commitTags, query]);
+
+  const applySuggestion = useCallback(
+    (option: MetadataAutocompleteOption) => {
+      commitTags([option.value]);
+    },
+    [commitTags],
+  );
+
+  const removeTag = useCallback(
+    (tagToRemove: string) => {
+      emitTags(tagValues.filter((tag) => tag.toLowerCase() !== tagToRemove.toLowerCase()));
+      requestAnimationFrame(() => inputRef.current?.focus());
+    },
+    [emitTags, tagValues],
+  );
+
+  return (
+    <div className="field autocomplete-field tag-editor-field">
+      <span id={labelId}>{label}</span>
+      <div
+        className={focused ? "tag-editor tag-editor--focused" : "tag-editor"}
+        onClick={() => inputRef.current?.focus()}
+      >
+        {tagValues.map((tag) => (
+          <span className="tag-input-chip" key={tag}>
+            <span>{tag}</span>
+            <button
+              aria-label={`Remove ${tag}`}
+              onClick={() => removeTag(tag)}
+              onMouseDown={(event) => event.preventDefault()}
+              title={`Remove ${tag}`}
+              type="button"
+            >
+              <X size={12} />
+            </button>
+          </span>
+        ))}
+        <input
+          aria-activedescendant={activeDescendant}
+          aria-autocomplete="list"
+          aria-controls={listOpen ? listId : undefined}
+          aria-expanded={listOpen}
+          aria-haspopup="listbox"
+          aria-labelledby={labelId}
+          autoComplete="off"
+          onBlur={() => {
+            if (query.trim()) {
+              commitTags(splitFilter(query), false);
+            }
+            setFocused(false);
+            setExpanded(false);
+          }}
+          onChange={(event) => {
+            const nextQuery = event.currentTarget.value;
+            if (nextQuery.includes(",")) {
+              const queryParts = nextQuery.split(",");
+              const completedTags = queryParts.slice(0, -1);
+              const remainingQuery = queryParts[queryParts.length - 1] ?? "";
+              if (completedTags.some((tag) => tag.trim())) {
+                const mergedTags = appendTagValues(tagValues, completedTags);
+                emitTags(mergedTags);
+              }
+              setQuery(remainingQuery);
+              setExpanded(true);
+              return;
+            }
+
+            setQuery(nextQuery);
+            setExpanded(true);
+          }}
+          onFocus={() => {
+            setFocused(true);
+            setExpanded(true);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown" && suggestions.length > 0) {
+              event.preventDefault();
+              setExpanded(true);
+              setHighlightedIndex((current) =>
+                listOpen ? Math.min(current + 1, suggestions.length - 1) : 0,
+              );
+              return;
+            }
+
+            if (event.key === "ArrowUp" && suggestions.length > 0) {
+              event.preventDefault();
+              setExpanded(true);
+              setHighlightedIndex((current) =>
+                listOpen ? Math.max(current - 1, 0) : suggestions.length - 1,
+              );
+              return;
+            }
+
+            if ((event.key === "Enter" || event.key === "Tab") && query.trim()) {
+              event.preventDefault();
+              const suggestion = listOpen ? suggestions[safeHighlightedIndex] : null;
+              if (suggestion) {
+                applySuggestion(suggestion);
+              } else {
+                commitPendingTag();
+              }
+              return;
+            }
+
+            if (event.key === "," && query.trim()) {
+              event.preventDefault();
+              commitPendingTag();
+              return;
+            }
+
+            if (event.key === "Backspace" && !query && tagValues.length > 0) {
+              event.preventDefault();
+              emitTags(tagValues.slice(0, -1));
+              return;
+            }
+
+            if (event.key === "Escape" && listOpen) {
+              event.preventDefault();
+              setExpanded(false);
+            }
+          }}
+          placeholder={tagValues.length > 0 ? "" : placeholder}
+          ref={inputRef}
+          type="text"
+          value={query}
+        />
+      </div>
       {listOpen && (
         <div className="autocomplete-list" id={listId} role="listbox">
           {suggestions.map((option, index) => {
@@ -6916,6 +7167,28 @@ function splitFilter(value: string) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function uniqueTagList(tags: string[]) {
+  const seen = new Set<string>();
+  const uniqueTags: string[] = [];
+  for (const tag of tags) {
+    const normalized = tag.trim();
+    const key = normalized.toLowerCase();
+    if (normalized && !seen.has(key)) {
+      seen.add(key);
+      uniqueTags.push(normalized);
+    }
+  }
+  return uniqueTags;
+}
+
+function appendTagValues(currentTags: string[], nextTags: string[]) {
+  return uniqueTagList([...currentTags, ...nextTags]);
+}
+
+function serializeTagList(tags: string[]) {
+  return tags.join(", ");
 }
 
 function autocompleteTokenForValue(

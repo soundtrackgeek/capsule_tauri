@@ -117,10 +117,16 @@ body {
 :root[data-theme="dark"] .icon-button,
 :root[data-theme="dark"] .field input,
 :root[data-theme="dark"] .field select,
-:root[data-theme="dark"] .field textarea {
+:root[data-theme="dark"] .field textarea,
+:root[data-theme="dark"] .tag-editor {
   border-color: #34433a;
   background: #141a17;
   color: #e9eee8;
+}
+
+:root[data-theme="dark"] .tag-editor--focused {
+  border-color: #7d9b88;
+  outline-color: rgba(125, 155, 136, 0.24);
 }
 
 :root[data-theme="dark"] .autocomplete-list {
@@ -167,9 +173,14 @@ body {
 }
 
 :root[data-theme="dark"] .tag-chip,
+:root[data-theme="dark"] .tag-input-chip,
 :root[data-theme="dark"] .icon-stat {
   background: #29342d;
   color: #dcebe1;
+}
+
+:root[data-theme="dark"] .tag-input-chip button:hover {
+  background: rgba(220, 235, 225, 0.12);
 }
 
 :root[data-theme="dark"] .mood-chip {
@@ -389,6 +400,7 @@ body {
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field input,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field select,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field textarea,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .tag-editor,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .writer-controls input[type="color"],
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .writer-controls select,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .writer-controls input[type="range"] {
@@ -399,7 +411,8 @@ body {
 
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field input:focus,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field select:focus,
-:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field textarea:focus {
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field textarea:focus,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .tag-editor--focused {
   border-color: var(--retro-accent);
   outline-color: var(--retro-focus);
 }
@@ -519,12 +532,17 @@ body {
 }
 
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .tag-chip,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .tag-input-chip,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .icon-stat,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .state-panel code,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .thread-entry-index,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .word-cloud strong {
   background: var(--retro-chip-bg);
   color: var(--retro-chip-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .tag-input-chip button:hover {
+  background: var(--retro-hover);
 }
 
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .mood-chip {
@@ -1306,6 +1324,79 @@ button:active:not(:disabled) {
 
 .autocomplete-field {
   position: relative;
+}
+
+.tag-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid #cfd8d1;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #17201b;
+  cursor: text;
+  padding: 4px 6px;
+}
+
+.tag-editor--focused {
+  border-color: #37684f;
+  outline: 3px solid rgba(55, 104, 79, 0.16);
+}
+
+.tag-editor input,
+.tag-editor input:focus {
+  flex: 1 1 92px;
+  width: auto;
+  min-width: 92px;
+  min-height: 28px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  outline: 0;
+  padding: 0 2px;
+}
+
+.tag-input-chip {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  max-width: 100%;
+  min-height: 28px;
+  border-radius: 999px;
+  background: #dcebe1;
+  color: #214c2f;
+  padding: 0 4px 0 9px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.tag-input-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-input-chip button {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.tag-input-chip button:hover {
+  background: rgba(33, 76, 47, 0.12);
 }
 
 .autocomplete-list {
