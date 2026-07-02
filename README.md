@@ -51,7 +51,8 @@ Capsule database:
   place for new-entry weather capture.
 - Editable Settings paths for the active database file, image media root,
   backup directory, and shared sync folder, with native browse buttons.
-- Local theme and sidebar-density settings stored outside the journal database.
+- Local System, Light, Dark, MS-DOS, Commodore 64, and ZX Spectrum theme
+  settings plus sidebar-density settings stored outside the journal database.
 - Tag rename, merge, and delete tools guarded by verified database backups.
 - Mood rename and clear tools guarded by verified database backups.
 - Template and prompt library management for custom rows, with built-in rows

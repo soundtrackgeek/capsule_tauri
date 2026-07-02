@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.0 - 2026-07-02
+
+### Added
+
+- Added MS-DOS, Commodore 64, and ZX Spectrum inspired Interface themes.
+
+### Changed
+
+- Bumped the app version to 0.10.0.
+
 ## 0.9.4 - 2026-07-02
 
 ### Fixed

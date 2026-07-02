@@ -244,9 +244,12 @@ type WriterSettings = {
   lineSpacing: number;
 };
 
+type UiTheme = "system" | "light" | "dark" | "msdos" | "commodore64" | "spectrum";
+type SidebarMode = "comfortable" | "compact";
+
 type UiSettings = {
-  theme: "system" | "light" | "dark";
-  sidebarMode: "comfortable" | "compact";
+  theme: UiTheme;
+  sidebarMode: SidebarMode;
 };
 
 type LocationCaptureDraft = {
@@ -334,10 +337,47 @@ const draftStorageKey = "capsule-tauri-composer-draft-v1";
 const uiSettingsStorageKey = "capsule-tauri-ui-settings-v1";
 const appUpdateCheckIntervalMs = 60 * 60 * 1000;
 
+const uiThemeOptions: Array<{ value: UiTheme; label: string }> = [
+  { value: "system", label: "System" },
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+  { value: "msdos", label: "MS-DOS" },
+  { value: "commodore64", label: "Commodore 64" },
+  { value: "spectrum", label: "ZX Spectrum" },
+];
+
+const sidebarModeOptions: Array<{ value: SidebarMode; label: string }> = [
+  { value: "comfortable", label: "Comfortable" },
+  { value: "compact", label: "Compact" },
+];
+
 const defaultUiSettings: UiSettings = {
   theme: "system",
   sidebarMode: "comfortable",
 };
+
+function isUiTheme(value: unknown): value is UiTheme {
+  return uiThemeOptions.some((option) => option.value === value);
+}
+
+function isSidebarMode(value: unknown): value is SidebarMode {
+  return sidebarModeOptions.some((option) => option.value === value);
+}
+
+function normalizeUiSettings(value: unknown): UiSettings {
+  if (!value || typeof value !== "object") {
+    return defaultUiSettings;
+  }
+
+  const partial = value as Partial<Record<keyof UiSettings, unknown>>;
+
+  return {
+    theme: isUiTheme(partial.theme) ? partial.theme : defaultUiSettings.theme,
+    sidebarMode: isSidebarMode(partial.sidebarMode)
+      ? partial.sidebarMode
+      : defaultUiSettings.sidebarMode,
+  };
+}
 
 const defaultEntryFilters: EntryFilterForm = {
   text: "",
@@ -998,7 +1038,7 @@ function App() {
     }
 
     try {
-      setUiSettings({ ...defaultUiSettings, ...JSON.parse(rawSettings) });
+      setUiSettings(normalizeUiSettings(JSON.parse(rawSettings)));
     } catch {
       window.localStorage.removeItem(uiSettingsStorageKey);
     }
@@ -4819,9 +4859,11 @@ function SettingsView({
               }
               value={uiSettings.theme}
             >
-              <option value="system">System</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
+              {uiThemeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </label>
           <label className="field">
@@ -4835,8 +4877,11 @@ function SettingsView({
               }
               value={uiSettings.sidebarMode}
             >
-              <option value="comfortable">Comfortable</option>
-              <option value="compact">Compact</option>
+              {sidebarModeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </label>
         </div>

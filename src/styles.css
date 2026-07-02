@@ -170,6 +170,424 @@ body {
   background: #243029;
 }
 
+:root[data-theme="msdos"] {
+  --retro-bg: #061309;
+  --retro-body-bg:
+    linear-gradient(180deg, rgba(92, 255, 125, 0.1), rgba(92, 255, 125, 0) 260px),
+    #061309;
+  --retro-sidebar: #07180b;
+  --retro-panel: #0a1d0f;
+  --retro-card: #0d2412;
+  --retro-control: #020803;
+  --retro-text: #76ff88;
+  --retro-muted: #49c862;
+  --retro-muted-strong: #62e477;
+  --retro-border: #2bea59;
+  --retro-card-border: #1e9f3c;
+  --retro-accent: #b6ff9c;
+  --retro-active-bg: #76ff88;
+  --retro-active-text: #061309;
+  --retro-hover: #11341a;
+  --retro-focus: rgba(118, 255, 136, 0.24);
+  --retro-chip-bg: #102f18;
+  --retro-chip-text: #b6ff9c;
+  --retro-mood-bg: #2e2a0a;
+  --retro-mood-text: #ffd85a;
+  --retro-warn-bg: #2e2608;
+  --retro-warn-text: #ffd85a;
+  --retro-success-bg: #12391c;
+  --retro-success-text: #b6ff9c;
+  --retro-neutral-bg: #092b32;
+  --retro-neutral-text: #7eeaff;
+  --retro-danger: #ff6a5f;
+  --retro-danger-hover: #d94c43;
+  --retro-danger-bg: #32110f;
+  --retro-danger-text: #ffe7e4;
+  --retro-shadow: 0 0 0 1px rgba(118, 255, 136, 0.12);
+}
+
+:root[data-theme="commodore64"] {
+  --retro-bg: #261765;
+  --retro-body-bg: linear-gradient(180deg, #41339a 0, #261765 360px);
+  --retro-sidebar: #302184;
+  --retro-panel: #3a2a94;
+  --retro-card: #4430a5;
+  --retro-control: #23145f;
+  --retro-text: #f5f3ff;
+  --retro-muted: #c8c2ff;
+  --retro-muted-strong: #dedaff;
+  --retro-border: #7c70da;
+  --retro-card-border: #6f61d4;
+  --retro-accent: #7fffff;
+  --retro-active-bg: #7fffff;
+  --retro-active-text: #20115a;
+  --retro-hover: #4f3ab4;
+  --retro-focus: rgba(127, 255, 255, 0.24);
+  --retro-chip-bg: #2d1d76;
+  --retro-chip-text: #aefcff;
+  --retro-mood-bg: #5a297b;
+  --retro-mood-text: #ffd1ff;
+  --retro-warn-bg: #594119;
+  --retro-warn-text: #ffe28a;
+  --retro-success-bg: #1c5c58;
+  --retro-success-text: #b7fff1;
+  --retro-neutral-bg: #263f8d;
+  --retro-neutral-text: #d8e4ff;
+  --retro-danger: #ff8fb2;
+  --retro-danger-hover: #ff6f9d;
+  --retro-danger-bg: #5a1f4c;
+  --retro-danger-text: #fff2f7;
+  --retro-shadow: 0 18px 34px -30px rgba(5, 4, 24, 0.72);
+}
+
+:root[data-theme="spectrum"] {
+  --retro-bg: #090909;
+  --retro-body-bg:
+    linear-gradient(
+      90deg,
+      #004cff 0 8px,
+      #d900ff 8px 16px,
+      #e00000 16px 24px,
+      #ffe600 24px 32px,
+      #00b800 32px 40px,
+      #00e5ff 40px 48px,
+      transparent 48px
+    ),
+    #090909;
+  --retro-sidebar: #101010;
+  --retro-panel: #141414;
+  --retro-card: #1b1b1b;
+  --retro-control: #050505;
+  --retro-text: #f8f8f8;
+  --retro-muted: #c7c7c7;
+  --retro-muted-strong: #e2e2e2;
+  --retro-border: #f8f8f8;
+  --retro-card-border: #5e5e5e;
+  --retro-accent: #ffe600;
+  --retro-active-bg: #ffe600;
+  --retro-active-text: #050505;
+  --retro-hover: #242424;
+  --retro-focus: rgba(255, 230, 0, 0.28);
+  --retro-chip-bg: #002f7f;
+  --retro-chip-text: #f8f8f8;
+  --retro-mood-bg: #7a007f;
+  --retro-mood-text: #fff0ff;
+  --retro-warn-bg: #554a00;
+  --retro-warn-text: #fff59d;
+  --retro-success-bg: #005c00;
+  --retro-success-text: #eaffea;
+  --retro-neutral-bg: #00545c;
+  --retro-neutral-text: #e8fcff;
+  --retro-danger: #ff3b30;
+  --retro-danger-hover: #d82920;
+  --retro-danger-bg: #4c0b07;
+  --retro-danger-text: #fff0ee;
+  --retro-shadow: none;
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) {
+  color: var(--retro-text);
+  background: var(--retro-bg);
+  color-scheme: dark;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) body {
+  background: var(--retro-body-bg);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) ::placeholder {
+  color: var(--retro-muted);
+  opacity: 0.78;
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .sidebar {
+  border-color: var(--retro-border);
+  background: var(--retro-sidebar);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .brand-mark,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .nav-item--active,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .nav-item--active:hover {
+  border-color: var(--retro-active-bg);
+  background: var(--retro-active-bg);
+  color: var(--retro-active-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .nav-item {
+  color: var(--retro-muted-strong);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .nav-item:hover {
+  border-color: var(--retro-accent);
+  background: var(--retro-hover);
+  color: var(--retro-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .panel,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .about-panel,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .backup-view,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .filters-panel,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .entry-list-panel,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .detail-panel,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .thread-list-panel,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .thread-detail-panel,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .media-panel,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .toolbar-panel,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .cover-wall-panel,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .state-panel,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .composer-main,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .confirm-dialog {
+  border-color: var(--retro-border);
+  background: var(--retro-panel);
+  box-shadow: var(--retro-shadow);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .metric,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .entry-mini,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .backup-row,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .data-row,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .entry-card,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .thread-card,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .thread-entry-row,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .history-row,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .composer-queued-image-preview,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .composer-attached-image,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .media-tile,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .capability-card,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .quest-card,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .suggestion-card,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .calendar-month,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .cover-tile,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .skeleton-card {
+  border-color: var(--retro-card-border);
+  background: var(--retro-card);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .secondary-button,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .icon-button,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field input,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field select,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field textarea,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .writer-controls input[type="color"],
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .writer-controls select,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .writer-controls input[type="range"] {
+  border-color: var(--retro-card-border);
+  background: var(--retro-control);
+  color: var(--retro-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field input:focus,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field select:focus,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field textarea:focus {
+  border-color: var(--retro-accent);
+  outline-color: var(--retro-focus);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .primary-button {
+  background: var(--retro-active-bg);
+  color: var(--retro-active-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .primary-button:hover {
+  background: var(--retro-accent);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .icon-button:hover,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .secondary-button:hover {
+  border-color: var(--retro-accent);
+  background: var(--retro-hover);
+  color: var(--retro-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .danger-button {
+  border-color: var(--retro-danger);
+  background: var(--retro-danger);
+  color: var(--retro-danger-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .danger-button:hover {
+  background: var(--retro-danger-hover);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .icon-button--danger {
+  border-color: var(--retro-danger);
+  color: var(--retro-danger);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .icon-button--active,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .entry-card:hover,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .entry-card--active,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .thread-card:hover,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .thread-card--active,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .cover-tile:hover,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .cover-tile--active {
+  border-color: var(--retro-accent);
+  background: var(--retro-hover);
+  color: var(--retro-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .entry-card--active,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .thread-card--active,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .cover-tile--active {
+  box-shadow: inset 3px 0 0 var(--retro-accent);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .brand p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .muted,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .eyebrow,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .entry-mini p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .entry-card p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .thread-card p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .thread-entry-row p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .backup-row p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .data-row p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .capability-card p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .media-tile p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .quest-card p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .suggestion-card p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .cover-tile span,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .bar-row em,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .about-panel p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .metadata-block p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .history-row p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .history-row span,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .composer-queued-image-preview p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .composer-attached-image p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .update-summary p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .update-progress span,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .detail-panel--empty p {
+  color: var(--retro-muted);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .detail-list dt,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .metric dt,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field span,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .check-row span,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .metadata-block h4,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .composer-image-row-heading span,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .calendar-weekdays,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .quest-footer {
+  color: var(--retro-muted-strong);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .detail-list--paths code,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .entry-body,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .confirm-dialog blockquote {
+  color: var(--retro-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .tag-chip,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .icon-stat,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .state-panel code,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .thread-entry-index,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .word-cloud strong {
+  background: var(--retro-chip-bg);
+  color: var(--retro-chip-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .mood-chip {
+  background: var(--retro-mood-bg);
+  color: var(--retro-mood-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .status-pill--good,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .banner--success,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .writer-banner--success {
+  background: var(--retro-success-bg);
+  color: var(--retro-success-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .status-pill--warn,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .inline-warning {
+  background: var(--retro-warn-bg);
+  color: var(--retro-warn-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .status-pill--neutral,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .banner--neutral {
+  background: var(--retro-neutral-bg);
+  color: var(--retro-neutral-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .banner--error,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .writer-banner--error,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .danger-mark {
+  background: var(--retro-danger-bg);
+  color: var(--retro-danger);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .media-placeholder,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .composer-preview-thumb,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .composer-image-thumb,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .cover-thumb,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .cover-full-preview,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .bar-track,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .progress-track,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .calendar-day {
+  background: var(--retro-control);
+  color: var(--retro-muted);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .bar-track div,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .progress-track div {
+  background: var(--retro-accent);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .calendar-day--level-1 {
+  background: var(--retro-chip-bg);
+  color: var(--retro-chip-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .calendar-day--level-2 {
+  background: var(--retro-neutral-bg);
+  color: var(--retro-neutral-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .calendar-day--level-3 {
+  background: var(--retro-success-bg);
+  color: var(--retro-success-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .calendar-day--level-4 {
+  background: var(--retro-active-bg);
+  color: var(--retro-active-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .entry-body,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .metadata-block,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .composer-image-draft,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .composer-existing-images {
+  border-color: var(--retro-card-border);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .confirm-dialog p {
+  color: var(--retro-muted-strong);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .confirm-dialog blockquote {
+  border-color: var(--retro-danger);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .empty-state {
+  border-color: var(--retro-card-border);
+  color: var(--retro-muted);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--retro-control) 0%,
+    var(--retro-panel) 45%,
+    var(--retro-control) 100%
+  );
+  background-size: 220% 100%;
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .dialog-backdrop {
+  background: rgba(0, 0, 0, 0.72);
+}
+
 button,
 input,
 select,
