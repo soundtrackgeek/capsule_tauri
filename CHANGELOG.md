@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.2 - 2026-07-02
+
+### Removed
+
+- Removed the New Entry composer `When` metadata field so new entries use the
+  actual save time instead of a user-selected timestamp.
+
+### Changed
+
+- Bumped the app version to 0.9.2.
+
 ## 0.9.1 - 2026-07-02
 
 ### Fixed

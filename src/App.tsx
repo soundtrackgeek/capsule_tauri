@@ -230,7 +230,6 @@ type ComposerDraft = {
   summary: string;
   mood: string;
   tags: string;
-  when: string;
   starred: boolean;
   pinned: boolean;
   continueFromUuid: string;
@@ -303,7 +302,6 @@ const emptyComposerDraft: ComposerDraft = {
   summary: "",
   mood: "",
   tags: "",
-  when: "",
   starred: false,
   pinned: false,
   continueFromUuid: "",
@@ -933,9 +931,12 @@ function App() {
     }
 
     try {
-      const parsed = JSON.parse(rawDraft) as ComposerDraft;
-      if (draftHasContent(parsed)) {
-        setComposerDraft({ ...emptyComposerDraft, ...parsed });
+      const { when: _discardedWhen, ...parsedDraft } = JSON.parse(rawDraft) as Partial<ComposerDraft> & {
+        when?: string;
+      };
+      const recoveredDraft = { ...emptyComposerDraft, ...parsedDraft };
+      if (draftHasContent(recoveredDraft)) {
+        setComposerDraft(recoveredDraft);
         setDraftRecovered(true);
       }
     } catch {
@@ -1666,7 +1667,6 @@ function App() {
           summary: nullableFromText(composerDraft.summary),
           mood: nullableFromText(composerDraft.mood),
           tags: splitFilter(composerDraft.tags),
-          when: nullableFromText(composerDraft.when),
           starred: composerDraft.starred,
           pinned: composerDraft.pinned,
           continueFromUuid: nullableFromText(composerDraft.continueFromUuid),
@@ -3966,16 +3966,6 @@ function ComposerView({
                 value={draft.tags}
               />
             </label>
-            {mode === "create" && (
-              <label className="field">
-                <span>When</span>
-                <input
-                  onChange={(event) => onChange({ ...draft, when: event.target.value })}
-                  type="datetime-local"
-                  value={draft.when}
-                />
-              </label>
-            )}
             <label className="field">
               <span>Continue from UUID</span>
               <input
@@ -6457,7 +6447,6 @@ function draftHasContent(draft: ComposerDraft) {
       draft.summary.trim() ||
       draft.mood.trim() ||
       draft.tags.trim() ||
-      draft.when.trim() ||
       draft.continueFromUuid.trim() ||
       draft.starred ||
       draft.pinned,
@@ -6471,7 +6460,6 @@ function draftFromEntry(entry: Entry): ComposerDraft {
     summary: entry.summary ?? "",
     mood: entry.mood ?? "",
     tags: entry.tags.map((tag) => tag.name).join(", "),
-    when: "",
     starred: entry.starred,
     pinned: entry.pinned,
     continueFromUuid: entry.thread?.parentUuid ?? "",

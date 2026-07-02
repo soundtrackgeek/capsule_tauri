@@ -23,9 +23,9 @@ Capsule database:
   and weather auto-capture for new entries.
 - Backup-guarded star, unstar, pin, unpin, hide, unhide, and confirmed delete
   entry actions.
-- Full-page markdown composer with metadata fields, continuation UUID support,
-  multi-select queued local image attachments with thumbnail previews, writing
-  stats, and local draft recovery.
+- Full-page markdown composer with metadata fields, save-time entry dating,
+  continuation UUID support, multi-select queued local image attachments with
+  thumbnail previews, writing stats, and local draft recovery.
 - Distraction-free Writer Mode with local display preferences.
 - Entry history review for legacy Capsule edit snapshots.
 - Keyword search using `entries_fts` when available, with a compatibility
