@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.1 - 2026-07-02
+
+### Added
+
+- Added a tag-triggered GitHub Actions workflow that builds Windows Tauri
+  bundles and attaches the NSIS setup executable and MSI to GitHub Releases.
+
 ## 0.8.0 - 2026-07-01
 
 ### Added

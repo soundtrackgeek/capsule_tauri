@@ -133,6 +133,22 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
+## Releases
+
+Windows release bundles are built and attached to GitHub Releases by the
+`Release Windows Installer` workflow. After updating the app version and
+committing the release changes, push a semantic version tag to publish the
+installer assets:
+
+```powershell
+git tag v0.8.0
+git push origin v0.8.0
+```
+
+The workflow runs `npm ci` and `npm run tauri:build` on `windows-latest`, then
+uploads the generated NSIS setup executable and MSI from
+`src-tauri/target/release/bundle` to the matching GitHub Release.
+
 Rust tests can be run from the Tauri crate:
 
 ```powershell
