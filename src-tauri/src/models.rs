@@ -174,6 +174,7 @@ pub struct LocationConfigUpdateRequest {
 pub struct PathSettingsResponse {
     pub database_path: String,
     pub image_media_root: String,
+    pub cover_wall_root: String,
     pub backup_directory: String,
     pub sync_path: Option<String>,
     pub github_gist_id: Option<String>,
@@ -189,6 +190,7 @@ pub struct PathSettingsResponse {
 pub struct PathSettingsUpdateRequest {
     pub database_path: Option<String>,
     pub image_media_root: Option<String>,
+    pub cover_wall_root: Option<String>,
     pub backup_directory: Option<String>,
     pub sync_path: Option<String>,
     pub github_gist_id: Option<String>,

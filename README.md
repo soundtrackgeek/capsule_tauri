@@ -123,8 +123,9 @@ Uploaded originals use Capsule's legacy image key layout
 `<hash-prefix>/<sha256>.<ext>` and thumbnails use
 `thumb/<hash-prefix>/<sha256>.jpg`, with attachment metadata stored in
 `plugin_media_assets` and `plugin_entry_media` for old Capsule compatibility.
-Cover wall assets are local-only and ignored by Git under `local-assets/`; set
-`CAPSULE_COVERS_ROOT` to point at a different cover folder.
+Cover wall assets are local-only and ignored by Git under `local-assets/`.
+Cover Wall image storage resolves `CAPSULE_COVERS_ROOT` first, then the saved
+Cover Wall image path from Settings, then `local-assets/covers`.
 Mood sentiment scoring for Analytics and Calendar uses the bundled legacy mood
 scale in `src-tauri/mood_sentiment.json`.
 

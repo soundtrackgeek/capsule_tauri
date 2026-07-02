@@ -107,6 +107,15 @@ pub fn get_path_settings() -> Result<PathSettingsResponse> {
             "CAPSULE_IMAGES_MEDIA_ROOT is set and overrides the saved image path.".to_string(),
         );
     }
+    if env::var(images::COVER_ROOT_ENV)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .is_some()
+    {
+        warnings.push(
+            "CAPSULE_COVERS_ROOT is set and overrides the saved Cover Wall image path.".to_string(),
+        );
+    }
     if env::var("CAPSULE_BACKUP_DIR")
         .ok()
         .filter(|value| !value.trim().is_empty())
@@ -161,6 +170,7 @@ pub fn get_path_settings() -> Result<PathSettingsResponse> {
     Ok(PathSettingsResponse {
         database_path: db::path_to_string(&db_path),
         image_media_root: images::get_image_media_root()?,
+        cover_wall_root: images::get_cover_wall_root(),
         backup_directory: db::path_to_string(&backup_directory),
         sync_path,
         github_gist_id,
@@ -179,6 +189,7 @@ pub fn set_path_settings(input: PathSettingsUpdateRequest) -> Result<PathSetting
     let mut settings = db::read_local_path_settings();
     settings.database_path = normalize_string(input.database_path.as_deref());
     settings.image_media_root = normalize_string(input.image_media_root.as_deref());
+    settings.cover_wall_root = normalize_string(input.cover_wall_root.as_deref());
     settings.backup_directory = normalize_string(input.backup_directory.as_deref());
     settings.sync_path = normalize_string(input.sync_path.as_deref());
     settings.github_gist_id = normalize_string(input.github_gist_id.as_deref());
@@ -194,6 +205,10 @@ pub fn set_path_settings(input: PathSettingsUpdateRequest) -> Result<PathSetting
 
     if let Some(path) = settings.image_media_root.as_deref() {
         fs::create_dir_all(path).with_context(|| format!("failed to create image path {path}"))?;
+    }
+    if let Some(path) = settings.cover_wall_root.as_deref() {
+        fs::create_dir_all(path)
+            .with_context(|| format!("failed to create Cover Wall image path {path}"))?;
     }
     if let Some(path) = settings.backup_directory.as_deref() {
         fs::create_dir_all(path).with_context(|| format!("failed to create backup path {path}"))?;

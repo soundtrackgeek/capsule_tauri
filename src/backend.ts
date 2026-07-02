@@ -111,8 +111,10 @@ export async function getAppVersion(): Promise<string> {
 
 const defaultMockDatabasePath = "C:\\Users\\jtill\\.capsule\\capsule.db";
 const defaultMockBackupDirectory = "C:\\Users\\jtill\\.capsule";
+const defaultMockCoverWallRoot = "C:\\_code\\capsule_tauri\\local-assets\\covers";
 const mockImageMediaRoot = "C:\\Users\\jtill\\OneDrive\\_capsule\\images";
 const mockPathSettingsPath = "C:\\Users\\jtill\\AppData\\Roaming\\Capsule\\path_settings.json";
+let mockCoverWallRoot = defaultMockCoverWallRoot;
 let mockSyncPath = "C:\\Users\\jtill\\OneDrive\\_capsule\\sync";
 let mockGithubGistId = "";
 let mockGithubGistTokenConfigured = false;
@@ -795,6 +797,7 @@ export async function setPathSettings(
     await pause(180);
     const databasePath = normalizeNullable(input.databasePath);
     const imageMediaRoot = normalizeNullable(input.imageMediaRoot);
+    const coverWallRoot = normalizeNullable(input.coverWallRoot);
     const backupDirectory = normalizeNullable(input.backupDirectory);
     const syncPath = normalizeNullable(input.syncPath);
     const githubGistId = normalizeNullable(input.githubGistId);
@@ -816,6 +819,7 @@ export async function setPathSettings(
       ...mockConfig,
       values: upsertConfigValue(mockConfig.values, "images.media_root", imageMediaRoot),
     };
+    mockCoverWallRoot = coverWallRoot ?? defaultMockCoverWallRoot;
     mockSyncPath = syncPath ?? "";
     mockGithubGistId = githubGistId ?? "";
     if (input.clearGithubGistToken) {
@@ -2487,7 +2491,7 @@ function buildMockCoverWall(input: CoverWallRequest): CoverWallResponse {
     offset,
     availableTypes: ["magazine", "notebook"],
     orphanedCoverCount: 0,
-    coversRoot: "C:\\_code\\capsule_tauri\\local-assets\\covers",
+    coversRoot: mockCoverWallRoot,
   };
 }
 
@@ -2497,6 +2501,7 @@ function mockPathSettings(): PathSettingsResponse {
     imageMediaRoot:
       mockConfig.values.find((item) => item.key === "images.media_root")?.value ??
       mockImageMediaRoot,
+    coverWallRoot: mockCoverWallRoot,
     backupDirectory: mockBackups.backupDirectory,
     syncPath: mockSyncPath || null,
     githubGistId: mockGithubGistId || null,

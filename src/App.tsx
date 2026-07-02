@@ -5163,6 +5163,7 @@ function SettingsView({
   const [pathDraft, setPathDraft] = useState({
     databasePath: "",
     imageMediaRoot: "",
+    coverWallRoot: "",
     backupDirectory: "",
     syncPath: "",
     githubGistId: "",
@@ -5197,6 +5198,7 @@ function SettingsView({
     setPathDraft({
       databasePath: pathSettings?.databasePath ?? status?.dbPath ?? "",
       imageMediaRoot: pathSettings?.imageMediaRoot ?? imageMediaRoot,
+      coverWallRoot: pathSettings?.coverWallRoot ?? "",
       backupDirectory: pathSettings?.backupDirectory ?? backupDirectory,
       syncPath: pathSettings?.syncPath ?? "",
       githubGistId: pathSettings?.githubGistId ?? "",
@@ -5211,6 +5213,7 @@ function SettingsView({
     pathSettings?.autoSyncEnabled,
     pathSettings?.autoSyncIntervalMinutes,
     pathSettings?.backupDirectory,
+    pathSettings?.coverWallRoot,
     pathSettings?.databasePath,
     pathSettings?.githubGistId,
     pathSettings?.imageMediaRoot,
@@ -5290,6 +5293,32 @@ function SettingsView({
                   }
                 }}
                 title="Browse image path"
+                type="button"
+              >
+                <FolderOpen size={17} />
+              </button>
+            </div>
+          </label>
+          <label className="field">
+            <span>Cover Wall images</span>
+            <div className="path-input-row">
+              <input
+                onChange={(event) =>
+                  setPathDraft({ ...pathDraft, coverWallRoot: event.target.value })
+                }
+                value={pathDraft.coverWallRoot}
+              />
+              <button
+                aria-label="Browse Cover Wall image path"
+                className="icon-button"
+                disabled={dataToolMutating}
+                onClick={async () => {
+                  const selected = await onBrowseDirectoryPath(pathDraft.coverWallRoot);
+                  if (selected) {
+                    setPathDraft({ ...pathDraft, coverWallRoot: selected });
+                  }
+                }}
+                title="Browse Cover Wall image path"
                 type="button"
               >
                 <FolderOpen size={17} />
@@ -5427,6 +5456,7 @@ function SettingsView({
                   onSavePathSettings({
                     databasePath: pathDraft.databasePath,
                     imageMediaRoot: pathDraft.imageMediaRoot,
+                    coverWallRoot: pathDraft.coverWallRoot,
                     backupDirectory: pathDraft.backupDirectory,
                     syncPath: pathDraft.syncPath,
                     githubGistId: pathDraft.githubGistId,

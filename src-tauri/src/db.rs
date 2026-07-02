@@ -23,6 +23,7 @@ const BACKUP_DIRECTORY_ENV: &str = "CAPSULE_BACKUP_DIR";
 pub struct LocalPathSettings {
     pub database_path: Option<String>,
     pub image_media_root: Option<String>,
+    pub cover_wall_root: Option<String>,
     pub backup_directory: Option<String>,
     pub sync_path: Option<String>,
     pub github_gist_id: Option<String>,
@@ -221,6 +222,15 @@ pub fn local_image_media_root_for_database(path: &Path) -> Option<PathBuf> {
     None
 }
 
+pub fn local_cover_wall_root_for_database(path: &Path) -> Option<PathBuf> {
+    if is_active_database_path(path) {
+        return read_local_path_settings()
+            .cover_wall_root
+            .map(PathBuf::from);
+    }
+    None
+}
+
 pub fn is_active_database_path(path: &Path) -> bool {
     comparable_path(path) == comparable_path(&resolve_database_path())
 }
@@ -356,6 +366,7 @@ impl LocalPathSettings {
     fn normalize(&mut self) {
         self.database_path = normalize_path_setting(self.database_path.take());
         self.image_media_root = normalize_path_setting(self.image_media_root.take());
+        self.cover_wall_root = normalize_path_setting(self.cover_wall_root.take());
         self.backup_directory = normalize_path_setting(self.backup_directory.take());
         self.sync_path = normalize_path_setting(self.sync_path.take());
         self.github_gist_id = normalize_path_setting(self.github_gist_id.take());

@@ -105,6 +105,7 @@ export type LocationConfigUpdateRequest = {
 export type PathSettingsResponse = {
   databasePath: string;
   imageMediaRoot: string;
+  coverWallRoot: string;
   backupDirectory: string;
   syncPath: string | null;
   githubGistId: string | null;
@@ -118,6 +119,7 @@ export type PathSettingsResponse = {
 export type PathSettingsUpdateRequest = {
   databasePath?: string | null;
   imageMediaRoot?: string | null;
+  coverWallRoot?: string | null;
   backupDirectory?: string | null;
   syncPath?: string | null;
   githubGistId?: string | null;

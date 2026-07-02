@@ -23,7 +23,7 @@ use crate::{
 
 const DEFAULT_MEDIA_ROOT: &str = r"C:\Users\jtill\OneDrive\_capsule\images";
 const MAX_UPLOAD_BYTES: u64 = 10 * 1024 * 1024;
-const COVER_ROOT_ENV: &str = "CAPSULE_COVERS_ROOT";
+pub(crate) const COVER_ROOT_ENV: &str = "CAPSULE_COVERS_ROOT";
 const MEDIA_ROOT_ENV: &str = "CAPSULE_IMAGES_MEDIA_ROOT";
 const COVER_THUMB_SIZE: u32 = 840;
 const IMAGE_THUMB_SIZE: u32 = 480;
@@ -69,6 +69,11 @@ pub fn get_image_media_root() -> Result<String> {
     let root =
         first_existing_or_default_root(&roots).unwrap_or_else(|| PathBuf::from(DEFAULT_MEDIA_ROOT));
     Ok(db::path_to_string(&root))
+}
+
+pub fn get_cover_wall_root() -> String {
+    let db_path = db::resolve_database_path();
+    db::path_to_string(&resolve_covers_root_for_database(&db_path))
 }
 
 pub(crate) fn list_entry_images_for_database(
@@ -296,7 +301,7 @@ pub(crate) fn list_cover_wall_for_database(
     db_path: &Path,
     input: CoverWallRequest,
 ) -> Result<CoverWallResponse> {
-    let covers_root = resolve_covers_root();
+    let covers_root = resolve_covers_root_for_database(db_path);
     let all_covers = iter_cover_files(&covers_root)?;
     let entry_uuids = all_covers
         .iter()
@@ -389,7 +394,7 @@ pub(crate) fn list_cover_wall_for_database(
 }
 
 pub fn get_cover_data_url(filename: String, variant: ImageVariant) -> Result<String> {
-    let covers_root = resolve_covers_root();
+    let covers_root = resolve_covers_root_for_database(&db::resolve_database_path());
     let cover = resolve_cover_file(&covers_root, &filename)?;
     let bytes = match variant {
         ImageVariant::Full => fs::read(&cover.path)
@@ -1039,12 +1044,19 @@ fn data_url(mime_type: &str, bytes: &[u8]) -> String {
     )
 }
 
-fn resolve_covers_root() -> PathBuf {
+fn resolve_covers_root_for_database(db_path: &Path) -> PathBuf {
     if let Ok(value) = env::var(COVER_ROOT_ENV) {
         if !value.trim().is_empty() {
             return PathBuf::from(value);
         }
     }
+    if let Some(local_root) = db::local_cover_wall_root_for_database(db_path) {
+        return local_root;
+    }
+    default_covers_root()
+}
+
+fn default_covers_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("local-assets")

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.16.0 - 2026-07-02
+
+### Added
+
+- Added a saved Settings path for Cover Wall images, with
+  `CAPSULE_COVERS_ROOT` still taking precedence when set.
+
+### Changed
+
+- Bumped the app version to 0.16.0.
+
 ## 0.15.0 - 2026-07-02
 
 ### Added
