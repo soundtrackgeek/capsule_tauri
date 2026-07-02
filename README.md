@@ -68,9 +68,10 @@ Capsule database:
   file picking in the Images page, multi-select composer image picking, entry
   attachment previews, batched composer image save, removal, and sync tombstone
   recording.
-- Analytics dashboard with overview counts, monthly trend, tag/mood/location
-  breakdowns, weather breakdowns, top words, and streaks.
-- Writing Calendar heatmap for active days, words, images, and mood metadata.
+- Analytics dashboard with overview counts, monthly trend, mood sentiment trend,
+  tag/mood/location breakdowns, weather breakdowns, top words, and streaks.
+- Writing Calendar heatmap for active days, words, images, mood metadata, and
+  mood sentiment markers.
 - Cover Wall view backed by ignored local cover files under `local-assets/covers`
   with generated thumbnails under `local-assets/cover_thumbnails`.
 - AI overview for provider/model readiness, persisted conversations, AI Time
@@ -119,6 +120,8 @@ Uploaded originals use Capsule's legacy image key layout
 `plugin_media_assets` and `plugin_entry_media` for old Capsule compatibility.
 Cover wall assets are local-only and ignored by Git under `local-assets/`; set
 `CAPSULE_COVERS_ROOT` to point at a different cover folder.
+Mood sentiment scoring for Analytics and Calendar uses the bundled legacy mood
+scale in `src-tauri/mood_sentiment.json`.
 
 Location auto-capture on entry creation uses the same Capsule configuration keys
 as the existing app: `location.auto_capture`, `location.auto_capture_method`,

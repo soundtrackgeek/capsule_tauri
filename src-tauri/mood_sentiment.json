@@ -1,0 +1,164 @@
+{
+  "_description": "Mood sentiment scoring system for Capsule journaling",
+  "_schema": {
+    "sentiment_score": "Range from -1.0 (very negative) to 1.0 (very positive)",
+    "category": "Descriptive label: very_negative, negative, slightly_negative, neutral, slightly_positive, positive, very_positive",
+    "description": "Human-readable explanation of the mood's typical sentiment"
+  },
+  "_scale": {
+    "very_positive": 1.0,
+    "positive": 0.67,
+    "slightly_positive": 0.33,
+    "neutral": 0.0,
+    "slightly_negative": -0.33,
+    "negative": -0.67,
+    "very_negative": -1.0
+  },
+  "moods": {
+    "happy": {
+      "sentiment_score": 1.0,
+      "category": "very_positive",
+      "description": "Feeling joyful and content"
+    },
+    "excited": {
+      "sentiment_score": 1.0,
+      "category": "very_positive",
+      "description": "Enthusiastic and energized about something"
+    },
+    "great": {
+      "sentiment_score": 1.0,
+      "category": "very_positive",
+      "description": "Feeling excellent and highly positive"
+    },
+    "good": {
+      "sentiment_score": 0.67,
+      "category": "positive",
+      "description": "Generally positive and pleasant"
+    },
+    "proud": {
+      "sentiment_score": 1.0,
+      "category": "very_positive",
+      "description": "Feeling accomplished and satisfied with achievements"
+    },
+    "fun": {
+      "sentiment_score": 0.67,
+      "category": "positive",
+      "description": "Enjoying oneself and having a good time"
+    },
+    "curious": {
+      "sentiment_score": 0.33,
+      "category": "slightly_positive",
+      "description": "Interested and engaged, mildly positive"
+    },
+    "ok": {
+      "sentiment_score": 0.1,
+      "category": "neutral",
+      "description": "Neither particularly good nor bad, just adequate"
+    },
+    "weird": {
+      "sentiment_score": 0.0,
+      "category": "neutral",
+      "description": "Unusual or strange feeling, not clearly positive or negative"
+    },
+    "tired": {
+      "sentiment_score": -0.33,
+      "category": "slightly_negative",
+      "description": "Physically or mentally drained, mildly unpleasant"
+    },
+    "confused": {
+      "sentiment_score": -0.33,
+      "category": "slightly_negative",
+      "description": "Uncertain or unclear, mildly uncomfortable"
+    },
+    "annoyed": {
+      "sentiment_score": -0.67,
+      "category": "negative",
+      "description": "Mildly irritated or bothered"
+    },
+    "nervous": {
+      "sentiment_score": -0.67,
+      "category": "negative",
+      "description": "Feeling uneasy or apprehensive"
+    },
+    "frustrated": {
+      "sentiment_score": -0.67,
+      "category": "negative",
+      "description": "Feeling blocked or thwarted, disappointed"
+    },
+    "sick": {
+      "sentiment_score": -0.67,
+      "category": "negative",
+      "description": "Physically unwell or ill"
+    },
+    "anxious": {
+      "sentiment_score": -0.67,
+      "category": "negative",
+      "description": "Worried and tense about something"
+    },
+    "worried": {
+      "sentiment_score": -0.67,
+      "category": "negative",
+      "description": "Concerned and troubled about potential issues"
+    },
+    "upset": {
+      "sentiment_score": -0.67,
+      "category": "negative",
+      "description": "Emotionally disturbed or distressed"
+    },
+    "depleted": {
+      "sentiment_score": -0.67,
+      "category": "negative",
+      "description": "Exhausted and drained of energy or resources"
+    },
+    "sad": {
+      "sentiment_score": -1.0,
+      "category": "very_negative",
+      "description": "Feeling unhappy and sorrowful"
+    },
+    "bad": {
+      "sentiment_score": -1.0,
+      "category": "very_negative",
+      "description": "Generally negative and unpleasant"
+    },
+    "depressed": {
+      "sentiment_score": -1.0,
+      "category": "very_negative",
+      "description": "Feeling very low, hopeless, or deeply unhappy"
+    },
+    "bored": {
+      "sentiment_score": -0.33,
+      "category": "slightly_negative",
+      "description": "feeling bored an uninterested"
+    },
+    "hopeful": {
+      "sentiment_score": 0.33,
+      "category": "slightly_positive",
+      "description": "Mildly positive or hopeful"
+    },
+    "calm": {
+      "sentiment_score": 0.0,
+      "category": "neutral",
+      "description": "Auto-classified as neutral in non-interactive mode"
+    },
+    "focused": {
+      "sentiment_score": 0.0,
+      "category": "neutral",
+      "description": "Auto-classified as neutral in non-interactive mode"
+    },
+    "stressed": {
+      "sentiment_score": 0.0,
+      "category": "neutral",
+      "description": "Auto-classified as neutral in non-interactive mode"
+    },
+    "angry": {
+      "sentiment_score": -1.0,
+      "category": "very_negative",
+      "description": "Extremely negative, distressing, or painful"
+    },
+    "disappointed": {
+      "sentiment_score": -0.67,
+      "category": "negative",
+      "description": "Generally negative or unpleasant"
+    }
+  }
+}

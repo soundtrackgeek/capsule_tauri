@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.14.0 - 2026-07-02
+
+### Added
+
+- Added bundled mood sentiment scoring from legacy Capsule moods for average
+  mood analytics, monthly sentiment trend graphs, and writing-calendar mood
+  markers.
+
+### Changed
+
+- Bumped the app version to 0.14.0.
+
 ## 0.13.0 - 2026-07-02
 
 ### Added

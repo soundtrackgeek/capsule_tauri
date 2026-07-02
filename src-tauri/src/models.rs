@@ -1165,6 +1165,8 @@ pub struct AnalyticsOverview {
     pub total_entries: i64,
     pub total_words: i64,
     pub average_words: f64,
+    pub average_mood_sentiment: Option<f64>,
+    pub mood_sentiment_count: i64,
     pub total_images: i64,
     pub entries_with_images: i64,
     pub entries_with_location: i64,
@@ -1178,6 +1180,8 @@ pub struct AnalyticsTrendPoint {
     pub period: String,
     pub entry_count: i64,
     pub word_count: i64,
+    pub average_mood_sentiment: Option<f64>,
+    pub mood_sentiment_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1215,6 +1219,8 @@ pub struct WritingCalendarDay {
     pub word_count: i64,
     pub image_count: i64,
     pub moods: Vec<String>,
+    pub average_mood_sentiment: Option<f64>,
+    pub mood_sentiment_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]

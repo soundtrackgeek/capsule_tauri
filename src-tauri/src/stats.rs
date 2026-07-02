@@ -13,6 +13,7 @@ use crate::{
         AnalyticsBreakdownItem, AnalyticsOverview, AnalyticsPeriodRequest, AnalyticsResponse,
         AnalyticsTrendPoint, WordCount, WritingCalendarDay, WritingCalendarResponse,
     },
+    mood_sentiment,
 };
 
 const TOP_LIMIT: usize = 12;
@@ -52,6 +53,7 @@ pub(crate) fn get_analytics_for_database(
     let (longest_streak_days, current_streak_days) = streaks(&active_dates);
     let (total_images, entries_with_images) = image_counts(&connection, &input)?;
     let entries_with_location = location_count(&connection, &input)?;
+    let mood_sentiment_summary = mood_sentiment_summary(&rows);
 
     Ok(AnalyticsResponse {
         overview: AnalyticsOverview {
@@ -62,6 +64,8 @@ pub(crate) fn get_analytics_for_database(
             } else {
                 total_words as f64 / total_entries as f64
             },
+            average_mood_sentiment: mood_sentiment_summary.average(),
+            mood_sentiment_count: mood_sentiment_summary.count,
             total_images,
             entries_with_images,
             entries_with_location,
@@ -114,10 +118,19 @@ pub(crate) fn get_writing_calendar_for_database(
                 word_count: 0,
                 image_count: 0,
                 moods: Vec::new(),
+                average_mood_sentiment: None,
+                mood_sentiment_count: 0,
             });
         day.entry_count += 1;
         day.word_count += word_count(&row.text) as i64;
         if let Some(mood) = row.mood.and_then(|value| normalize_string(Some(&value))) {
+            if let Some(score) = mood_sentiment::score_for_mood(&mood) {
+                let current_sum =
+                    day.average_mood_sentiment.unwrap_or(0.0) * day.mood_sentiment_count as f64;
+                day.mood_sentiment_count += 1;
+                day.average_mood_sentiment =
+                    Some((current_sum + score) / day.mood_sentiment_count as f64);
+            }
             if !day
                 .moods
                 .iter()
@@ -324,20 +337,81 @@ fn breakdown_query(
 }
 
 fn monthly_trend(rows: &[EntryStatsRow]) -> Vec<AnalyticsTrendPoint> {
-    let mut by_month: BTreeMap<String, AnalyticsTrendPoint> = BTreeMap::new();
+    let mut by_month: BTreeMap<String, TrendAccumulator> = BTreeMap::new();
     for row in rows {
         let period = row.date.get(0..7).unwrap_or(&row.date).to_string();
-        let point = by_month
-            .entry(period.clone())
-            .or_insert(AnalyticsTrendPoint {
-                period,
-                entry_count: 0,
-                word_count: 0,
-            });
+        let point = by_month.entry(period.clone()).or_insert(TrendAccumulator {
+            period,
+            entry_count: 0,
+            word_count: 0,
+            mood_sentiment_sum: 0.0,
+            mood_sentiment_count: 0,
+        });
         point.entry_count += 1;
         point.word_count += word_count(&row.text) as i64;
+        if let Some(score) = row.mood.as_deref().and_then(mood_sentiment::score_for_mood) {
+            point.mood_sentiment_sum += score;
+            point.mood_sentiment_count += 1;
+        }
     }
-    by_month.into_values().collect()
+    by_month
+        .into_values()
+        .map(TrendAccumulator::into_point)
+        .collect()
+}
+
+#[derive(Debug, Clone)]
+struct TrendAccumulator {
+    period: String,
+    entry_count: i64,
+    word_count: i64,
+    mood_sentiment_sum: f64,
+    mood_sentiment_count: i64,
+}
+
+impl TrendAccumulator {
+    fn into_point(self) -> AnalyticsTrendPoint {
+        AnalyticsTrendPoint {
+            period: self.period,
+            entry_count: self.entry_count,
+            word_count: self.word_count,
+            average_mood_sentiment: if self.mood_sentiment_count == 0 {
+                None
+            } else {
+                Some(self.mood_sentiment_sum / self.mood_sentiment_count as f64)
+            },
+            mood_sentiment_count: self.mood_sentiment_count,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MoodSentimentSummary {
+    sum: f64,
+    count: i64,
+}
+
+impl MoodSentimentSummary {
+    fn average(self) -> Option<f64> {
+        if self.count == 0 {
+            None
+        } else {
+            Some(self.sum / self.count as f64)
+        }
+    }
+}
+
+fn mood_sentiment_summary(rows: &[EntryStatsRow]) -> MoodSentimentSummary {
+    rows.iter()
+        .filter_map(|row| row.mood.as_deref())
+        .filter_map(mood_sentiment::score_for_mood)
+        .fold(
+            MoodSentimentSummary { sum: 0.0, count: 0 },
+            |summary, score| MoodSentimentSummary {
+                sum: summary.sum + score,
+                count: summary.count + 1,
+            },
+        )
 }
 
 fn mood_breakdown(rows: &[EntryStatsRow]) -> Vec<AnalyticsBreakdownItem> {
@@ -568,9 +642,13 @@ mod tests {
         assert_eq!(response.overview.total_images, 2);
         assert_eq!(response.overview.entries_with_images, 1);
         assert_eq!(response.overview.entries_with_location, 2);
+        assert_eq!(response.overview.mood_sentiment_count, 3);
+        assert_close(response.overview.average_mood_sentiment, 1.0 / 3.0);
         assert_eq!(response.mood_breakdown[0].label, "focused");
         assert_eq!(response.tag_breakdown[0].label, "work");
         assert_eq!(response.monthly_trend[0].period, "2026-01");
+        assert_eq!(response.monthly_trend[0].mood_sentiment_count, 2);
+        assert_close(response.monthly_trend[0].average_mood_sentiment, 0.5);
     }
 
     #[test]
@@ -584,6 +662,21 @@ mod tests {
         assert_eq!(response.active_days, 3);
         assert_eq!(response.max_entry_count, 1);
         assert!(response.days.iter().any(|day| day.date == "2026-01-02"));
+        let happy_day = response
+            .days
+            .iter()
+            .find(|day| day.date == "2026-01-02")
+            .expect("happy day");
+        assert_eq!(happy_day.mood_sentiment_count, 1);
+        assert_close(happy_day.average_mood_sentiment, 1.0);
+    }
+
+    fn assert_close(actual: Option<f64>, expected: f64) {
+        let actual = actual.expect("sentiment average");
+        assert!(
+            (actual - expected).abs() < 0.0001,
+            "expected {expected}, got {actual}"
+        );
     }
 
     fn create_stats_fixture(path: &Path) -> PathBuf {
@@ -652,7 +745,7 @@ mod tests {
                     (uuid, created_at, updated_at, text, text_plain, content_format, title, mood, hidden)
                 VALUES
                     ('entry_one', '2026-01-01 08:00', '2026-01-01 08:00', 'Rust work starts', 'Rust work starts', 'markdown', 'One', 'focused', 0),
-                    ('entry_two', '2026-01-02 08:00', '2026-01-02 08:00', 'Location weather note', 'Location weather note', 'plain', 'Two', 'calm', 0),
+                    ('entry_two', '2026-01-02 08:00', '2026-01-02 08:00', 'Location weather note', 'Location weather note', 'plain', 'Two', 'happy', 0),
                     ('entry_three', '2026-02-01 08:00', '2026-02-01 08:00', 'More rust work', 'More rust work', 'plain', 'Three', 'focused', 0),
                     ('entry_hidden', '2026-02-02 08:00', '2026-02-02 08:00', 'Hidden', 'Hidden', 'plain', 'Hidden', 'quiet', 1);
                 INSERT INTO tags (name) VALUES ('work'), ('personal');

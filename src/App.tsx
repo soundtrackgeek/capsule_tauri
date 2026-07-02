@@ -3450,10 +3450,11 @@ function AnalyticsView({
       {!loading && !analytics && <div className="empty-state">Analytics will appear after loading.</div>}
       {analytics && (
         <>
-          <div className="metric-strip metric-strip--six">
+          <div className="metric-strip metric-strip--seven">
             <Metric label="Entries" value={analytics.overview.totalEntries} />
             <Metric label="Words" value={analytics.overview.totalWords} />
             <Metric label="Avg words" value={analytics.overview.averageWords} />
+            <Metric label="Avg mood" value={formatMoodSentiment(analytics.overview.averageMoodSentiment)} />
             <Metric label="Images" value={analytics.overview.totalImages} />
             <Metric label="Location" value={analytics.overview.entriesWithLocation} />
             <Metric label="Streak" value={`${analytics.overview.currentStreakDays}d`} />
@@ -3469,6 +3470,9 @@ function AnalyticsView({
           <div className="analytics-grid">
             <Panel icon={<BarChart3 size={20} />} title="Monthly Trend">
               <TrendBars trend={analytics.monthlyTrend} />
+            </Panel>
+            <Panel icon={<Sparkles size={20} />} title="Mood Sentiment">
+              <MoodTrendBars trend={analytics.monthlyTrend} />
             </Panel>
             <Panel icon={<Tags size={20} />} title="Tags">
               <BreakdownList items={analytics.tagBreakdown} />
@@ -3591,9 +3595,10 @@ function WritingCalendarView({
                   ))}
                   {month.days.map((day) => {
                     const level = calendarLevel(day.data, calendar.maxEntryCount);
+                    const sentimentClass = calendarSentimentClass(day.data);
                     return (
                       <span
-                        className={`calendar-day calendar-day--level-${level}`}
+                        className={`calendar-day calendar-day--level-${level} ${sentimentClass}`}
                         key={day.date}
                         title={calendarDayTitle(day.date, day.data)}
                       >
@@ -7027,6 +7032,37 @@ function TrendBars({ trend }: { trend: AnalyticsResponse["monthlyTrend"] }) {
   );
 }
 
+function MoodTrendBars({ trend }: { trend: AnalyticsResponse["monthlyTrend"] }) {
+  if (trend.length === 0) {
+    return <p className="muted">No monthly activity in this period.</p>;
+  }
+
+  if (!trend.some((point) => point.averageMoodSentiment !== null)) {
+    return <p className="muted">No rated moods in this period.</p>;
+  }
+
+  return (
+    <div className="bar-list">
+      {trend.map((point) => (
+        <div className="bar-row bar-row--sentiment" key={point.period}>
+          <span>{point.period}</span>
+          <div className="sentiment-track">
+            {point.averageMoodSentiment !== null && (
+              <i
+                aria-hidden="true"
+                className="sentiment-marker"
+                style={{ left: `${sentimentPosition(point.averageMoodSentiment)}%` }}
+              />
+            )}
+          </div>
+          <strong>{formatMoodSentiment(point.averageMoodSentiment)}</strong>
+          <em>{point.moodSentimentCount} moods</em>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function BreakdownList({
   items,
   emptyText = "No data in this period.",
@@ -7100,12 +7136,46 @@ function calendarLevel(day: CalendarDayCell["data"], maxEntryCount: number) {
   return Math.max(1, Math.ceil((day.entryCount / Math.max(maxEntryCount, 1)) * 4));
 }
 
+function calendarSentimentClass(day: CalendarDayCell["data"]) {
+  const value = day?.averageMoodSentiment;
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  if (value >= 0.2) {
+    return "calendar-day--sentiment-positive";
+  }
+
+  if (value <= -0.2) {
+    return "calendar-day--sentiment-negative";
+  }
+
+  return "calendar-day--sentiment-neutral";
+}
+
 function calendarDayTitle(date: string, day: CalendarDayCell["data"]) {
   if (!day) {
     return `${date}: no entries`;
   }
   const moodText = day.moods.length ? ` / ${day.moods.join(", ")}` : "";
-  return `${date}: ${day.entryCount} entries, ${day.wordCount} words, ${day.imageCount} images${moodText}`;
+  const sentimentText =
+    day.averageMoodSentiment !== null
+      ? ` / mood ${formatMoodSentiment(day.averageMoodSentiment)}`
+      : "";
+  return `${date}: ${day.entryCount} entries, ${day.wordCount} words, ${day.imageCount} images${moodText}${sentimentText}`;
+}
+
+function formatMoodSentiment(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "n/a";
+  }
+
+  const rounded = Math.abs(value) < 0.005 ? 0 : value;
+  return `${rounded > 0 ? "+" : ""}${rounded.toFixed(2)}`;
+}
+
+function sentimentPosition(value: number) {
+  return Math.max(0, Math.min(100, ((value + 1) / 2) * 100));
 }
 
 function SkeletonList({ compact = false }: { compact?: boolean }) {

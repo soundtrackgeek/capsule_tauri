@@ -4,6 +4,7 @@ mod entries;
 mod images;
 mod location;
 mod models;
+mod mood_sentiment;
 mod phase6;
 mod search;
 mod security;

@@ -808,6 +808,8 @@ export type AnalyticsOverview = {
   totalEntries: number;
   totalWords: number;
   averageWords: number;
+  averageMoodSentiment: number | null;
+  moodSentimentCount: number;
   totalImages: number;
   entriesWithImages: number;
   entriesWithLocation: number;
@@ -819,6 +821,8 @@ export type AnalyticsTrendPoint = {
   period: string;
   entryCount: number;
   wordCount: number;
+  averageMoodSentiment: number | null;
+  moodSentimentCount: number;
 };
 
 export type AnalyticsBreakdownItem = {
@@ -848,6 +852,8 @@ export type WritingCalendarDay = {
   wordCount: number;
   imageCount: number;
   moods: string[];
+  averageMoodSentiment: number | null;
+  moodSentimentCount: number;
 };
 
 export type WritingCalendarResponse = {

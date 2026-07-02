@@ -191,6 +191,38 @@ let mockMoods: MoodCatalogResponse = {
   warnings: [],
 };
 
+const moodSentimentScores: Record<string, number> = {
+  happy: 1.0,
+  excited: 1.0,
+  great: 1.0,
+  good: 0.67,
+  proud: 1.0,
+  fun: 0.67,
+  curious: 0.33,
+  ok: 0.1,
+  weird: 0.0,
+  tired: -0.33,
+  confused: -0.33,
+  annoyed: -0.67,
+  nervous: -0.67,
+  frustrated: -0.67,
+  sick: -0.67,
+  anxious: -0.67,
+  worried: -0.67,
+  upset: -0.67,
+  depleted: -0.67,
+  sad: -1.0,
+  bad: -1.0,
+  depressed: -1.0,
+  bored: -0.33,
+  hopeful: 0.33,
+  calm: 0.0,
+  focused: 0.0,
+  stressed: 0.0,
+  angry: -1.0,
+  disappointed: -0.67,
+};
+
 let mockLibrary: LibraryListResponse = {
   templates: [
     {
@@ -2267,21 +2299,43 @@ function buildMockAnalytics(input: AnalyticsPeriodRequest): AnalyticsResponse {
   const totalImages = entries.reduce((sum, entry) => sum + entry.attachmentCount, 0);
   const entriesWithImages = entries.filter((entry) => entry.attachmentCount > 0).length;
   const entriesWithLocation = entries.filter((entry) => entry.location).length;
-  const monthly = new Map<string, { entryCount: number; wordCount: number }>();
+  const monthly = new Map<
+    string,
+    {
+      entryCount: number;
+      wordCount: number;
+      moodSentimentSum: number;
+      moodSentimentCount: number;
+    }
+  >();
   const moods = new Map<string, number>();
   const tags = new Map<string, number>();
   const locations = new Map<string, number>();
   const weather = new Map<string, number>();
   const words = new Map<string, number>();
+  let moodSentimentSum = 0;
+  let moodSentimentCount = 0;
 
   for (const entry of entries) {
     const month = entry.createdAt.slice(0, 7);
-    const monthValue = monthly.get(month) ?? { entryCount: 0, wordCount: 0 };
+    const monthValue = monthly.get(month) ?? {
+      entryCount: 0,
+      wordCount: 0,
+      moodSentimentSum: 0,
+      moodSentimentCount: 0,
+    };
+    const moodSentiment = moodSentimentScore(entry.mood);
     monthly.set(month, {
       entryCount: monthValue.entryCount + 1,
       wordCount: monthValue.wordCount + writingWordCount(entry.textPlain),
+      moodSentimentSum: monthValue.moodSentimentSum + (moodSentiment ?? 0),
+      moodSentimentCount: monthValue.moodSentimentCount + (moodSentiment === null ? 0 : 1),
     });
     if (entry.mood) moods.set(entry.mood, (moods.get(entry.mood) ?? 0) + 1);
+    if (moodSentiment !== null) {
+      moodSentimentSum += moodSentiment;
+      moodSentimentCount += 1;
+    }
     for (const tag of entry.tags) tags.set(tag.name, (tags.get(tag.name) ?? 0) + 1);
     if (entry.location?.placeName) {
       locations.set(entry.location.placeName, (locations.get(entry.location.placeName) ?? 0) + 1);
@@ -2301,13 +2355,23 @@ function buildMockAnalytics(input: AnalyticsPeriodRequest): AnalyticsResponse {
       totalEntries: entries.length,
       totalWords,
       averageWords: entries.length ? totalWords / entries.length : 0,
+      averageMoodSentiment: moodSentimentCount ? moodSentimentSum / moodSentimentCount : null,
+      moodSentimentCount,
       totalImages,
       entriesWithImages,
       entriesWithLocation,
       longestStreakDays: mockStreak(entries),
       currentStreakDays: mockStreak(entries),
     },
-    monthlyTrend: [...monthly.entries()].sort().map(([period, value]) => ({ period, ...value })),
+    monthlyTrend: [...monthly.entries()].sort().map(([period, value]) => ({
+      period,
+      entryCount: value.entryCount,
+      wordCount: value.wordCount,
+      averageMoodSentiment: value.moodSentimentCount
+        ? value.moodSentimentSum / value.moodSentimentCount
+        : null,
+      moodSentimentCount: value.moodSentimentCount,
+    })),
     moodBreakdown: mapToBreakdown(moods),
     tagBreakdown: mapToBreakdown(tags),
     locationBreakdown: mapToBreakdown(locations),
@@ -2331,10 +2395,18 @@ function buildMockCalendar(year: number): WritingCalendarResponse {
       wordCount: 0,
       imageCount: 0,
       moods: [],
+      averageMoodSentiment: null,
+      moodSentimentCount: 0,
     };
     current.entryCount += 1;
     current.wordCount += writingWordCount(entry.textPlain);
     current.imageCount += entry.attachmentCount;
+    const moodSentiment = moodSentimentScore(entry.mood);
+    if (moodSentiment !== null) {
+      const currentSum = (current.averageMoodSentiment ?? 0) * current.moodSentimentCount;
+      current.moodSentimentCount += 1;
+      current.averageMoodSentiment = (currentSum + moodSentiment) / current.moodSentimentCount;
+    }
     if (entry.mood && !current.moods.includes(entry.mood)) current.moods.push(entry.mood);
     days.set(date, current);
   }
@@ -2497,6 +2569,11 @@ function mapToBreakdown(values: Map<string, number>) {
 
 function writingWordCount(value: string) {
   return value.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function moodSentimentScore(mood: string | null | undefined) {
+  const normalized = mood?.trim().toLowerCase();
+  return normalized ? moodSentimentScores[normalized] ?? null : null;
 }
 
 function mockStreak(entries: Entry[]) {
