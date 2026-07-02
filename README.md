@@ -78,6 +78,9 @@ Capsule database:
 - Sync controls in Settings for manual runs and configurable automatic sync
   intervals, plus a Sync page with status, history, tombstone counts, and GitHub
   Gist import readiness.
+- Signed in-app updates, including an hourly background check, an update banner
+  when a new version is available, and a manual Check for updates button in
+  Settings.
 - Legacy plugin-prefixed media and location tables remain supported for Capsule
   compatibility, while plugin registry navigation and activation toggles are not
   exposed in the UI.
@@ -133,6 +136,12 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
+`npm run tauri:build` creates signed updater artifacts. In CI the signing key
+comes from GitHub Secrets; for a local release build, set
+`TAURI_SIGNING_PRIVATE_KEY` to the private key content before running the
+command. For a passwordless key, set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` to an
+empty string.
+
 ## Releases
 
 Windows release bundles are built and attached to GitHub Releases by the
@@ -141,13 +150,22 @@ committing the release changes, push a semantic version tag to publish the
 installer assets:
 
 ```powershell
-git tag v0.8.0
-git push origin v0.8.0
+git tag vMAJOR.MINOR.PATCH
+git push origin vMAJOR.MINOR.PATCH
 ```
 
 The workflow runs `npm ci` and `npm run tauri:build` on `windows-latest`, then
-uploads the generated NSIS setup executable and MSI from
-`src-tauri/target/release/bundle` to the matching GitHub Release.
+uploads the generated NSIS setup executable, MSI, updater signatures, and
+`latest.json` manifest from `src-tauri/target/release/bundle` to the matching
+GitHub Release.
+
+In-app updates use Tauri's signed updater. The app contains only the public
+verification key; release builds sign updater artifacts with the
+`TAURI_SIGNING_PRIVATE_KEY` GitHub secret, plus the optional
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secret if the key is password protected.
+Users do not need these keys. Anyone on a build older than the first
+updater-enabled release must install that release manually once before future
+updates can be installed from inside Capsule.
 
 Rust tests can be run from the Tauri crate:
 

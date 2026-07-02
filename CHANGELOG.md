@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.0 - 2026-07-02
+
+### Added
+
+- Added signed in-app updates with hourly background checks, an update banner,
+  install progress, and a manual Check for updates button in Settings.
+- Added Tauri updater artifact signing and `latest.json` generation to the
+  Windows release workflow so GitHub Releases can serve update metadata.
+
+### Changed
+
+- Bumped the app version to 0.9.0.
+
 ## 0.8.1 - 2026-07-02
 
 ### Added

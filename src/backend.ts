@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 import type {
   AiMetadataSuggestionRequest,
   AiMetadataSuggestionResponse,
@@ -78,6 +79,21 @@ declare global {
 
 const runningInTauri = () =>
   typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
+
+export type AppUpdateInfo = {
+  currentVersion: string;
+  version: string;
+  date: string | null;
+  body: string | null;
+};
+
+export type AppUpdateProgress = {
+  phase: "started" | "progress" | "finished";
+  downloadedBytes: number;
+  contentLength: number | null;
+};
+
+let pendingAppUpdate: Update | null = null;
 
 const defaultMockDatabasePath = "C:\\Users\\jtill\\.capsule\\capsule.db";
 const defaultMockBackupDirectory = "C:\\Users\\jtill\\.capsule";
@@ -501,6 +517,75 @@ const normalizeError = (error: unknown): Error => {
 
   return new Error("Unexpected Capsule backend error");
 };
+
+function mapAppUpdate(update: Update): AppUpdateInfo {
+  return {
+    currentVersion: update.currentVersion,
+    version: update.version,
+    date: update.date ?? null,
+    body: update.body ?? null,
+  };
+}
+
+export async function checkForAppUpdate(): Promise<AppUpdateInfo | null> {
+  try {
+    if (runningInTauri()) {
+      const update = await check({ timeout: 30_000 });
+      if (pendingAppUpdate && pendingAppUpdate !== update) {
+        void pendingAppUpdate.close().catch(() => undefined);
+      }
+      pendingAppUpdate = update;
+      return update ? mapAppUpdate(update) : null;
+    }
+
+    await pause(150);
+    pendingAppUpdate = null;
+    return null;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function installAppUpdate(
+  onProgress?: (progress: AppUpdateProgress) => void,
+): Promise<void> {
+  try {
+    if (runningInTauri()) {
+      const update = pendingAppUpdate ?? (await check({ timeout: 30_000 }));
+      if (!update) {
+        throw new Error("No Capsule update is available to install.");
+      }
+
+      let downloadedBytes = 0;
+      let contentLength: number | null = null;
+
+      const emitProgress = (event: DownloadEvent) => {
+        if (event.event === "Started") {
+          downloadedBytes = 0;
+          contentLength = event.data.contentLength ?? null;
+          onProgress?.({ phase: "started", downloadedBytes, contentLength });
+          return;
+        }
+
+        if (event.event === "Progress") {
+          downloadedBytes += event.data.chunkLength;
+          onProgress?.({ phase: "progress", downloadedBytes, contentLength });
+          return;
+        }
+
+        onProgress?.({ phase: "finished", downloadedBytes, contentLength });
+      };
+
+      await update.downloadAndInstall(emitProgress, { timeout: 120_000 });
+      pendingAppUpdate = null;
+      return;
+    }
+
+    await pause(450);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
 
 export async function getDatabaseStatus(): Promise<DatabaseStatus> {
   try {

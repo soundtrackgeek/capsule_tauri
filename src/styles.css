@@ -970,6 +970,30 @@ button:active:not(:disabled) {
   font-size: 13px;
 }
 
+.update-summary,
+.update-progress {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.update-summary h4 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.update-summary p,
+.update-progress span {
+  margin: 0;
+  color: #66756d;
+  line-height: 1.5;
+}
+
+.update-progress .progress-track {
+  margin-top: 0;
+}
+
 .thread-card {
   width: 100%;
   cursor: pointer;

@@ -53,6 +53,7 @@ import {
   attachImage,
   bulkDetachThreads,
   claimQuest,
+  checkForAppUpdate,
   createPrompt,
   createEntry,
   createBackup,
@@ -79,6 +80,7 @@ import {
   getSyncOverview,
   getWritingCalendar,
   hideEntry,
+  installAppUpdate,
   listCoverWall,
   listEntryHistory,
   listEntryImages,
@@ -117,6 +119,8 @@ import {
   browseDirectoryPath,
   browseImagePath,
   browseImagePaths,
+  type AppUpdateInfo,
+  type AppUpdateProgress,
 } from "./backend";
 import { StatusPill } from "./components/StatusPill";
 import { formatBytes, formatDateTime } from "./lib/format";
@@ -329,6 +333,8 @@ const defaultWriterSettings: WriterSettings = {
 
 const draftStorageKey = "capsule-tauri-composer-draft-v1";
 const uiSettingsStorageKey = "capsule-tauri-ui-settings-v1";
+const appVersion = "0.9.0";
+const appUpdateCheckIntervalMs = 60 * 60 * 1000;
 
 const defaultUiSettings: UiSettings = {
   theme: "system",
@@ -469,6 +475,10 @@ function App() {
   const [draftRecovered, setDraftRecovered] = useState(false);
   const [writerSettings, setWriterSettings] = useState<WriterSettings>(defaultWriterSettings);
   const [uiSettings, setUiSettings] = useState<UiSettings>(defaultUiSettings);
+  const [availableUpdate, setAvailableUpdate] = useState<AppUpdateInfo | null>(null);
+  const [updateCheckedAt, setUpdateCheckedAt] = useState<string | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<AppUpdateProgress | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
   const [entryHistory, setEntryHistory] = useState<EntryHistoryResponse | null>(null);
   const [restorePreview, setRestorePreview] = useState<BackupRestorePreview | null>(null);
   const [capsuleConfig, setCapsuleConfig] = useState<CapsuleConfigResponse | null>(null);
@@ -498,6 +508,8 @@ function App() {
   const [restoringBackup, setRestoringBackup] = useState(false);
   const [dataToolsLoading, setDataToolsLoading] = useState(false);
   const [dataToolMutating, setDataToolMutating] = useState(false);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateInstalling, setUpdateInstalling] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [savingEntry, setSavingEntry] = useState(false);
   const [savingThread, setSavingThread] = useState(false);
@@ -505,6 +517,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const autoSyncRunningRef = useRef(false);
+  const updateCheckRunningRef = useRef(false);
 
   const statusTone = useMemo(() => {
     if (!status || !status.dbExists || !status.readable) {
@@ -513,6 +526,26 @@ function App() {
 
     return status.warnings.length > 0 ? "neutral" : "good";
   }, [status]);
+
+  const updateProgressLabel = useMemo(() => {
+    if (!updateInstalling) {
+      return availableUpdate
+        ? `Capsule ${availableUpdate.version} is available.`
+        : "Capsule is up to date.";
+    }
+
+    if (updateProgress?.phase === "finished") {
+      return "Download finished. Windows will apply the update.";
+    }
+
+    if (updateProgress?.contentLength) {
+      return `Downloading update: ${formatBytes(updateProgress.downloadedBytes)} of ${formatBytes(
+        updateProgress.contentLength,
+      )}`;
+    }
+
+    return updateProgress ? `Downloading update: ${formatBytes(updateProgress.downloadedBytes)}` : "Preparing update.";
+  }, [availableUpdate, updateInstalling, updateProgress]);
 
   const builtEntryFilters = useMemo<EntryFilters>(() => {
     const tags = splitFilter(entryFilters.tag);
@@ -1178,6 +1211,80 @@ function App() {
     setBackupDirectory(response.backupDirectory);
     return `Saved local paths: ${response.settingsPath}`;
   }, []);
+
+  const handleCheckForUpdates = useCallback(async (silent = false) => {
+    if (updateCheckRunningRef.current) {
+      return;
+    }
+
+    updateCheckRunningRef.current = true;
+    setUpdateChecking(true);
+    setUpdateError(null);
+    if (!silent) {
+      setError(null);
+      setNotice(null);
+    }
+
+    try {
+      const update = await checkForAppUpdate();
+      setAvailableUpdate(update);
+      setUpdateCheckedAt(new Date().toISOString());
+      setUpdateProgress(null);
+      if (!silent) {
+        setNotice(update ? `Capsule ${update.version} is ready to install.` : "Capsule is up to date.");
+      }
+    } catch (checkError) {
+      const message = checkError instanceof Error ? checkError.message : "Unable to check for updates";
+      setUpdateError(message);
+      if (!silent) {
+        setError(message);
+      }
+    } finally {
+      setUpdateChecking(false);
+      updateCheckRunningRef.current = false;
+    }
+  }, []);
+
+  const handleInstallUpdate = useCallback(async () => {
+    if (!availableUpdate) {
+      setUpdateError("Check for updates before installing.");
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Install Capsule ${availableUpdate.version}? Capsule may close while Windows applies the update.`,
+      )
+    ) {
+      return;
+    }
+
+    setUpdateInstalling(true);
+    setUpdateError(null);
+    setError(null);
+    setNotice(null);
+    setUpdateProgress(null);
+    try {
+      await installAppUpdate(setUpdateProgress);
+      setNotice("Update installed. Restart Capsule to finish applying it.");
+      setAvailableUpdate(null);
+    } catch (installError) {
+      const message = installError instanceof Error ? installError.message : "Unable to install update";
+      setUpdateError(message);
+      setError(message);
+    } finally {
+      setUpdateInstalling(false);
+    }
+  }, [availableUpdate]);
+
+  useEffect(() => {
+    void handleCheckForUpdates(true);
+    const intervalId = window.setInterval(() => {
+      void handleCheckForUpdates(true);
+    }, appUpdateCheckIntervalMs);
+
+    return () => window.clearInterval(intervalId);
+  }, [handleCheckForUpdates]);
 
   const handleRunSync = useCallback(
     async (silent = false) => {
@@ -1995,6 +2102,21 @@ function App() {
           </div>
         )}
 
+        {availableUpdate && (
+          <div className="banner banner--neutral" role="status">
+            <Download size={18} />
+            <span>{updateProgressLabel}</span>
+            <button
+              className="text-button"
+              disabled={updateInstalling}
+              onClick={() => void handleInstallUpdate()}
+              type="button"
+            >
+              {updateInstalling ? "Installing" : "Install update"}
+            </button>
+          </div>
+        )}
+
         {draftRecovered && activeView === "composer" && (
           <div className="banner banner--neutral" role="status">
             <Clock3 size={18} />
@@ -2243,6 +2365,7 @@ function App() {
 
         {activeView === "settings" && (
           <SettingsView
+            availableUpdate={availableUpdate}
             backupDirectory={backupDirectory}
             config={capsuleConfig}
             dataToolMutating={dataToolMutating}
@@ -2250,8 +2373,10 @@ function App() {
             library={library}
             loading={dataToolsLoading}
             moodCatalog={moodCatalog}
+            onCheckForUpdates={() => void handleCheckForUpdates(false)}
             onBrowseDatabasePath={handleBrowseDatabasePath}
             onBrowseDirectoryPath={handleBrowseDirectoryPath}
+            onInstallUpdate={() => void handleInstallUpdate()}
             onRefresh={loadDataTools}
             onRunMutation={runDataToolMutation}
             onRunSync={() => void handleRunSync(false)}
@@ -2261,6 +2386,12 @@ function App() {
             statusTone={statusTone}
             syncMutating={syncMutating}
             tagCatalog={tagCatalog}
+            updateCheckedAt={updateCheckedAt}
+            updateChecking={updateChecking}
+            updateError={updateError}
+            updateInstalling={updateInstalling}
+            updateProgress={updateProgress}
+            updateProgressLabel={updateProgressLabel}
             uiSettings={uiSettings}
             setUiSettings={setUiSettings}
           />
@@ -4301,10 +4432,19 @@ type SettingsViewProps = {
   library: LibraryListResponse | null;
   uiSettings: UiSettings;
   setUiSettings: (next: UiSettings) => void;
+  availableUpdate: AppUpdateInfo | null;
+  updateCheckedAt: string | null;
+  updateChecking: boolean;
+  updateInstalling: boolean;
+  updateProgress: AppUpdateProgress | null;
+  updateProgressLabel: string;
+  updateError: string | null;
   loading: boolean;
   dataToolMutating: boolean;
   onBrowseDatabasePath: (currentPath: string) => Promise<string | null>;
   onBrowseDirectoryPath: (currentPath: string) => Promise<string | null>;
+  onCheckForUpdates: () => void;
+  onInstallUpdate: () => void;
   onRefresh: () => void;
   onRunMutation: (mutation: () => Promise<string>) => Promise<void>;
   onRunSync: () => void;
@@ -4324,10 +4464,19 @@ function SettingsView({
   library,
   uiSettings,
   setUiSettings,
+  availableUpdate,
+  updateCheckedAt,
+  updateChecking,
+  updateInstalling,
+  updateProgress,
+  updateProgressLabel,
+  updateError,
   loading,
   dataToolMutating,
   onBrowseDatabasePath,
   onBrowseDirectoryPath,
+  onCheckForUpdates,
+  onInstallUpdate,
   onRefresh,
   onRunMutation,
   onRunSync,
@@ -4396,6 +4545,15 @@ function SettingsView({
   const normalizedDefaultLocationName = locationDraft.defaultLocationName.trim();
   const fixedLocationReady = locationDraft.useDefaultLocation && Boolean(normalizedDefaultLocationName);
   const locationMode = !locationDraft.autoCapture ? "Off" : fixedLocationReady ? "Fixed" : "IP lookup";
+  const updatePercent =
+    updateProgress?.contentLength && updateProgress.contentLength > 0
+      ? Math.min(100, Math.round((updateProgress.downloadedBytes / updateProgress.contentLength) * 100))
+      : null;
+  const updateStatus = availableUpdate
+    ? `Version ${availableUpdate.version} available`
+    : updateCheckedAt
+      ? `Last checked ${formatDateTime(updateCheckedAt)}`
+      : "Not checked yet";
 
   return (
     <section className="settings-grid" aria-label="Settings">
@@ -4596,10 +4754,51 @@ function SettingsView({
         title="Application"
       >
         <dl className="detail-list">
-          <Detail label="Version" value="0.8.0" />
+          <Detail label="Version" value={appVersion} />
           <Detail label="Mode" value="Backups and data tools" />
           <Detail label="Writes" value="Backup guarded" />
+          <Detail label="Updates" value={updateStatus} />
         </dl>
+        {updateError && (
+          <div className="inline-warning">
+            <TriangleAlert size={15} />
+            {updateError}
+          </div>
+        )}
+        {availableUpdate && (
+          <div className="update-summary">
+            <h4>Capsule {availableUpdate.version}</h4>
+            {availableUpdate.body && <p>{availableUpdate.body}</p>}
+          </div>
+        )}
+        {updateInstalling && (
+          <div className="update-progress" aria-label="Update install progress">
+            <div className="progress-track">
+              <div style={{ width: `${updatePercent ?? 35}%` }} />
+            </div>
+            <span>{updateProgressLabel}</span>
+          </div>
+        )}
+        <div className="path-action-row">
+          <button
+            className="secondary-button"
+            disabled={updateChecking || updateInstalling}
+            onClick={onCheckForUpdates}
+            type="button"
+          >
+            <RefreshCw size={17} />
+            {updateChecking ? "Checking" : "Check for updates"}
+          </button>
+          <button
+            className="primary-button"
+            disabled={!availableUpdate || updateInstalling || updateChecking}
+            onClick={onInstallUpdate}
+            type="button"
+          >
+            <Download size={17} />
+            {updateInstalling ? "Installing" : "Install update"}
+          </button>
+        </div>
       </Panel>
 
       <Panel icon={<Settings size={20} />} title="Interface">
