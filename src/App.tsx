@@ -1353,7 +1353,7 @@ function App() {
     setPathSettingsState(response);
     setImageMediaRoot(response.imageMediaRoot);
     setBackupDirectory(response.backupDirectory);
-    return `Saved local paths: ${response.settingsPath}`;
+    return `Saved local settings: ${response.settingsPath}`;
   }, []);
 
   const handleCheckForUpdates = useCallback(async (silent = false) => {
@@ -1475,7 +1475,11 @@ function App() {
   );
 
   useEffect(() => {
-    if (!status?.readable || !pathSettings?.syncPath || !pathSettings.autoSyncEnabled) {
+    if (
+      !status?.readable ||
+      (!pathSettings?.syncPath && !pathSettings?.githubGistId) ||
+      !pathSettings.autoSyncEnabled
+    ) {
       return;
     }
 
@@ -1499,6 +1503,7 @@ function App() {
     handleRunSync,
     pathSettings?.autoSyncEnabled,
     pathSettings?.autoSyncIntervalMinutes,
+    pathSettings?.githubGistId,
     pathSettings?.syncPath,
     status?.readable,
   ]);
@@ -5160,6 +5165,9 @@ function SettingsView({
     imageMediaRoot: "",
     backupDirectory: "",
     syncPath: "",
+    githubGistId: "",
+    githubGistToken: "",
+    clearGithubGistToken: false,
     autoSyncEnabled: false,
     autoSyncIntervalMinutes: 15,
   });
@@ -5191,6 +5199,9 @@ function SettingsView({
       imageMediaRoot: pathSettings?.imageMediaRoot ?? imageMediaRoot,
       backupDirectory: pathSettings?.backupDirectory ?? backupDirectory,
       syncPath: pathSettings?.syncPath ?? "",
+      githubGistId: pathSettings?.githubGistId ?? "",
+      githubGistToken: "",
+      clearGithubGistToken: false,
       autoSyncEnabled: pathSettings?.autoSyncEnabled ?? false,
       autoSyncIntervalMinutes: pathSettings?.autoSyncIntervalMinutes ?? 15,
     });
@@ -5201,6 +5212,7 @@ function SettingsView({
     pathSettings?.autoSyncIntervalMinutes,
     pathSettings?.backupDirectory,
     pathSettings?.databasePath,
+    pathSettings?.githubGistId,
     pathSettings?.imageMediaRoot,
     pathSettings?.syncPath,
     status?.dbPath,
@@ -5226,6 +5238,7 @@ function SettingsView({
     : updateCheckedAt
       ? `Last checked ${formatDateTime(updateCheckedAt)}`
       : "Not checked yet";
+  const canRunSyncFromSettings = Boolean(pathDraft.syncPath.trim() || pathDraft.githubGistId.trim());
 
   return (
     <section className="settings-grid" aria-label="Settings">
@@ -5333,6 +5346,48 @@ function SettingsView({
               </button>
             </div>
           </label>
+          <label className="field">
+            <span>GitHub Gist ID</span>
+            <input
+              onChange={(event) => setPathDraft({ ...pathDraft, githubGistId: event.target.value })}
+              value={pathDraft.githubGistId}
+            />
+          </label>
+          <label className="field">
+            <span>Gist token</span>
+            <input
+              onChange={(event) =>
+                setPathDraft({
+                  ...pathDraft,
+                  githubGistToken: event.target.value,
+                  clearGithubGistToken: false,
+                })
+              }
+              type="password"
+              value={pathDraft.githubGistToken}
+            />
+          </label>
+          <div className="settings-form-grid settings-form-grid--toggles settings-form-grid--sync">
+            <label className="check-row">
+              <input
+                checked={pathDraft.clearGithubGistToken}
+                disabled={!pathSettings?.githubGistTokenConfigured}
+                onChange={(event) =>
+                  setPathDraft({
+                    ...pathDraft,
+                    clearGithubGistToken: event.target.checked,
+                    githubGistToken: event.target.checked ? "" : pathDraft.githubGistToken,
+                  })
+                }
+                type="checkbox"
+              />
+              <span>Clear saved Gist token</span>
+            </label>
+            <div className="token-status-row">
+              <span>Gist token</span>
+              <strong>{pathSettings?.githubGistTokenConfigured ? "Saved" : "Not set"}</strong>
+            </div>
+          </div>
           <div className="settings-form-grid settings-form-grid--toggles settings-form-grid--sync">
             <label className="check-row">
               <input
@@ -5374,6 +5429,9 @@ function SettingsView({
                     imageMediaRoot: pathDraft.imageMediaRoot,
                     backupDirectory: pathDraft.backupDirectory,
                     syncPath: pathDraft.syncPath,
+                    githubGistId: pathDraft.githubGistId,
+                    githubGistToken: pathDraft.githubGistToken,
+                    clearGithubGistToken: pathDraft.clearGithubGistToken,
                     autoSyncEnabled: pathDraft.autoSyncEnabled,
                     autoSyncIntervalMinutes: pathDraft.autoSyncIntervalMinutes,
                   }),
@@ -5382,11 +5440,11 @@ function SettingsView({
               type="button"
             >
               <Save size={17} />
-              Save paths
+              Save settings
             </button>
             <button
               className="secondary-button"
-              disabled={dataToolMutating || syncMutating || !pathDraft.syncPath.trim()}
+              disabled={dataToolMutating || syncMutating || !canRunSyncFromSettings}
               onClick={onRunSync}
               type="button"
             >
@@ -6193,6 +6251,17 @@ function SyncView({ status, overview, loading, mutating, onRefresh, onRunSync }:
             <Detail label="Configured" value={overview?.configured ? "Yes" : "No"} />
             <Detail label="Folder" value={overview?.syncPath ?? "Set a sync folder in Settings"} />
             <Detail label="Sync file" value={overview?.syncFilePath ?? "None"} />
+            <Detail label="GitHub Gist" value={overview?.githubGistId ?? "None"} />
+            <Detail
+              label="Gist mode"
+              value={
+                overview?.githubGistId
+                  ? overview.githubGistTokenConfigured
+                    ? "Pull and push"
+                    : "Pull only"
+                  : "Off"
+              }
+            />
             <Detail
               label="Auto sync"
               value={

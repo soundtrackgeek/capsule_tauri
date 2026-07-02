@@ -187,12 +187,26 @@ pub(crate) fn get_sync_overview_for_database(db_path: &Path) -> Result<SyncOverv
     let connection = db::open_read_only_connection(db_path)?;
     let tables = detected_tables(&connection)?;
     let local_settings = db::read_local_path_settings();
-    let sync_path = env::var("CAPSULE_SYNC_PATH")
+    let configured_sync_path = env::var("CAPSULE_SYNC_PATH")
         .ok()
         .and_then(|value| normalized_string(Some(&value)))
         .or_else(|| local_settings.sync_path.clone());
-    let configured = sync_path.is_some();
-    let sync_file_path = sync_path
+    let github_gist_id = env::var("CAPSULE_GITHUB_GIST_ID")
+        .ok()
+        .and_then(|value| normalized_string(Some(&value)))
+        .or_else(|| local_settings.github_gist_id.clone());
+    let github_gist_token_configured = env::var("CAPSULE_GITHUB_GIST_TOKEN")
+        .ok()
+        .and_then(|value| normalized_string(Some(&value)))
+        .or_else(|| local_settings.github_gist_token.clone())
+        .is_some();
+    let effective_sync_path = configured_sync_path.clone().or_else(|| {
+        github_gist_id
+            .as_ref()
+            .map(|_| db::path_to_string(&db::local_github_gist_sync_cache_path()))
+    });
+    let configured = effective_sync_path.is_some();
+    let sync_file_path = effective_sync_path
         .as_ref()
         .map(|path| db::path_to_string(&Path::new(path).join("capsule_sync.json")));
     let auto_sync_enabled = configured && local_settings.auto_sync_enabled.unwrap_or(false);
@@ -248,8 +262,10 @@ pub(crate) fn get_sync_overview_for_database(db_path: &Path) -> Result<SyncOverv
 
     Ok(SyncOverviewResponse {
         configured,
-        sync_path,
+        sync_path: effective_sync_path,
         sync_file_path,
+        github_gist_id: github_gist_id.clone(),
+        github_gist_token_configured,
         auto_sync_enabled,
         auto_sync_interval_minutes,
         status,
@@ -260,7 +276,7 @@ pub(crate) fn get_sync_overview_for_database(db_path: &Path) -> Result<SyncOverv
                 "shared-folder-sync",
                 "Shared-folder sync",
                 true,
-                configured,
+                configured_sync_path.is_some(),
                 false,
                 false,
                 "Runs Capsule-compatible shared-folder sync directly from Tauri.",
@@ -269,10 +285,14 @@ pub(crate) fn get_sync_overview_for_database(db_path: &Path) -> Result<SyncOverv
                 "github-gist-import",
                 "GitHub Gist import",
                 true,
-                python_bridge_configured(),
+                github_gist_id.is_some(),
                 true,
-                true,
-                "Mobile import is capability-gated and remains bridge-driven.",
+                !github_gist_token_configured,
+                if github_gist_token_configured {
+                    "Pulls Capsule sync files before merge and pushes merged files back to GitHub Gist."
+                } else {
+                    "Pulls Capsule sync files before merge; add a Gist token to push merged files back."
+                },
             ),
             capability(
                 "sync-history",

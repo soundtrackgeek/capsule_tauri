@@ -81,9 +81,9 @@ Capsule database:
   `capsule_threads_sync.json`, and `capsule_ai_chats_sync.json`, including entry,
   image metadata, location, custom library, thread, AI chat, and tombstone
   merging.
-- Sync controls in Settings for manual runs and configurable automatic sync
-  intervals, plus a Sync page with status, history, tombstone counts, and GitHub
-  Gist import readiness.
+- Sync controls in Settings for manual runs, configurable automatic sync
+  intervals, shared-folder paths, and per-user GitHub Gist ID/token links. The
+  Sync page reports status, history, tombstone counts, and Gist pull/push mode.
 - Signed in-app updates, including an hourly background check, an update banner
   when a new version is available, and a manual Check for updates button in
   Settings. The Settings Application panel reports the installed Tauri runtime
@@ -113,7 +113,12 @@ from Settings, then the active database directory. Saved local paths are stored
 outside the journal database in the app path settings file shown in Settings.
 Shared-folder sync resolves `CAPSULE_SYNC_PATH` first, then the saved sync path
 from Settings, and writes the same three sync files used by the older Capsule
-app.
+app. GitHub Gist sync resolves `CAPSULE_GITHUB_GIST_ID` and
+`CAPSULE_GITHUB_GIST_TOKEN` first, then the saved Gist ID/token from Settings.
+Manual or automatic sync pulls the three Capsule sync files from the Gist before
+merging. If a token is configured, the merged files are pushed back to the Gist;
+without a token the Gist link is pull-only. If no sync folder is configured,
+Gist sync uses a local cache folder under the app path settings directory.
 Uploaded originals use Capsule's legacy image key layout
 `<hash-prefix>/<sha256>.<ext>` and thumbnails use
 `thumb/<hash-prefix>/<sha256>.jpg`, with attachment metadata stored in
@@ -216,7 +221,8 @@ enabled with a saved interval. Sync applies remote delete tombstones before
 upserts, keeps newer local rows when they win by timestamp, rewrites the latest
 sync files after merging, and retries if the shared file changes during a run.
 
-AI chat live requests, semantic vector ranking, and GitHub Gist mobile import
-remain capability-gated. Tauri reads their existing state, but it does not send
-journal data to cloud providers or run bridge-driven workflows without explicit
-bridge configuration and user action.
+AI chat live requests and semantic vector ranking remain capability-gated.
+Tauri reads their existing state, but it does not send journal data to cloud
+providers or run bridge-driven workflows without explicit bridge configuration
+and user action. GitHub Gist sync only runs after a Gist ID is configured and a
+manual or automatic sync is triggered.

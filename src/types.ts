@@ -107,6 +107,8 @@ export type PathSettingsResponse = {
   imageMediaRoot: string;
   backupDirectory: string;
   syncPath: string | null;
+  githubGistId: string | null;
+  githubGistTokenConfigured: boolean;
   autoSyncEnabled: boolean;
   autoSyncIntervalMinutes: number;
   settingsPath: string;
@@ -118,6 +120,9 @@ export type PathSettingsUpdateRequest = {
   imageMediaRoot?: string | null;
   backupDirectory?: string | null;
   syncPath?: string | null;
+  githubGistId?: string | null;
+  githubGistToken?: string | null;
+  clearGithubGistToken?: boolean | null;
   autoSyncEnabled?: boolean | null;
   autoSyncIntervalMinutes?: number | null;
 };
@@ -360,6 +365,8 @@ export type SyncOverviewResponse = {
   configured: boolean;
   syncPath: string | null;
   syncFilePath: string | null;
+  githubGistId: string | null;
+  githubGistTokenConfigured: boolean;
   autoSyncEnabled: boolean;
   autoSyncIntervalMinutes: number;
   status: SyncStatusSummary | null;
@@ -376,6 +383,8 @@ export type SyncRunRequest = {
 export type SyncRunResponse = {
   syncPath: string;
   syncFilePath: string;
+  githubGistPulled: boolean;
+  githubGistPushed: boolean;
   importedCount: number;
   updatedCount: number;
   deletedCount: number;

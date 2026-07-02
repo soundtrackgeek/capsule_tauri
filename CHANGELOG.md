@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.15.0 - 2026-07-02
+
+### Added
+
+- Added per-user GitHub Gist sync settings for a Gist ID and optional token,
+  with Sync runs pulling Capsule sync files from the Gist before local merging
+  and pushing merged files back when a token is configured.
+
+### Changed
+
+- Changed the Sync page's GitHub Gist capability from bridge-readiness status
+  into native pull/push configuration status.
+- Bumped the app version to 0.15.0.
+
 ## 0.14.0 - 2026-07-02
 
 ### Added

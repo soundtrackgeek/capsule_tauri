@@ -114,6 +114,8 @@ const defaultMockBackupDirectory = "C:\\Users\\jtill\\.capsule";
 const mockImageMediaRoot = "C:\\Users\\jtill\\OneDrive\\_capsule\\images";
 const mockPathSettingsPath = "C:\\Users\\jtill\\AppData\\Roaming\\Capsule\\path_settings.json";
 let mockSyncPath = "C:\\Users\\jtill\\OneDrive\\_capsule\\sync";
+let mockGithubGistId = "";
+let mockGithubGistTokenConfigured = false;
 let mockAutoSyncEnabled = false;
 let mockAutoSyncIntervalMinutes = 15;
 
@@ -795,6 +797,8 @@ export async function setPathSettings(
     const imageMediaRoot = normalizeNullable(input.imageMediaRoot);
     const backupDirectory = normalizeNullable(input.backupDirectory);
     const syncPath = normalizeNullable(input.syncPath);
+    const githubGistId = normalizeNullable(input.githubGistId);
+    const githubGistToken = normalizeNullable(input.githubGistToken);
     const autoSyncInterval = Math.min(
       24 * 60,
       Math.max(1, Math.round(input.autoSyncIntervalMinutes ?? mockAutoSyncIntervalMinutes)),
@@ -813,6 +817,12 @@ export async function setPathSettings(
       values: upsertConfigValue(mockConfig.values, "images.media_root", imageMediaRoot),
     };
     mockSyncPath = syncPath ?? "";
+    mockGithubGistId = githubGistId ?? "";
+    if (input.clearGithubGistToken) {
+      mockGithubGistTokenConfigured = false;
+    } else if (githubGistToken) {
+      mockGithubGistTokenConfigured = true;
+    }
     mockAutoSyncEnabled = Boolean(input.autoSyncEnabled);
     mockAutoSyncIntervalMinutes = autoSyncInterval;
 
@@ -1437,17 +1447,29 @@ export async function getSyncOverview(): Promise<SyncOverviewResponse> {
     const capabilities = phase6Capabilities.sync.map((capability) =>
       capability.key === "shared-folder-sync"
         ? { ...capability, configured: Boolean(mockSyncPath) }
+        : capability.key === "github-gist-import"
+          ? {
+              ...capability,
+              configured: Boolean(mockGithubGistId),
+              readOnly: !mockGithubGistTokenConfigured,
+              detail: mockGithubGistTokenConfigured
+                ? "Pulls Capsule sync files before merge and pushes merged files back to GitHub Gist."
+                : "Pulls Capsule sync files before merge; add a Gist token to push merged files back.",
+            }
         : capability,
     );
+    const effectiveSyncPath = mockSyncPath || (mockGithubGistId ? "C:\\Users\\jtill\\AppData\\Roaming\\Capsule\\gist_sync" : "");
     return {
-      configured: Boolean(mockSyncPath),
-      syncPath: mockSyncPath || null,
-      syncFilePath: mockSyncPath ? `${mockSyncPath}\\capsule_sync.json` : null,
+      configured: Boolean(effectiveSyncPath),
+      syncPath: effectiveSyncPath || null,
+      syncFilePath: effectiveSyncPath ? `${effectiveSyncPath}\\capsule_sync.json` : null,
+      githubGistId: mockGithubGistId || null,
+      githubGistTokenConfigured: mockGithubGistTokenConfigured,
       autoSyncEnabled: mockAutoSyncEnabled,
       autoSyncIntervalMinutes: mockAutoSyncIntervalMinutes,
       status: {
         lastSuccessfulSyncAt: "2026-06-29 09:00",
-        lastSyncFilePath: mockSyncPath ? `${mockSyncPath}\\capsule_sync.json` : null,
+        lastSyncFilePath: effectiveSyncPath ? `${effectiveSyncPath}\\capsule_sync.json` : null,
         lastSyncFileSizeBytes: 42_000,
         lastSyncImported: 1,
         lastSyncUpdated: 2,
@@ -1478,7 +1500,7 @@ export async function getSyncOverview(): Promise<SyncOverviewResponse> {
         { table: "sync_image_tombstones", count: 1 },
       ],
       capabilities,
-      warnings: mockSyncPath ? [] : ["No shared-folder sync path is configured in Settings."],
+      warnings: effectiveSyncPath ? [] : ["No sync folder or GitHub Gist is configured in Settings."],
     };
   } catch (error) {
     throw normalizeError(error);
@@ -1492,20 +1514,24 @@ export async function runSync(input?: SyncRunRequest): Promise<SyncRunResponse> 
     }
 
     await pause(260);
-    const syncPath = normalizeNullable(input?.syncPath) ?? mockSyncPath;
+    const syncPath =
+      normalizeNullable(input?.syncPath) ??
+      (mockSyncPath || (mockGithubGistId ? "C:\\Users\\jtill\\AppData\\Roaming\\Capsule\\gist_sync" : ""));
     if (!syncPath) {
-      throw new Error("No sync path configured. Set a sync folder in Settings first.");
+      throw new Error("No sync path or GitHub Gist configured. Set a sync folder or GitHub Gist in Settings first.");
     }
     const completedAt = new Date().toISOString();
     return {
       syncPath,
       syncFilePath: `${syncPath}\\capsule_sync.json`,
+      githubGistPulled: Boolean(mockGithubGistId),
+      githubGistPushed: Boolean(mockGithubGistId && mockGithubGistTokenConfigured),
       importedCount: 0,
       updatedCount: 1,
       deletedCount: 0,
       exportedCount: mockStatus.entryCount ?? 0,
       conflictCount: 0,
-      summary: "Mock sync completed.",
+      summary: mockGithubGistId ? "Mock sync completed, GitHub Gist checked." : "Mock sync completed.",
       completedAt,
     };
   } catch (error) {
@@ -2473,6 +2499,8 @@ function mockPathSettings(): PathSettingsResponse {
       mockImageMediaRoot,
     backupDirectory: mockBackups.backupDirectory,
     syncPath: mockSyncPath || null,
+    githubGistId: mockGithubGistId || null,
+    githubGistTokenConfigured: mockGithubGistTokenConfigured,
     autoSyncEnabled: mockAutoSyncEnabled,
     autoSyncIntervalMinutes: mockAutoSyncIntervalMinutes,
     settingsPath: mockPathSettingsPath,

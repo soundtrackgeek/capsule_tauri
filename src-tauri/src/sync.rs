@@ -2,11 +2,12 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
 use anyhow::{anyhow, Context, Result};
 use chrono::{Local, Utc};
+use reqwest::blocking::{Client, RequestBuilder};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Map, Value as JsonValue};
@@ -19,8 +20,18 @@ use crate::{
 const MAIN_SYNC_FILE: &str = "capsule_sync.json";
 const THREADS_SYNC_FILE: &str = "capsule_threads_sync.json";
 const AI_CHATS_SYNC_FILE: &str = "capsule_ai_chats_sync.json";
+const GITHUB_API_BASE: &str = "https://api.github.com";
+const GITHUB_API_VERSION: &str = "2026-03-10";
+const GITHUB_USER_AGENT: &str = "Capsule-Tauri";
+const GITHUB_SYNC_FILES: [&str; 3] = [MAIN_SYNC_FILE, THREADS_SYNC_FILE, AI_CHATS_SYNC_FILE];
 const SYNC_RETRY_LIMIT: usize = 3;
 const SYNC_HISTORY_RETENTION_LIMIT: i64 = 200;
+
+#[derive(Debug, Clone)]
+struct GithubGistConfig {
+    gist_id: String,
+    token: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FileSignature {
@@ -37,6 +48,22 @@ struct SyncCounts {
     exported: i64,
     conflicts: Vec<String>,
     parts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct GithubGistResponse {
+    #[serde(default)]
+    files: HashMap<String, GithubGistFile>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct GithubGistFile {
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    raw_url: Option<String>,
+    #[serde(default)]
+    truncated: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -390,11 +417,31 @@ enum SyncAttempt {
 }
 
 pub fn run_sync(input: Option<SyncRunRequest>) -> Result<SyncRunResponse> {
-    let sync_dir = resolve_sync_dir(input.and_then(|input| normalize_string(input.sync_path)))?;
+    let local_settings = db::read_local_path_settings();
+    let gist_config = resolve_github_gist_config(&local_settings);
+    let sync_dir = resolve_sync_dir(
+        input.and_then(|input| normalize_string(input.sync_path)),
+        gist_config.is_some(),
+    )?;
     fs::create_dir_all(&sync_dir)
         .with_context(|| format!("failed to create {}", sync_dir.display()))?;
     let sync_file = sync_dir.join(MAIN_SYNC_FILE);
     let db_path = db::resolve_database_path();
+    let github_gist_pulled = if let Some(config) = gist_config.as_ref() {
+        match pull_github_gist_files(config, &sync_dir) {
+            Ok(pulled) => pulled,
+            Err(error) => {
+                if let Err(status_error) =
+                    record_sync_error(&db_path, &sync_file, &error.to_string())
+                {
+                    eprintln!("[Sync] Failed to record GitHub Gist pull error: {status_error}");
+                }
+                return Err(error);
+            }
+        }
+    } else {
+        false
+    };
 
     let guarded = backup::with_database_backup_for_database(&db_path, "sync.run", move |path| {
         match run_sync_with_retries(path, &sync_dir) {
@@ -408,10 +455,50 @@ pub fn run_sync(input: Option<SyncRunRequest>) -> Result<SyncRunResponse> {
         }
     })?;
 
-    Ok(guarded.value)
+    let mut response = guarded.value;
+    response.github_gist_pulled = github_gist_pulled;
+    response.github_gist_pushed = if let Some(config) = gist_config.as_ref() {
+        if config.token.is_some() {
+            match push_github_gist_files(config, &PathBuf::from(&response.sync_path)) {
+                Ok(pushed) => pushed,
+                Err(error) => {
+                    if let Err(status_error) = record_sync_error(
+                        &db_path,
+                        &PathBuf::from(&response.sync_file_path),
+                        &error.to_string(),
+                    ) {
+                        eprintln!("[Sync] Failed to record GitHub Gist push error: {status_error}");
+                    }
+                    return Err(error);
+                }
+            }
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    if let Some(summary) = github_summary_note(
+        response.github_gist_pulled,
+        response.github_gist_pushed,
+        gist_config
+            .as_ref()
+            .and_then(|config| config.token.as_ref())
+            .is_none()
+            && gist_config.is_some(),
+    ) {
+        response.summary = append_summary_note(&response.summary, &summary);
+        if let Err(error) =
+            record_sync_summary_override(&db_path, &response.completed_at, &response.summary)
+        {
+            eprintln!("[Sync] Failed to update GitHub Gist sync summary: {error}");
+        }
+    }
+
+    Ok(response)
 }
 
-fn resolve_sync_dir(override_path: Option<String>) -> Result<PathBuf> {
+fn resolve_sync_dir(override_path: Option<String>, gist_configured: bool) -> Result<PathBuf> {
     if let Some(path) = override_path {
         return Ok(PathBuf::from(path));
     }
@@ -423,9 +510,192 @@ fn resolve_sync_dir(override_path: Option<String>) -> Result<PathBuf> {
     if let Some(path) = db::read_local_path_settings().sync_path {
         return Ok(PathBuf::from(path));
     }
+    if gist_configured {
+        return Ok(db::local_github_gist_sync_cache_path());
+    }
     Err(anyhow!(
-        "No sync path configured. Set a sync folder in Settings first."
+        "No sync path or GitHub Gist configured. Set a sync folder or GitHub Gist in Settings first."
     ))
+}
+
+fn resolve_github_gist_config(settings: &db::LocalPathSettings) -> Option<GithubGistConfig> {
+    let gist_id = std::env::var("CAPSULE_GITHUB_GIST_ID")
+        .ok()
+        .and_then(|value| normalize_string(Some(value)))
+        .or_else(|| settings.github_gist_id.clone())?;
+    let token = std::env::var("CAPSULE_GITHUB_GIST_TOKEN")
+        .ok()
+        .and_then(|value| normalize_string(Some(value)))
+        .or_else(|| settings.github_gist_token.clone());
+
+    Some(GithubGistConfig { gist_id, token })
+}
+
+fn github_client() -> Result<Client> {
+    Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .context("failed to build GitHub client")
+}
+
+fn github_request(builder: RequestBuilder, token: Option<&str>) -> RequestBuilder {
+    let builder = builder
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", GITHUB_USER_AGENT)
+        .header("X-GitHub-Api-Version", GITHUB_API_VERSION);
+    if let Some(token) = token {
+        builder.bearer_auth(token)
+    } else {
+        builder
+    }
+}
+
+fn pull_github_gist_files(config: &GithubGistConfig, sync_dir: &Path) -> Result<bool> {
+    let client = github_client()?;
+    let url = format!("{GITHUB_API_BASE}/gists/{}", config.gist_id);
+    let response = github_request(client.get(url), config.token.as_deref())
+        .send()
+        .context("failed to fetch GitHub Gist")?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().unwrap_or_default();
+        return Err(anyhow!(
+            "GitHub Gist fetch failed with status {status}: {}",
+            truncate_for_display(&body, 240)
+        ));
+    }
+
+    let gist: GithubGistResponse = response.json().context("failed to parse GitHub Gist")?;
+    let mut pulled = false;
+    for filename in GITHUB_SYNC_FILES {
+        if let Some(file) = gist.files.get(filename) {
+            let content = github_gist_file_content(&client, config, file)
+                .with_context(|| format!("failed to fetch {filename} from GitHub Gist"))?;
+            validate_sync_file_json(filename, &content)?;
+            write_text_replace(&sync_dir.join(filename), &content)
+                .with_context(|| format!("failed to write fetched GitHub Gist file {filename}"))?;
+            pulled = true;
+        }
+    }
+
+    Ok(pulled)
+}
+
+fn github_gist_file_content(
+    client: &Client,
+    config: &GithubGistConfig,
+    file: &GithubGistFile,
+) -> Result<String> {
+    if !file.truncated {
+        if let Some(content) = file.content.as_ref() {
+            return Ok(content.clone());
+        }
+    }
+
+    let raw_url = file
+        .raw_url
+        .as_ref()
+        .ok_or_else(|| anyhow!("GitHub Gist file content was truncated without a raw URL"))?;
+    let response = github_request(client.get(raw_url), config.token.as_deref())
+        .send()
+        .context("failed to fetch raw GitHub Gist file")?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().unwrap_or_default();
+        return Err(anyhow!(
+            "GitHub Gist raw file fetch failed with status {status}: {}",
+            truncate_for_display(&body, 240)
+        ));
+    }
+
+    response
+        .text()
+        .context("failed to read raw GitHub Gist file")
+}
+
+fn push_github_gist_files(config: &GithubGistConfig, sync_dir: &Path) -> Result<bool> {
+    let token = config
+        .token
+        .as_deref()
+        .ok_or_else(|| anyhow!("GitHub Gist token is required to push sync files"))?;
+    let mut files = Map::new();
+    for filename in GITHUB_SYNC_FILES {
+        let path = sync_dir.join(filename);
+        if path.exists() {
+            let content = fs::read_to_string(&path)
+                .with_context(|| format!("failed to read {}", path.display()))?;
+            validate_sync_file_json(filename, &content)?;
+            files.insert(filename.to_string(), json!({ "content": content }));
+        }
+    }
+    if files.is_empty() {
+        return Ok(false);
+    }
+
+    let client = github_client()?;
+    let url = format!("{GITHUB_API_BASE}/gists/{}", config.gist_id);
+    let response = github_request(client.patch(url), Some(token))
+        .json(&json!({ "files": files }))
+        .send()
+        .context("failed to update GitHub Gist")?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().unwrap_or_default();
+        return Err(anyhow!(
+            "GitHub Gist update failed with status {status}: {}",
+            truncate_for_display(&body, 240)
+        ));
+    }
+
+    Ok(true)
+}
+
+fn validate_sync_file_json(filename: &str, content: &str) -> Result<()> {
+    serde_json::from_str::<JsonValue>(content)
+        .with_context(|| format!("{filename} from GitHub Gist is not valid JSON"))?;
+    Ok(())
+}
+
+fn write_text_replace(path: &Path, content: &str) -> Result<()> {
+    let tmp_path = path.with_extension(format!(
+        "tmp.{}.{}",
+        std::process::id(),
+        Utc::now()
+            .timestamp_nanos_opt()
+            .unwrap_or_else(|| Utc::now().timestamp_micros() * 1_000)
+    ));
+    fs::write(&tmp_path, content)
+        .with_context(|| format!("failed to write {}", tmp_path.display()))?;
+    if path.exists() {
+        fs::remove_file(path).with_context(|| format!("failed to replace {}", path.display()))?;
+    }
+    fs::rename(&tmp_path, path).with_context(|| {
+        format!(
+            "failed to move {} to {}",
+            tmp_path.display(),
+            path.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn github_summary_note(pulled: bool, pushed: bool, read_only: bool) -> Option<String> {
+    match (pulled, pushed, read_only) {
+        (true, true, _) => Some("GitHub Gist pulled and pushed".to_string()),
+        (true, false, true) => Some("GitHub Gist pulled read-only".to_string()),
+        (true, false, false) => Some("GitHub Gist pulled".to_string()),
+        (false, true, _) => Some("GitHub Gist pushed".to_string()),
+        (false, false, true) => Some("GitHub Gist checked read-only".to_string()),
+        (false, false, false) => None,
+    }
+}
+
+fn append_summary_note(summary: &str, note: &str) -> String {
+    if summary.trim().is_empty() {
+        note.to_string()
+    } else {
+        format!("{summary}, {note}")
+    }
 }
 
 fn run_sync_with_retries(db_path: &Path, sync_dir: &Path) -> Result<SyncRunResponse> {
@@ -522,6 +792,8 @@ fn run_sync_once(db_path: &Path, sync_dir: &Path, attempt: usize) -> Result<Sync
     Ok(SyncAttempt::Complete(SyncRunResponse {
         sync_path: db::path_to_string(sync_dir),
         sync_file_path: db::path_to_string(&sync_file),
+        github_gist_pulled: false,
+        github_gist_pushed: false,
         imported_count: counts.imported,
         updated_count: counts.updated,
         deleted_count: counts.deleted,
@@ -2957,6 +3229,27 @@ fn record_sync_success(
         Some(summary),
         (!counts.conflicts.is_empty()).then(|| counts.conflicts.join("\n")),
         None,
+    )?;
+    Ok(())
+}
+
+fn record_sync_summary_override(db_path: &Path, timestamp: &str, summary: &str) -> Result<()> {
+    let connection = db::open_read_write_connection(db_path)?;
+    ensure_sync_schema(&connection)?;
+    connection.execute(
+        "UPDATE sync_status SET last_sync_summary = ?1 WHERE id = 1",
+        [summary],
+    )?;
+    connection.execute(
+        "UPDATE sync_history
+         SET summary = ?1
+         WHERE id = (
+             SELECT id FROM sync_history
+             WHERE timestamp = ?2 AND status = 'success'
+             ORDER BY id DESC
+             LIMIT 1
+         )",
+        params![summary, timestamp],
     )?;
     Ok(())
 }

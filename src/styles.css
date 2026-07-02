@@ -76,8 +76,13 @@ body {
 :root[data-theme="dark"] .detail-list dt,
 :root[data-theme="dark"] .metric dt,
 :root[data-theme="dark"] .field span,
-:root[data-theme="dark"] .check-row span {
+:root[data-theme="dark"] .check-row span,
+:root[data-theme="dark"] .token-status-row {
   color: #b8c7bd;
+}
+
+:root[data-theme="dark"] .token-status-row strong {
+  color: #e9eee8;
 }
 
 :root[data-theme="dark"] .detail-list--paths code {
@@ -530,11 +535,16 @@ body {
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .metric dt,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field span,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .check-row span,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .token-status-row,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .metadata-block h4,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .composer-image-row-heading span,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .calendar-weekdays,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .quest-footer {
   color: var(--retro-muted-strong);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .token-status-row strong {
+  color: var(--retro-text);
 }
 
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .detail-list--paths code,
@@ -2063,6 +2073,18 @@ button:active:not(:disabled) {
 .settings-form-grid--toggles {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: center;
+}
+
+.token-status-row {
+  display: grid;
+  gap: 4px;
+  color: #66756d;
+  font-size: 12px;
+}
+
+.token-status-row strong {
+  color: #26362f;
+  font-size: 13px;
 }
 
 .settings-form-grid--location {

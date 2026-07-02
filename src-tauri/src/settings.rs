@@ -121,6 +121,25 @@ pub fn get_path_settings() -> Result<PathSettingsResponse> {
     {
         warnings.push("CAPSULE_SYNC_PATH is set and overrides the saved sync path.".to_string());
     }
+    if env::var("CAPSULE_GITHUB_GIST_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .is_some()
+    {
+        warnings.push(
+            "CAPSULE_GITHUB_GIST_ID is set and overrides the saved GitHub Gist ID.".to_string(),
+        );
+    }
+    if env::var("CAPSULE_GITHUB_GIST_TOKEN")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .is_some()
+    {
+        warnings.push(
+            "CAPSULE_GITHUB_GIST_TOKEN is set and overrides the saved GitHub Gist token."
+                .to_string(),
+        );
+    }
 
     let db_path = db::resolve_database_path();
     let backup_directory = db::backup_directory_for_database(&db_path);
@@ -129,12 +148,23 @@ pub fn get_path_settings() -> Result<PathSettingsResponse> {
         .ok()
         .and_then(|value| normalize_string(Some(&value)))
         .or_else(|| local_settings.sync_path.clone());
+    let github_gist_id = env::var("CAPSULE_GITHUB_GIST_ID")
+        .ok()
+        .and_then(|value| normalize_string(Some(&value)))
+        .or_else(|| local_settings.github_gist_id.clone());
+    let github_gist_token_configured = env::var("CAPSULE_GITHUB_GIST_TOKEN")
+        .ok()
+        .and_then(|value| normalize_string(Some(&value)))
+        .or_else(|| local_settings.github_gist_token.clone())
+        .is_some();
 
     Ok(PathSettingsResponse {
         database_path: db::path_to_string(&db_path),
         image_media_root: images::get_image_media_root()?,
         backup_directory: db::path_to_string(&backup_directory),
         sync_path,
+        github_gist_id,
+        github_gist_token_configured,
         auto_sync_enabled: local_settings.auto_sync_enabled.unwrap_or(false),
         auto_sync_interval_minutes: local_settings
             .auto_sync_interval_minutes
@@ -151,6 +181,12 @@ pub fn set_path_settings(input: PathSettingsUpdateRequest) -> Result<PathSetting
     settings.image_media_root = normalize_string(input.image_media_root.as_deref());
     settings.backup_directory = normalize_string(input.backup_directory.as_deref());
     settings.sync_path = normalize_string(input.sync_path.as_deref());
+    settings.github_gist_id = normalize_string(input.github_gist_id.as_deref());
+    if input.clear_github_gist_token.unwrap_or(false) {
+        settings.github_gist_token = None;
+    } else if let Some(token) = normalize_string(input.github_gist_token.as_deref()) {
+        settings.github_gist_token = Some(token);
+    }
     settings.auto_sync_enabled = input.auto_sync_enabled;
     settings.auto_sync_interval_minutes = input
         .auto_sync_interval_minutes

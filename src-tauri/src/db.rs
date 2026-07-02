@@ -25,6 +25,8 @@ pub struct LocalPathSettings {
     pub image_media_root: Option<String>,
     pub backup_directory: Option<String>,
     pub sync_path: Option<String>,
+    pub github_gist_id: Option<String>,
+    pub github_gist_token: Option<String>,
     pub auto_sync_enabled: Option<bool>,
     pub auto_sync_interval_minutes: Option<i64>,
 }
@@ -243,6 +245,14 @@ pub fn local_path_settings_path() -> PathBuf {
     PathBuf::from("path_settings.json")
 }
 
+pub fn local_github_gist_sync_cache_path() -> PathBuf {
+    local_path_settings_path()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("gist_sync")
+}
+
 pub fn read_local_path_settings() -> LocalPathSettings {
     try_read_local_path_settings().unwrap_or_default()
 }
@@ -348,6 +358,8 @@ impl LocalPathSettings {
         self.image_media_root = normalize_path_setting(self.image_media_root.take());
         self.backup_directory = normalize_path_setting(self.backup_directory.take());
         self.sync_path = normalize_path_setting(self.sync_path.take());
+        self.github_gist_id = normalize_path_setting(self.github_gist_id.take());
+        self.github_gist_token = normalize_path_setting(self.github_gist_token.take());
         self.auto_sync_interval_minutes = self
             .auto_sync_interval_minutes
             .map(|minutes| minutes.clamp(1, 24 * 60));
