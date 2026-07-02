@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.0 - 2026-07-02
+
+### Added
+
+- Added mood and tag autocomplete in the New Entry and Edit Entry composer,
+  including keyboard selection with arrow keys and Enter.
+
+### Changed
+
+- Bumped the app version to 0.12.0.
+
 ## 0.11.0 - 2026-07-02
 
 ### Added

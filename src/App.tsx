@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Archive,
   BarChart3,
@@ -266,6 +266,14 @@ type ImageUploadDraft = {
 
 type ComposerImageDraft = ImageUploadDraft & {
   id: string;
+};
+
+type MetadataAutocompleteMode = "single" | "comma";
+
+type MetadataAutocompleteOption = {
+  value: string;
+  label?: string;
+  meta?: string;
 };
 
 type PeriodForm = {
@@ -975,6 +983,22 @@ function App() {
     }
   }, [status?.readable]);
 
+  const loadMetadataCatalogs = useCallback(async () => {
+    if (!status?.readable) {
+      setTagCatalog(null);
+      setMoodCatalog(null);
+      return;
+    }
+
+    try {
+      const [nextTags, nextMoods] = await Promise.all([listTags(), listMoods()]);
+      setTagCatalog(nextTags);
+      setMoodCatalog(nextMoods);
+    } catch (catalogError) {
+      setError(catalogError instanceof Error ? catalogError.message : "Unable to load metadata suggestions");
+    }
+  }, [status?.readable]);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -995,17 +1019,21 @@ function App() {
         const now = new Date();
         const yearStart = `${now.getFullYear()}-01-01`;
         const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-        const [recent, pinned, random, yearEntries, monthEntries] = await Promise.all([
+        const [recent, pinned, random, yearEntries, monthEntries, nextTags, nextMoods] = await Promise.all([
           listEntries({ limit: 6, sort: "desc" }),
           listEntries({ pinned: true, limit: 6, sort: "desc" }),
           getRandomEntry({ includeHidden: false }),
           listEntries({ since: yearStart, limit: 1 }),
           listEntries({ since: monthStart, limit: 1 }),
+          listTags(),
+          listMoods(),
         ]);
 
         setRecentEntries(recent.entries);
         setPinnedEntries(pinned.entries);
         setRandomEntry(random);
+        setTagCatalog(nextTags);
+        setMoodCatalog(nextMoods);
         setDashboardCounts({
           currentYear: yearEntries.total,
           currentMonth: monthEntries.total,
@@ -1014,6 +1042,8 @@ function App() {
         setRecentEntries([]);
         setPinnedEntries([]);
         setRandomEntry(null);
+        setTagCatalog(null);
+        setMoodCatalog(null);
         setDashboardCounts({ currentYear: null, currentMonth: null });
       }
     } catch (refreshError) {
@@ -1180,6 +1210,12 @@ function App() {
       void loadDataTools();
     }
   }, [activeView, loadDataTools]);
+
+  useEffect(() => {
+    if (activeView === "composer") {
+      void loadMetadataCatalogs();
+    }
+  }, [activeView, loadMetadataCatalogs]);
 
   useEffect(() => {
     setThreadDraft({
@@ -2455,6 +2491,7 @@ function App() {
             imagesLoading={composerImagesLoading}
             imagesMutating={imageMutating}
             mode={composerMode}
+            moodCatalog={moodCatalog}
             onAddImageDraft={handleAddComposerImageDraft}
             onBrowseImagePath={handleBrowseImagePath}
             onCancel={() => setActiveView("entries")}
@@ -2466,6 +2503,7 @@ function App() {
             onSave={handleSaveEntry}
             saving={savingEntry}
             status={status}
+            tagCatalog={tagCatalog}
           />
         )}
 
@@ -3959,6 +3997,8 @@ type ComposerViewProps = {
   mode: ComposerMode;
   editingEntry: Entry | null;
   draft: ComposerDraft;
+  moodCatalog: MoodCatalogResponse | null;
+  tagCatalog: TagCatalogResponse | null;
   imageDrafts: ComposerImageDraft[];
   existingImages: ImageEntryListResponse | null;
   onChange: (next: ComposerDraft) => void;
@@ -3980,6 +4020,8 @@ function ComposerView({
   mode,
   editingEntry,
   draft,
+  moodCatalog,
+  tagCatalog,
   imageDrafts,
   existingImages,
   onChange,
@@ -3995,6 +4037,66 @@ function ComposerView({
   imagesLoading,
   imagesMutating,
 }: ComposerViewProps) {
+  const [composerTagCatalog, setComposerTagCatalog] = useState<TagCatalogResponse | null>(tagCatalog);
+  const [composerMoodCatalog, setComposerMoodCatalog] = useState<MoodCatalogResponse | null>(moodCatalog);
+
+  useEffect(() => {
+    setComposerTagCatalog(tagCatalog);
+  }, [tagCatalog]);
+
+  useEffect(() => {
+    setComposerMoodCatalog(moodCatalog);
+  }, [moodCatalog]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!status?.readable) {
+      setComposerTagCatalog(null);
+      setComposerMoodCatalog(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    Promise.all([listTags(), listMoods()])
+      .then(([nextTags, nextMoods]) => {
+        if (!cancelled) {
+          setComposerTagCatalog(nextTags);
+          setComposerMoodCatalog(nextMoods);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setComposerTagCatalog(tagCatalog);
+          setComposerMoodCatalog(moodCatalog);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [editingEntry?.uuid, mode, moodCatalog, status?.readable, tagCatalog]);
+
+  const moodOptions = useMemo(
+    () =>
+      (composerMoodCatalog?.moods ?? []).map((mood) => ({
+        value: mood.name,
+        label: mood.label,
+        meta: entryCountLabel(mood.entryCount),
+      })),
+    [composerMoodCatalog?.moods],
+  );
+  const tagOptions = useMemo(
+    () =>
+      (composerTagCatalog?.tags ?? []).map((tag) => ({
+        value: tag.name,
+        meta: entryCountLabel(tag.entryCount),
+      })),
+    [composerTagCatalog?.tags],
+  );
+  const stats = writingStats(draft.text);
+
   if (status && (!status.dbExists || !status.readable)) {
     return (
       <section className="state-panel">
@@ -4005,8 +4107,6 @@ function ComposerView({
       </section>
     );
   }
-
-  const stats = writingStats(draft.text);
 
   return (
     <section className="composer-view" aria-label={mode === "edit" ? "Edit entry" : "New entry"}>
@@ -4070,24 +4170,21 @@ function ComposerView({
                 value={draft.summary}
               />
             </label>
-            <label className="field">
-              <span>Mood</span>
-              <input
-                onChange={(event) => onChange({ ...draft, mood: event.target.value })}
-                placeholder="focused"
-                type="text"
-                value={draft.mood}
-              />
-            </label>
-            <label className="field">
-              <span>Tags</span>
-              <input
-                onChange={(event) => onChange({ ...draft, tags: event.target.value })}
-                placeholder="work, capsule"
-                type="text"
-                value={draft.tags}
-              />
-            </label>
+            <MetadataAutocompleteInput
+              label="Mood"
+              onChange={(mood) => onChange({ ...draft, mood })}
+              options={moodOptions}
+              placeholder="focused"
+              value={draft.mood}
+            />
+            <MetadataAutocompleteInput
+              label="Tags"
+              mode="comma"
+              onChange={(tags) => onChange({ ...draft, tags })}
+              options={tagOptions}
+              placeholder="work, capsule"
+              value={draft.tags}
+            />
             <label className="field">
               <span>Continue from UUID</span>
               <input
@@ -4281,6 +4378,211 @@ function ComposerView({
         </Panel>
       </aside>
     </section>
+  );
+}
+
+type MetadataAutocompleteInputProps = {
+  label: string;
+  value: string;
+  placeholder: string;
+  options: MetadataAutocompleteOption[];
+  onChange: (value: string) => void;
+  mode?: MetadataAutocompleteMode;
+};
+
+function MetadataAutocompleteInput({
+  label,
+  value,
+  placeholder,
+  options,
+  onChange,
+  mode = "single",
+}: MetadataAutocompleteInputProps) {
+  const inputId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [cursorPosition, setCursorPosition] = useState(value.length);
+  const [focused, setFocused] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const labelId = `${inputId}-label`;
+  const listId = `${inputId}-list`;
+
+  useEffect(() => {
+    setCursorPosition((current) => Math.min(current, value.length));
+  }, [value.length]);
+
+  const activeToken = useMemo(
+    () => autocompleteTokenForValue(value, cursorPosition, mode),
+    [cursorPosition, mode, value],
+  );
+  const query = activeToken.text.trim().toLowerCase();
+
+  const suggestions = useMemo(() => {
+    if (!query) {
+      return [];
+    }
+
+    const selectedValues =
+      mode === "comma"
+        ? new Set(splitFilter(value).map((item) => item.toLowerCase()))
+        : null;
+    const activeValue = activeToken.text.trim().toLowerCase();
+
+    return options
+      .filter((option) => {
+        const optionValue = option.value.trim();
+        if (!optionValue) {
+          return false;
+        }
+
+        const normalizedValue = optionValue.toLowerCase();
+        if (
+          mode === "comma" &&
+          selectedValues?.has(normalizedValue) &&
+          normalizedValue !== activeValue
+        ) {
+          return false;
+        }
+
+        const normalizedLabel = (option.label ?? "").toLowerCase();
+        return normalizedValue.startsWith(query) || normalizedLabel.startsWith(query);
+      })
+      .sort((left, right) => metadataOptionLabel(left).localeCompare(metadataOptionLabel(right)))
+      .slice(0, 8);
+  }, [activeToken.text, mode, options, query, value]);
+
+  const listOpen = focused && expanded && suggestions.length > 0;
+  const safeHighlightedIndex = Math.min(highlightedIndex, Math.max(suggestions.length - 1, 0));
+  const activeDescendant = listOpen ? `${listId}-option-${safeHighlightedIndex}` : undefined;
+
+  useEffect(() => {
+    setHighlightedIndex(0);
+  }, [query]);
+
+  const updateCursorFromInput = useCallback((input: HTMLInputElement) => {
+    setCursorPosition(input.selectionStart ?? input.value.length);
+  }, []);
+
+  const applySuggestion = useCallback(
+    (option: MetadataAutocompleteOption) => {
+      const token = autocompleteTokenForValue(value, cursorPosition, mode);
+      const leadingSpace = value.slice(token.start, token.end).match(/^\s*/)?.[0] ?? "";
+      const nextValue =
+        mode === "comma"
+          ? replaceMetadataToken(value, token.start, token.end, option.value)
+          : option.value;
+      const nextCursorPosition =
+        mode === "comma" ? token.start + leadingSpace.length + option.value.length : option.value.length;
+
+      onChange(nextValue);
+      setExpanded(false);
+      setCursorPosition(nextCursorPosition);
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        inputRef.current?.setSelectionRange(nextCursorPosition, nextCursorPosition);
+      });
+    },
+    [cursorPosition, mode, onChange, value],
+  );
+
+  return (
+    <div className="field autocomplete-field">
+      <span id={labelId}>{label}</span>
+      <input
+        aria-activedescendant={activeDescendant}
+        aria-autocomplete="list"
+        aria-controls={listOpen ? listId : undefined}
+        aria-expanded={listOpen}
+        aria-haspopup="listbox"
+        aria-labelledby={labelId}
+        autoComplete="off"
+        onBlur={() => {
+          setFocused(false);
+          setExpanded(false);
+        }}
+        onChange={(event) => {
+          updateCursorFromInput(event.currentTarget);
+          onChange(event.currentTarget.value);
+          setExpanded(true);
+        }}
+        onClick={(event) => updateCursorFromInput(event.currentTarget)}
+        onFocus={(event) => {
+          updateCursorFromInput(event.currentTarget);
+          setFocused(true);
+          setExpanded(true);
+        }}
+        onKeyDown={(event) => {
+          updateCursorFromInput(event.currentTarget);
+
+          if (event.key === "ArrowDown" && suggestions.length > 0) {
+            event.preventDefault();
+            setExpanded(true);
+            setHighlightedIndex((current) =>
+              listOpen ? Math.min(current + 1, suggestions.length - 1) : 0,
+            );
+            return;
+          }
+
+          if (event.key === "ArrowUp" && suggestions.length > 0) {
+            event.preventDefault();
+            setExpanded(true);
+            setHighlightedIndex((current) =>
+              listOpen ? Math.max(current - 1, 0) : suggestions.length - 1,
+            );
+            return;
+          }
+
+          if (event.key === "Enter" && listOpen) {
+            const suggestion = suggestions[safeHighlightedIndex];
+            if (suggestion) {
+              event.preventDefault();
+              applySuggestion(suggestion);
+            }
+            return;
+          }
+
+          if (event.key === "Escape" && listOpen) {
+            event.preventDefault();
+            setExpanded(false);
+          }
+        }}
+        onKeyUp={(event) => updateCursorFromInput(event.currentTarget)}
+        placeholder={placeholder}
+        ref={inputRef}
+        type="text"
+        value={value}
+      />
+      {listOpen && (
+        <div className="autocomplete-list" id={listId} role="listbox">
+          {suggestions.map((option, index) => {
+            const optionId = `${listId}-option-${index}`;
+            const selected = index === safeHighlightedIndex;
+            return (
+              <button
+                aria-selected={selected}
+                className={
+                  selected
+                    ? "autocomplete-option autocomplete-option--active"
+                    : "autocomplete-option"
+                }
+                id={optionId}
+                key={option.value}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  applySuggestion(option);
+                }}
+                role="option"
+                tabIndex={-1}
+                type="button"
+              >
+                <span className="autocomplete-option-label">{metadataOptionLabel(option)}</span>
+                {option.meta && <span className="autocomplete-option-meta">{option.meta}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -6614,6 +6916,36 @@ function splitFilter(value: string) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function autocompleteTokenForValue(
+  value: string,
+  cursorPosition: number,
+  mode: MetadataAutocompleteMode,
+) {
+  if (mode === "single") {
+    return { start: 0, end: value.length, text: value };
+  }
+
+  const cursor = Math.min(Math.max(cursorPosition, 0), value.length);
+  const start = value.lastIndexOf(",", Math.max(0, cursor - 1)) + 1;
+  const nextComma = value.indexOf(",", cursor);
+  const end = nextComma === -1 ? value.length : nextComma;
+
+  return { start, end, text: value.slice(start, end) };
+}
+
+function replaceMetadataToken(value: string, start: number, end: number, nextToken: string) {
+  const leadingSpace = value.slice(start, end).match(/^\s*/)?.[0] ?? "";
+  return `${value.slice(0, start)}${leadingSpace}${nextToken}${value.slice(end)}`;
+}
+
+function metadataOptionLabel(option: MetadataAutocompleteOption) {
+  return option.label ?? option.value;
+}
+
+function entryCountLabel(count: number) {
+  return `${count} ${count === 1 ? "entry" : "entries"}`;
 }
 
 function isThreadLeaf(thread: ThreadGroup, entry: Entry) {
