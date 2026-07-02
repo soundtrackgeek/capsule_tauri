@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.3 - 2026-07-02
+
+### Fixed
+
+- Fixed the Settings Application panel showing a stale hardcoded app version
+  after an in-app update.
+
+### Changed
+
+- Bumped the app version to 0.9.3.
+
 ## 0.9.2 - 2026-07-02
 
 ### Removed

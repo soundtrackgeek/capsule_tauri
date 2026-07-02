@@ -80,7 +80,8 @@ Capsule database:
   Gist import readiness.
 - Signed in-app updates, including an hourly background check, an update banner
   when a new version is available, and a manual Check for updates button in
-  Settings.
+  Settings. The Settings Application panel reports the installed Tauri runtime
+  version so it matches updater decisions.
 - Legacy plugin-prefixed media and location tables remain supported for Capsule
   compatibility, while plugin registry navigation and activation toggles are not
   exposed in the UI.

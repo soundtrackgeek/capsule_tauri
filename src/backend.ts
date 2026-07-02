@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
+import packageJson from "../package.json";
 import type {
   AiMetadataSuggestionRequest,
   AiMetadataSuggestionResponse,
@@ -94,6 +96,18 @@ export type AppUpdateProgress = {
 };
 
 let pendingAppUpdate: Update | null = null;
+
+export async function getAppVersion(): Promise<string> {
+  if (!runningInTauri()) {
+    return packageJson.version;
+  }
+
+  try {
+    return await getVersion();
+  } catch {
+    return packageJson.version;
+  }
+}
 
 const defaultMockDatabasePath = "C:\\Users\\jtill\\.capsule\\capsule.db";
 const defaultMockBackupDirectory = "C:\\Users\\jtill\\.capsule";

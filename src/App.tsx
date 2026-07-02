@@ -68,6 +68,7 @@ import {
   exportEntries,
   getAnalytics,
   getAiOverview,
+  getAppVersion,
   getCapsuleConfig,
   getCoverDataUrl,
   getDatabaseStatus,
@@ -331,7 +332,6 @@ const defaultWriterSettings: WriterSettings = {
 
 const draftStorageKey = "capsule-tauri-composer-draft-v1";
 const uiSettingsStorageKey = "capsule-tauri-ui-settings-v1";
-const appVersion = "0.9.0";
 const appUpdateCheckIntervalMs = 60 * 60 * 1000;
 
 const defaultUiSettings: UiSettings = {
@@ -473,6 +473,7 @@ function App() {
   const [draftRecovered, setDraftRecovered] = useState(false);
   const [writerSettings, setWriterSettings] = useState<WriterSettings>(defaultWriterSettings);
   const [uiSettings, setUiSettings] = useState<UiSettings>(defaultUiSettings);
+  const [appVersion, setAppVersion] = useState("Loading");
   const [availableUpdate, setAvailableUpdate] = useState<AppUpdateInfo | null>(null);
   const [updateCheckedAt, setUpdateCheckedAt] = useState<string | null>(null);
   const [updateProgress, setUpdateProgress] = useState<AppUpdateProgress | null>(null);
@@ -1277,6 +1278,20 @@ function App() {
       setUpdateInstalling(false);
     }
   }, [availableUpdate]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getAppVersion().then((version) => {
+      if (!cancelled) {
+        setAppVersion(version);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     void handleCheckForUpdates(true);
@@ -2365,6 +2380,7 @@ function App() {
 
         {activeView === "settings" && (
           <SettingsView
+            appVersion={appVersion}
             availableUpdate={availableUpdate}
             backupDirectory={backupDirectory}
             config={capsuleConfig}
@@ -4411,6 +4427,7 @@ function BackupsView({
 }
 
 type SettingsViewProps = {
+  appVersion: string;
   status: DatabaseStatus | null;
   backupDirectory: string;
   imageMediaRoot: string;
@@ -4443,6 +4460,7 @@ type SettingsViewProps = {
 };
 
 function SettingsView({
+  appVersion,
   status,
   backupDirectory,
   imageMediaRoot,
