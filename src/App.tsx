@@ -317,6 +317,55 @@ const emptyImageUploadDraft: ImageUploadDraft = {
   altText: "",
 };
 
+const serifWriterFont = "Georgia, ui-serif, serif";
+const monoWriterFont = "Cascadia Code, ui-monospace, monospace";
+
+const writerThemeDefaults: Record<
+  UiTheme,
+  Pick<WriterSettings, "background" | "color" | "fontFamily">
+> = {
+  system: {
+    background: "#f7f6f0",
+    color: "#17201b",
+    fontFamily: serifWriterFont,
+  },
+  light: {
+    background: "#f7f6f0",
+    color: "#17201b",
+    fontFamily: serifWriterFont,
+  },
+  dark: {
+    background: "#161b18",
+    color: "#e9eee8",
+    fontFamily: serifWriterFont,
+  },
+  msdos: {
+    background: "#061309",
+    color: "#76ff88",
+    fontFamily: monoWriterFont,
+  },
+  commodore64: {
+    background: "#261765",
+    color: "#f5f3ff",
+    fontFamily: monoWriterFont,
+  },
+  spectrum: {
+    background: "#090909",
+    color: "#f8f8f8",
+    fontFamily: monoWriterFont,
+  },
+};
+
+const writerDefaultBackgrounds = new Set(
+  Object.values(writerThemeDefaults).map((settings) => settings.background),
+);
+const writerDefaultColors = new Set(
+  Object.values(writerThemeDefaults).map((settings) => settings.color),
+);
+const writerDefaultFontFamilies = new Set(
+  Object.values(writerThemeDefaults).map((settings) => settings.fontFamily),
+);
+
 function createComposerImageDraft(path = ""): ComposerImageDraft {
   const id =
     typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -326,9 +375,7 @@ function createComposerImageDraft(path = ""): ComposerImageDraft {
 }
 
 const defaultWriterSettings: WriterSettings = {
-  background: "#f7f6f0",
-  color: "#17201b",
-  fontFamily: "Georgia, ui-serif, serif",
+  ...writerThemeDefaults.system,
   fontSize: 21,
   lineSpacing: 1.75,
 };
@@ -376,6 +423,21 @@ function normalizeUiSettings(value: unknown): UiSettings {
     sidebarMode: isSidebarMode(partial.sidebarMode)
       ? partial.sidebarMode
       : defaultUiSettings.sidebarMode,
+  };
+}
+
+function applyWriterThemeDefaults(settings: WriterSettings, theme: UiTheme): WriterSettings {
+  const themeDefaults = writerThemeDefaults[theme];
+
+  return {
+    ...settings,
+    background: writerDefaultBackgrounds.has(settings.background)
+      ? themeDefaults.background
+      : settings.background,
+    color: writerDefaultColors.has(settings.color) ? themeDefaults.color : settings.color,
+    fontFamily: writerDefaultFontFamilies.has(settings.fontFamily)
+      ? themeDefaults.fontFamily
+      : settings.fontFamily,
   };
 }
 
@@ -1048,6 +1110,10 @@ function App() {
     window.localStorage.setItem(uiSettingsStorageKey, JSON.stringify(uiSettings));
     document.documentElement.dataset.theme = uiSettings.theme;
   }, [uiSettings]);
+
+  useEffect(() => {
+    setWriterSettings((settings) => applyWriterThemeDefaults(settings, uiSettings.theme));
+  }, [uiSettings.theme]);
 
   useEffect(() => {
     if (activeView === "entries") {
@@ -4277,9 +4343,9 @@ function WriterModeView({
             onChange={(event) => setSettings({ ...settings, fontFamily: event.target.value })}
             value={settings.fontFamily}
           >
-            <option value="Georgia, ui-serif, serif">Serif</option>
+            <option value={serifWriterFont}>Serif</option>
             <option value="Inter, Segoe UI, ui-sans-serif, sans-serif">Sans</option>
-            <option value="Cascadia Code, ui-monospace, monospace">Mono</option>
+            <option value={monoWriterFont}>Mono</option>
           </select>
           <input
             max={28}

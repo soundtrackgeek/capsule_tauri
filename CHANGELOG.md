@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.1 - 2026-07-02
+
+### Changed
+
+- Changed Writer Mode default background, text color, and font to follow the
+  selected Interface theme.
+- Bumped the app version to 0.10.1.
+
 ## 0.10.0 - 2026-07-02
 
 ### Added
