@@ -136,7 +136,8 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
-`npm run tauri:build` creates signed updater artifacts. In CI the signing key
+`npm run tauri:build` creates signed updater artifacts and Windows release
+executables that launch without an extra console window. In CI the signing key
 comes from GitHub Secrets; for a local release build, set
 `TAURI_SIGNING_PRIVATE_KEY` to the private key content before running the
 command. For a passwordless key, set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` to an

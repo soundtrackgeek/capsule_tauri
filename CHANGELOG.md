@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.1 - 2026-07-02
+
+### Fixed
+
+- Fixed Windows release builds opening an extra blank console window at app
+  startup.
+
+### Changed
+
+- Bumped the app version to 0.9.1.
+
 ## 0.9.0 - 2026-07-02
 
 ### Added
