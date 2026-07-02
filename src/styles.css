@@ -35,8 +35,19 @@ body {
   background: #1d2520;
 }
 
+:root[data-theme="dark"] .nav-item {
+  color: #c8d8cf;
+}
+
+:root[data-theme="dark"] .nav-item:hover {
+  border-color: #3a4a40;
+  background: #28342d;
+  color: #f3f8f4;
+}
+
 :root[data-theme="dark"] .brand-mark,
-:root[data-theme="dark"] .nav-item--active {
+:root[data-theme="dark"] .nav-item--active,
+:root[data-theme="dark"] .nav-item--active:hover {
   background: #dcebe1;
   color: #152019;
 }
@@ -60,6 +71,17 @@ body {
 :root[data-theme="dark"] .metadata-block p,
 :root[data-theme="dark"] .detail-panel--empty p {
   color: #aab8ae;
+}
+
+:root[data-theme="dark"] .detail-list dt,
+:root[data-theme="dark"] .metric dt,
+:root[data-theme="dark"] .field span,
+:root[data-theme="dark"] .check-row span {
+  color: #b8c7bd;
+}
+
+:root[data-theme="dark"] .detail-list--paths code {
+  color: #d8e6dd;
 }
 
 :root[data-theme="dark"] .panel,

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.4 - 2026-07-02
+
+### Fixed
+
+- Fixed dark theme contrast for the sidebar menu, settings labels, and local
+  path metadata text.
+
+### Changed
+
+- Bumped the app version to 0.9.4.
+
 ## 0.9.3 - 2026-07-02
 
 ### Fixed
