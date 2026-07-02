@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.16.1 - 2026-07-02
+
+### Changed
+
+- Changed the Windows installer and app bundle icon to the Journal Vault app
+  icon so installed shortcuts, Start menu entries, and the taskbar use the new
+  Capsule branding.
+- Bumped the app version to 0.16.1.
+
 ## 0.16.0 - 2026-07-02
 
 ### Added
