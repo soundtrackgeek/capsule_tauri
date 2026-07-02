@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.16.3 - 2026-07-02
+
+### Fixed
+
+- Fixed Start menu and taskbar icon rendering by adding small-size optimized
+  Windows icon layers, matching the runtime AppUserModelID to the installer
+  shortcut, and explicitly applying the Capsule window icon at app startup.
+- Bumped the app version to 0.16.3.
+
 ## 0.16.2 - 2026-07-02
 
 ### Fixed

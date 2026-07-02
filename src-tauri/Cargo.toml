@@ -1,6 +1,6 @@
 [package]
 name = "capsule-tauri"
-version = "0.16.2"
+version = "0.16.3"
 description = "Capsule desktop app"
 authors = ["Capsule"]
 edition = "2021"
@@ -32,3 +32,6 @@ tempfile = "3"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-window-state = "2.4.1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_UI_Shell"] }

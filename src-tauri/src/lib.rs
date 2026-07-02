@@ -32,6 +32,10 @@ use models::{
     TagCatalogResponse, TagDeleteRequest, TagMergeRequest, TagMutationResponse, TagRenameRequest,
     ThreadListResponse, ThreadMetadataUpdate, ThreadMutationResponse, WritingCalendarResponse,
 };
+use tauri::Manager;
+
+const APP_ICON_BYTES: &[u8] = include_bytes!("../icons/icon-256.png");
+const WINDOWS_APP_USER_MODEL_ID: &str = "com.local.capsule";
 
 #[tauri::command]
 async fn get_database_status() -> Result<DatabaseStatus, String> {
@@ -645,12 +649,18 @@ async fn claim_quest(input: QuestClaimRequest) -> Result<QuestClaimResponse, Str
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    set_windows_app_user_model_id();
+
     let builder = tauri::Builder::default().plugin(tauri_plugin_updater::Builder::new().build());
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
 
     builder
+        .setup(|app| {
+            set_main_window_icon(app)?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_database_status,
             list_backups,
@@ -727,3 +737,33 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running Capsule Tauri app");
 }
+
+fn set_main_window_icon<R: tauri::Runtime>(
+    app: &mut tauri::App<R>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(window) = app.get_webview_window("main") {
+        let icon_rgba = ::image::load_from_memory(APP_ICON_BYTES)?.into_rgba8();
+        let (width, height) = icon_rgba.dimensions();
+        let icon = tauri::image::Image::new_owned(icon_rgba.into_raw(), width, height);
+        window.set_icon(icon)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(windows)]
+fn set_windows_app_user_model_id() {
+    use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+
+    let app_id = WINDOWS_APP_USER_MODEL_ID
+        .encode_utf16()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+
+    unsafe {
+        let _ = SetCurrentProcessExplicitAppUserModelID(app_id.as_ptr());
+    }
+}
+
+#[cfg(not(windows))]
+fn set_windows_app_user_model_id() {}
