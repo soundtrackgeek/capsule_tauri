@@ -73,7 +73,7 @@ Capsule database:
 - Writing Calendar heatmap for active days, words, images, mood metadata, and
   mood sentiment markers.
 - Cover Wall view backed by ignored local cover files under `local-assets/covers`
-  with generated thumbnails under `local-assets/cover_thumbnails`.
+  with generated thumbnails cached under the local app settings directory.
 - AI overview for provider/model readiness, persisted conversations, AI Time
   Capsules, embedding models, and local metadata suggestions that do not make
   cloud requests.
@@ -126,6 +126,9 @@ Uploaded originals use Capsule's legacy image key layout
 Cover wall assets are local-only and ignored by Git under `local-assets/`.
 Cover Wall image storage resolves `CAPSULE_COVERS_ROOT` first, then the saved
 Cover Wall image path from Settings, then `local-assets/covers`.
+Cover Wall thumbnails are generated on demand and cached under the local app
+settings directory, for example `%APPDATA%\Capsule\cover_thumbnails` on
+Windows.
 Mood sentiment scoring for Analytics and Calendar uses the bundled legacy mood
 scale in `src-tauri/mood_sentiment.json`.
 

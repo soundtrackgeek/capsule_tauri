@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.16.2 - 2026-07-02
+
+### Fixed
+
+- Fixed Cover Wall thumbnail rendering so generated thumbnails use a writable
+  app-local cache and still display when cache writes fail.
+
+### Changed
+
+- Bumped the app version to 0.16.2.
+
 ## 0.16.1 - 2026-07-02
 
 ### Changed

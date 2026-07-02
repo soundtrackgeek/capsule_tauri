@@ -396,32 +396,16 @@ pub(crate) fn list_cover_wall_for_database(
 pub fn get_cover_data_url(filename: String, variant: ImageVariant) -> Result<String> {
     let covers_root = resolve_covers_root_for_database(&db::resolve_database_path());
     let cover = resolve_cover_file(&covers_root, &filename)?;
-    let bytes = match variant {
-        ImageVariant::Full => fs::read(&cover.path)
-            .with_context(|| format!("failed to read {}", cover.path.display()))?,
-        ImageVariant::Thumb => {
-            let cache_path = cover_thumbnail_cache_path(&cover)?;
-            if !cache_path.exists() {
-                let original = fs::read(&cover.path)
-                    .with_context(|| format!("failed to read {}", cover.path.display()))?;
-                let thumbnail = build_thumbnail_bytes(&original, COVER_THUMB_SIZE)?;
-                if let Some(parent) = cache_path.parent() {
-                    fs::create_dir_all(parent)
-                        .with_context(|| format!("failed to create {}", parent.display()))?;
-                }
-                fs::write(&cache_path, &thumbnail)
-                    .with_context(|| format!("failed to write {}", cache_path.display()))?;
-                thumbnail
-            } else {
-                fs::read(&cache_path)
-                    .with_context(|| format!("failed to read {}", cache_path.display()))?
-            }
-        }
-    };
-    let mime_type = if variant == ImageVariant::Thumb {
-        "image/jpeg".to_string()
-    } else {
-        mime_from_path(&cover.path).unwrap_or_else(|| "image/jpeg".to_string())
+    let (bytes, mime_type) = match variant {
+        ImageVariant::Full => (
+            fs::read(&cover.path)
+                .with_context(|| format!("failed to read {}", cover.path.display()))?,
+            mime_from_path(&cover.path).unwrap_or_else(|| "image/jpeg".to_string()),
+        ),
+        ImageVariant::Thumb => (
+            read_or_build_cover_thumbnail(&cover)?,
+            "image/jpeg".to_string(),
+        ),
     };
     Ok(data_url(&mime_type, &bytes))
 }
@@ -1064,9 +1048,10 @@ fn default_covers_root() -> PathBuf {
 }
 
 fn resolve_cover_thumbnail_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("local-assets")
+    db::local_path_settings_path()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
         .join("cover_thumbnails")
 }
 
@@ -1138,7 +1123,40 @@ fn parse_cover_file(path: &Path) -> Result<Option<CoverFile>> {
     }))
 }
 
-fn cover_thumbnail_cache_path(cover: &CoverFile) -> Result<PathBuf> {
+fn read_or_build_cover_thumbnail(cover: &CoverFile) -> Result<Vec<u8>> {
+    read_or_build_cover_thumbnail_in_root(cover, &resolve_cover_thumbnail_root())
+}
+
+fn read_or_build_cover_thumbnail_in_root(
+    cover: &CoverFile,
+    thumbnail_root: &Path,
+) -> Result<Vec<u8>> {
+    let cache_path = cover_thumbnail_cache_path(cover, thumbnail_root)?;
+    if cache_path.exists() {
+        if let Ok(bytes) = fs::read(&cache_path) {
+            if !bytes.is_empty() {
+                return Ok(bytes);
+            }
+        }
+    }
+
+    let original = fs::read(&cover.path)
+        .with_context(|| format!("failed to read {}", cover.path.display()))?;
+    let thumbnail = build_thumbnail_bytes(&original, COVER_THUMB_SIZE)?;
+    write_cover_thumbnail_cache(&cache_path, &thumbnail);
+    Ok(thumbnail)
+}
+
+fn write_cover_thumbnail_cache(cache_path: &Path, thumbnail: &[u8]) {
+    if let Some(parent) = cache_path.parent() {
+        if fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
+    let _ = fs::write(cache_path, thumbnail);
+}
+
+fn cover_thumbnail_cache_path(cover: &CoverFile, thumbnail_root: &Path) -> Result<PathBuf> {
     let metadata = fs::metadata(&cover.path)?;
     let fingerprint = format!(
         "{}|{:?}|{}",
@@ -1146,7 +1164,7 @@ fn cover_thumbnail_cache_path(cover: &CoverFile) -> Result<PathBuf> {
         metadata.modified().ok(),
         metadata.len()
     );
-    Ok(resolve_cover_thumbnail_root().join(format!("{}.jpg", sha256_hex(fingerprint.as_bytes()))))
+    Ok(thumbnail_root.join(format!("{}.jpg", sha256_hex(fingerprint.as_bytes()))))
 }
 
 fn cover_matches(
@@ -1396,6 +1414,24 @@ mod tests {
         assert_eq!(response.total, 1);
         assert_eq!(response.covers[0].cover_type, "magazine");
         assert_eq!(response.covers[0].entry.uuid, "entry_root");
+    }
+
+    #[test]
+    fn cover_thumbnail_generation_does_not_require_writable_cache() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let cover_path = temp_dir.path().join("magazine-entry_root.png");
+        let image = ImageBuffer::from_pixel(6, 8, Rgb([120_u8, 40, 80]));
+        image.save(&cover_path).expect("cover");
+        let cover = parse_cover_file(&cover_path)
+            .expect("parse cover")
+            .expect("valid cover");
+        let unwritable_cache_root = temp_dir.path().join("cache-file");
+        fs::write(&unwritable_cache_root, b"not a directory").expect("cache blocker");
+
+        let thumbnail =
+            read_or_build_cover_thumbnail_in_root(&cover, &unwritable_cache_root).expect("thumb");
+
+        assert!(thumbnail.starts_with(&[0xff, 0xd8, 0xff]));
     }
 
     fn upload_image_for_database(
