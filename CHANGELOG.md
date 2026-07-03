@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.19.1 - 2026-07-03
+
+### Changed
+
+- Changed the app header, About panel, and README introduction to describe
+  Capsule as a local-first desktop journal instead of a release phase.
+- Bumped the app version to 0.19.1.
+
 ## 0.19.0 - 2026-07-03
 
 ### Added

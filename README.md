@@ -3,9 +3,10 @@
 Capsule Tauri is a local-first desktop journal for Capsule built with Tauri 2,
 React, TypeScript, Vite, Rust, and SQLite.
 
-Phase 6 provides images, location-aware browsing, analytics, a visual cover
-wall, and capability-gated AI/sync/gamification surfaces over the active
-Capsule database:
+It provides a native desktop shell for writing, reading, searching, backing up,
+syncing, and exploring the active Capsule SQLite database, including images,
+location-aware browsing, analytics, Writer Mode, a visual cover wall, and
+explicit capability-gated AI/sync surfaces:
 
 - Tauri 2 desktop configuration.
 - Native window restoration for the last size, position, maximized, and

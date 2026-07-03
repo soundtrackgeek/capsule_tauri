@@ -2257,7 +2257,7 @@ function App() {
       <main className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Phase 6</p>
+            <p className="eyebrow">Local-first journal</p>
             <h2>{title}</h2>
           </div>
 
@@ -6610,11 +6610,14 @@ function AboutView() {
     <section className="about-panel">
       <h3>Capsule Tauri</h3>
       <p>
-        Phase 6 adds capability-gated AI, sync, and gamification
-        surfaces over the local Capsule database. Cloud and bridge-driven paths
-        stay explicit, and quest writes keep the backup guard.
+        Capsule is a local-first desktop journal for writing, reading, searching,
+        and organizing personal entries in your own SQLite database.
       </p>
-      <p>Entry delete now requires an explicit warning and keeps the legacy ID resequencing path.</p>
+      <p>
+        It wraps everyday journaling with Writer Mode, image attachments, tags,
+        moods, location and weather context, analytics, threaded continuations,
+        backups, restore tools, and explicit sync/update controls.
+      </p>
     </section>
   );
 }
