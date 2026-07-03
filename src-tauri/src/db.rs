@@ -31,6 +31,7 @@ pub struct LocalPathSettings {
     pub auto_sync_enabled: Option<bool>,
     pub auto_sync_interval_minutes: Option<i64>,
     pub minimize_to_tray_on_close: Option<bool>,
+    pub show_window_after_update_restart: Option<bool>,
 }
 
 pub fn database_status() -> Result<DatabaseStatus> {
@@ -269,7 +270,10 @@ pub fn read_local_path_settings() -> LocalPathSettings {
 }
 
 pub fn try_read_local_path_settings() -> Result<LocalPathSettings> {
-    let path = local_path_settings_path();
+    read_local_path_settings_from_path(&local_path_settings_path())
+}
+
+fn read_local_path_settings_from_path(path: &Path) -> Result<LocalPathSettings> {
     if !path.exists() {
         return Ok(LocalPathSettings::default());
     }
@@ -282,7 +286,10 @@ pub fn try_read_local_path_settings() -> Result<LocalPathSettings> {
 }
 
 pub fn write_local_path_settings(settings: &LocalPathSettings) -> Result<()> {
-    let path = local_path_settings_path();
+    write_local_path_settings_to_path(&local_path_settings_path(), settings)
+}
+
+fn write_local_path_settings_to_path(path: &Path, settings: &LocalPathSettings) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
@@ -291,6 +298,31 @@ pub fn write_local_path_settings(settings: &LocalPathSettings) -> Result<()> {
     settings.normalize();
     fs::write(&path, serde_json::to_vec_pretty(&settings)?)
         .with_context(|| format!("failed to write {}", path.display()))
+}
+
+pub fn set_show_window_after_update_restart(requested: bool) -> Result<()> {
+    set_show_window_after_update_restart_at_path(&local_path_settings_path(), requested)
+}
+
+fn set_show_window_after_update_restart_at_path(path: &Path, requested: bool) -> Result<()> {
+    let mut settings = read_local_path_settings_from_path(path)?;
+    settings.show_window_after_update_restart = requested.then_some(true);
+    write_local_path_settings_to_path(path, &settings)
+}
+
+pub fn consume_show_window_after_update_restart() -> Result<bool> {
+    consume_show_window_after_update_restart_at_path(&local_path_settings_path())
+}
+
+fn consume_show_window_after_update_restart_at_path(path: &Path) -> Result<bool> {
+    let mut settings = read_local_path_settings_from_path(path)?;
+    let requested = settings.show_window_after_update_restart.unwrap_or(false);
+    if requested {
+        settings.show_window_after_update_restart = None;
+        write_local_path_settings_to_path(path, &settings)?;
+    }
+
+    Ok(requested)
 }
 
 pub fn open_read_only_connection(path: &Path) -> Result<Connection> {
@@ -460,5 +492,34 @@ mod tests {
         );
 
         assert_eq!(resolved, PathBuf::from(override_path));
+    }
+
+    #[test]
+    fn update_restart_window_request_round_trips_and_clears() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let settings_path = temp_dir.path().join("path_settings.json");
+        let settings = LocalPathSettings {
+            minimize_to_tray_on_close: Some(true),
+            ..LocalPathSettings::default()
+        };
+        write_local_path_settings_to_path(&settings_path, &settings).expect("seed settings");
+
+        set_show_window_after_update_restart_at_path(&settings_path, true).expect("mark request");
+        let marked = read_local_path_settings_from_path(&settings_path).expect("read marked");
+        assert_eq!(marked.minimize_to_tray_on_close, Some(true));
+        assert_eq!(marked.show_window_after_update_restart, Some(true));
+
+        assert!(
+            consume_show_window_after_update_restart_at_path(&settings_path)
+                .expect("consume request")
+        );
+        let consumed = read_local_path_settings_from_path(&settings_path).expect("read consumed");
+        assert_eq!(consumed.minimize_to_tray_on_close, Some(true));
+        assert_eq!(consumed.show_window_after_update_restart, None);
+
+        assert!(
+            !consume_show_window_after_update_restart_at_path(&settings_path)
+                .expect("consume empty request")
+        );
     }
 }

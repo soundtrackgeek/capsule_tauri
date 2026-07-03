@@ -651,6 +651,16 @@ async fn get_gamification_overview() -> Result<GamificationOverviewResponse, Str
 }
 
 #[tauri::command]
+async fn set_update_restart_window_request(requested: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        db::set_show_window_after_update_restart(requested)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn claim_quest(input: QuestClaimRequest) -> Result<QuestClaimResponse, String> {
     tauri::async_runtime::spawn_blocking(move || phase6::claim_quest(input))
         .await
@@ -686,6 +696,7 @@ pub fn run() {
             setup_tray(app)?;
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             setup_global_shortcuts(app.handle());
+            show_main_window_after_update_restart(app.handle());
             Ok(())
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -801,6 +812,7 @@ pub fn run() {
             run_sync,
             get_plugin_overview,
             get_gamification_overview,
+            set_update_restart_window_request,
             claim_quest
         ])
         .run(tauri::generate_context!())
@@ -841,6 +853,18 @@ fn setup_tray<R: tauri::Runtime>(
 fn setup_global_shortcuts<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Err(error) = app.global_shortcut().register("ctrl+alt+w") {
         eprintln!("Failed to register Ctrl+Alt+W global shortcut: {error}");
+    }
+}
+
+fn show_main_window_after_update_restart<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    match db::consume_show_window_after_update_restart() {
+        Ok(true) => {
+            if let Err(error) = open_main_window(app) {
+                eprintln!("Failed to show Capsule after update restart: {error}");
+            }
+        }
+        Ok(false) => {}
+        Err(error) => eprintln!("Failed to read Capsule update restart window request: {error}"),
     }
 }
 

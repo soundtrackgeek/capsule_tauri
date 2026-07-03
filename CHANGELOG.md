@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.19.2 - 2026-07-03
+
+### Fixed
+
+- Fixed update restarts reopening Capsule only in the system tray by showing the
+  main window once the updated app starts.
+
+### Changed
+
+- Bumped the app version to 0.19.2.
+
 ## 0.19.1 - 2026-07-03
 
 ### Changed

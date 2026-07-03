@@ -597,6 +597,12 @@ export async function checkForAppUpdate(): Promise<AppUpdateInfo | null> {
   }
 }
 
+async function setUpdateRestartWindowRequest(requested: boolean): Promise<void> {
+  if (runningInTauri()) {
+    await invoke<void>("set_update_restart_window_request", { requested });
+  }
+}
+
 export async function installAppUpdate(
   onProgress?: (progress: AppUpdateProgress) => void,
 ): Promise<void> {
@@ -627,7 +633,13 @@ export async function installAppUpdate(
         onProgress?.({ phase: "finished", downloadedBytes, contentLength });
       };
 
-      await update.downloadAndInstall(emitProgress, { timeout: 120_000 });
+      await setUpdateRestartWindowRequest(true);
+      try {
+        await update.downloadAndInstall(emitProgress, { timeout: 120_000 });
+      } catch (error) {
+        await setUpdateRestartWindowRequest(false).catch(() => undefined);
+        throw error;
+      }
       pendingAppUpdate = null;
       return;
     }
