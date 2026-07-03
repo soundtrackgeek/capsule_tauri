@@ -127,7 +127,7 @@ import {
 } from "./backend";
 import { StatusPill } from "./components/StatusPill";
 import { parseChangelog } from "./lib/changelog";
-import { formatBytes, formatDateTime } from "./lib/format";
+import { formatBytes, formatDateTime, formatEntryNumber } from "./lib/format";
 import type {
   BackupInfo,
   BackupRestorePreview,
@@ -6786,6 +6786,7 @@ function EntryDetail({
       <article className="entry-body">{entry.textPlain || entry.text}</article>
 
       <dl className="detail-list detail-list--compact">
+        <Detail label="Number" value={formatEntryNumber(entry.id)} />
         <Detail label="UUID" value={entry.uuid} />
         <Detail label="Format" value={entry.contentFormat} />
         <Detail label="Updated" value={formatDateTime(entry.updatedAt)} />
@@ -6908,10 +6909,11 @@ function EntryStack({ entries, loading, emptyText = "No entries found." }: Entry
 function EntryMini({ entry }: { entry: Entry }) {
   return (
     <article className="entry-mini">
-      <div>
+      <div className="entry-mini-heading">
         <h4>{entry.title || entry.textPlain.slice(0, 82) || "Untitled entry"}</h4>
-        <p>{entry.textPlain.slice(0, 140)}</p>
+        <EntryNumber entry={entry} />
       </div>
+      <p>{entry.textPlain.slice(0, 140)}</p>
       <EntryMeta entry={entry} />
     </article>
   );
@@ -6925,16 +6927,27 @@ function EntryCardContent({ entry }: { entry: Entry }) {
           <p className="eyebrow">{formatDateTime(entry.createdAt)}</p>
           <h4>{entry.title || entry.textPlain.slice(0, 84) || "Untitled entry"}</h4>
         </div>
-        {entry.attachmentCount > 0 && (
-          <span className="icon-stat" title="Image attachments">
-            <ImageIcon size={15} />
-            {entry.attachmentCount}
-          </span>
-        )}
+        <div className="entry-card-side">
+          <EntryNumber entry={entry} />
+          {entry.attachmentCount > 0 && (
+            <span className="icon-stat" title="Image attachments">
+              <ImageIcon size={15} />
+              {entry.attachmentCount}
+            </span>
+          )}
+        </div>
       </div>
       <p>{entry.summary || entry.textPlain.slice(0, 180)}</p>
       <EntryMeta entry={entry} />
     </>
+  );
+}
+
+function EntryNumber({ entry }: { entry: Entry }) {
+  return (
+    <span className="entry-number" title="Entry number">
+      {formatEntryNumber(entry.id)}
+    </span>
   );
 }
 

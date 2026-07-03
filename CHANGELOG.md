@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.21.0 - 2026-07-03
+
+### Added
+
+- Added old-Capsule-style entry numbers from `entries.id` on Dashboard,
+  Entries, Search, and entry detail views.
+
+### Fixed
+
+- Added conservative entry ID repair so imported legacy rows without visible
+  entry IDs receive numbers before new entries are created.
+
+### Changed
+
+- Bumped the app version to 0.21.0.
+
 ## 0.20.0 - 2026-07-03
 
 ### Added

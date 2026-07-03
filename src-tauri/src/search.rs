@@ -37,6 +37,7 @@ pub(crate) fn search_entries_for_database(
     db_path: &Path,
     input: SearchRequest,
 ) -> Result<SearchResponse> {
+    entries::ensure_entry_ids_for_database(db_path)?;
     let mut parsed = parse_search_request(input);
     let mode = match parsed.requested_mode {
         SearchMode::Keyword => SearchMode::Keyword,

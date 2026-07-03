@@ -25,3 +25,11 @@ export const formatDateTime = (value: string | null | undefined) => {
     timeStyle: "short",
   }).format(new Date(value));
 };
+
+export const formatEntryNumber = (id: number | null | undefined) => {
+  if (!id || id < 1) {
+    return "#?";
+  }
+
+  return `#${id}`;
+};

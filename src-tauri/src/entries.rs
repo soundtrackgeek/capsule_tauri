@@ -123,6 +123,20 @@ struct QueryParts {
 }
 
 #[derive(Debug, Clone)]
+struct EntryIdColumnInfo {
+    exists: bool,
+    primary_key: bool,
+}
+
+#[derive(Debug, Clone)]
+struct EntryIdRepairRow {
+    rowid: i64,
+    current_id: Option<i64>,
+    reference_id: Option<i64>,
+    repaired_id: i64,
+}
+
+#[derive(Debug, Clone)]
 struct DeletedEntry {
     entry_id: i64,
     entry_uuid: String,
@@ -152,6 +166,7 @@ pub fn list_entries_for_database(
     db_path: &Path,
     filters: EntryFilters,
 ) -> Result<EntryListResponse> {
+    ensure_entry_ids_for_database(db_path)?;
     let connection = open_entries_connection(db_path)?;
     let tables = detected_tables(&connection)?;
     ensure_entries_table(&tables)?;
@@ -178,6 +193,7 @@ pub fn get_entry(identifier: String) -> Result<Entry> {
 }
 
 pub fn get_entry_for_database(db_path: &Path, identifier: &str) -> Result<Entry> {
+    ensure_entry_ids_for_database(db_path)?;
     let connection = open_entries_connection(db_path)?;
     let tables = detected_tables(&connection)?;
     ensure_entries_table(&tables)?;
@@ -202,6 +218,7 @@ pub(crate) fn list_entries_by_uuids_for_database(
         return Ok(Vec::new());
     }
 
+    ensure_entry_ids_for_database(db_path)?;
     let connection = open_entries_connection(db_path)?;
     let tables = detected_tables(&connection)?;
     ensure_entries_table(&tables)?;
@@ -239,6 +256,7 @@ pub fn get_random_entry_for_database(
     db_path: &Path,
     filters: RandomEntryFilters,
 ) -> Result<Option<Entry>> {
+    ensure_entry_ids_for_database(db_path)?;
     let entry_filters = EntryFilters {
         include_hidden: filters.include_hidden,
         tags: filters.tags,
@@ -364,6 +382,7 @@ pub fn list_entry_history_for_database(
     db_path: &Path,
     identifier: &str,
 ) -> Result<EntryHistoryResponse> {
+    ensure_entry_ids_for_database(db_path)?;
     let connection = open_entries_connection(db_path)?;
     let (entry_id, _) = resolve_entry_identity(&connection, identifier)?;
     let current_snapshot = get_entry_snapshot(&connection, entry_id)?;
@@ -441,6 +460,7 @@ fn open_entries_connection(db_path: &Path) -> Result<Connection> {
 }
 
 fn create_entry_inner(db_path: &Path, input: EntryCreate) -> Result<Entry> {
+    ensure_entry_ids_for_database(db_path)?;
     let text = normalize_required_text(&input.text)?;
     let content_format = normalize_content_format(input.content_format.as_deref())?;
     let text_plain = build_text_plain(&text);
@@ -460,11 +480,13 @@ fn create_entry_inner(db_path: &Path, input: EntryCreate) -> Result<Entry> {
 
     let tx = connection.transaction()?;
     let uuid = generate_entry_uuid(&tx)?;
+    let entry_id = next_entry_id(&tx)?;
     tx.execute(
         "INSERT INTO entries
-            (uuid, created_at, updated_at, text, text_plain, content_format, title, summary, mood, starred, pinned, hidden)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0)",
+            (id, uuid, created_at, updated_at, text, text_plain, content_format, title, summary, mood, starred, pinned, hidden)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0)",
         params![
+            entry_id,
             uuid,
             created_at,
             updated_at,
@@ -478,7 +500,6 @@ fn create_entry_inner(db_path: &Path, input: EntryCreate) -> Result<Entry> {
             bool_to_int(pinned),
         ],
     )?;
-    let entry_id = tx.last_insert_rowid();
     replace_entry_tags(&tx, entry_id, &tags)?;
     if let Some(parent_uuid) = continue_from_uuid.as_deref() {
         set_entry_continuation(&tx, &uuid, Some(parent_uuid))?;
@@ -494,6 +515,7 @@ fn create_entry_inner(db_path: &Path, input: EntryCreate) -> Result<Entry> {
 }
 
 fn update_entry_inner(db_path: &Path, identifier: &str, input: EntryUpdate) -> Result<Entry> {
+    ensure_entry_ids_for_database(db_path)?;
     let mut connection = db::open_read_write_connection(db_path)?;
     let schema = db::inspect_schema(&connection)?;
     ensure_entries_table(&schema.detected_tables.into_iter().collect())?;
@@ -577,6 +599,7 @@ fn update_entry_inner(db_path: &Path, identifier: &str, input: EntryUpdate) -> R
 }
 
 fn delete_entry_inner(db_path: &Path, identifier: &str) -> Result<DeletedEntry> {
+    ensure_entry_ids_for_database(db_path)?;
     let connection = db::open_read_write_connection(db_path)?;
     let schema = db::inspect_schema(&connection)?;
     ensure_entries_table(&schema.detected_tables.into_iter().collect())?;
@@ -731,6 +754,7 @@ fn set_entry_flag_inner(
     column: &'static str,
     value: bool,
 ) -> Result<Entry> {
+    ensure_entry_ids_for_database(db_path)?;
     let mut connection = db::open_read_write_connection(db_path)?;
     let tx = connection.transaction()?;
     let (entry_id, uuid) = resolve_entry_identity(&tx, identifier)?;
@@ -1166,6 +1190,254 @@ fn update_sqlite_sequence(connection: &Connection) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+pub(crate) fn ensure_entry_ids_for_database(db_path: &Path) -> Result<()> {
+    let connection = db::open_read_only_connection(db_path)?;
+    let tables = detected_tables(&connection)?;
+    ensure_entries_table(&tables)?;
+    let needs_repair = entry_ids_need_repair(&connection)?;
+    drop(connection);
+
+    if !needs_repair {
+        return Ok(());
+    }
+
+    backup::with_database_backup_for_database(db_path, "entry.ids.repair", |path| {
+        let connection = db::open_read_write_connection(path)?;
+        repair_entry_ids(&connection)
+    })?;
+    Ok(())
+}
+
+fn entry_ids_need_repair(connection: &Connection) -> Result<bool> {
+    let info = entry_id_column_info(connection)?;
+    if !info.exists {
+        return Ok(true);
+    }
+    if info.primary_key {
+        return Ok(false);
+    }
+
+    let missing_count = connection.query_row(
+        "SELECT COUNT(*) FROM entries WHERE id IS NULL OR CAST(id AS INTEGER) <= 0",
+        [],
+        |row| row.get::<_, i64>(0),
+    )?;
+    if missing_count > 0 {
+        return Ok(true);
+    }
+
+    let duplicate_count = connection.query_row(
+        "SELECT COUNT(*)
+         FROM (
+            SELECT id
+            FROM entries
+            WHERE id IS NOT NULL AND CAST(id AS INTEGER) > 0
+            GROUP BY id
+            HAVING COUNT(*) > 1
+         )",
+        [],
+        |row| row.get::<_, i64>(0),
+    )?;
+    Ok(duplicate_count > 0)
+}
+
+fn repair_entry_ids(connection: &Connection) -> Result<()> {
+    connection.execute_batch("BEGIN IMMEDIATE")?;
+    let result = (|| -> Result<()> {
+        let info = entry_id_column_info(connection)?;
+        let rows = planned_entry_id_repair_rows(connection, info.exists)?;
+        let duplicate_id = duplicate_entry_id(connection)?;
+        if let Some(id) = duplicate_id {
+            return Err(anyhow!(
+                "Cannot repair entry numbers because entries.id value {id} is duplicated."
+            ));
+        }
+
+        if !info.exists {
+            connection.execute("ALTER TABLE entries ADD COLUMN id INTEGER", [])?;
+        }
+
+        let changed_rows = rows
+            .iter()
+            .filter(|row| row.current_id.unwrap_or(0) != row.repaired_id)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if changed_rows.is_empty() {
+            return Ok(());
+        }
+
+        update_entry_id_references(connection, &changed_rows)?;
+        for row in &changed_rows {
+            connection.execute(
+                "UPDATE entries SET id = ?1 WHERE rowid = ?2",
+                params![row.repaired_id, row.rowid],
+            )?;
+        }
+        rebuild_entries_fts(connection)?;
+        update_sqlite_sequence(connection)?;
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => {
+            connection.execute_batch("COMMIT")?;
+            Ok(())
+        }
+        Err(error) => {
+            let _ = connection.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
+}
+
+fn planned_entry_id_repair_rows(
+    connection: &Connection,
+    has_id_column: bool,
+) -> Result<Vec<EntryIdRepairRow>> {
+    let sql = if has_id_column {
+        "SELECT rowid, id FROM entries ORDER BY datetime(created_at) ASC, rowid ASC"
+    } else {
+        "SELECT rowid, NULL AS id FROM entries ORDER BY datetime(created_at) ASC, rowid ASC"
+    };
+    let mut statement = connection.prepare(sql)?;
+    let source_rows = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, Option<i64>>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let mut next_id = source_rows
+        .iter()
+        .filter_map(|(_, id)| (*id).filter(|value| *value > 0))
+        .max()
+        .unwrap_or(0)
+        + 1;
+    let mut rows = Vec::with_capacity(source_rows.len());
+    for (rowid, raw_id) in source_rows {
+        let current_id = raw_id.filter(|id| *id > 0);
+        let repaired_id = match current_id {
+            Some(id) => id,
+            None => {
+                let id = next_id;
+                next_id += 1;
+                id
+            }
+        };
+        let reference_id = if has_id_column { raw_id } else { Some(rowid) };
+        rows.push(EntryIdRepairRow {
+            rowid,
+            current_id,
+            reference_id,
+            repaired_id,
+        });
+    }
+    Ok(rows)
+}
+
+fn duplicate_entry_id(connection: &Connection) -> Result<Option<i64>> {
+    if !entry_id_column_info(connection)?.exists {
+        return Ok(None);
+    }
+
+    connection
+        .query_row(
+            "SELECT id
+             FROM entries
+             WHERE id IS NOT NULL AND CAST(id AS INTEGER) > 0
+             GROUP BY id
+             HAVING COUNT(*) > 1
+             LIMIT 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn update_entry_id_references(
+    connection: &Connection,
+    changed_rows: &[EntryIdRepairRow],
+) -> Result<()> {
+    update_entry_id_reference_table(connection, "entry_tags", "entry_id", changed_rows)?;
+    update_entry_id_reference_table(connection, "history", "entry_id", changed_rows)?;
+    update_entry_id_reference_table(connection, "embeddings", "entry_id", changed_rows)?;
+    Ok(())
+}
+
+fn update_entry_id_reference_table(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    changed_rows: &[EntryIdRepairRow],
+) -> Result<()> {
+    if changed_rows.is_empty() || !table_exists(connection, table)? {
+        return Ok(());
+    }
+    if !table_columns(connection, table)?.contains(column) {
+        return Ok(());
+    }
+
+    let table = match table {
+        "entry_tags" => "entry_tags",
+        "history" => "history",
+        "embeddings" => "embeddings",
+        _ => return Err(anyhow!("Unsupported entry ID repair table: {table}")),
+    };
+    let column = match column {
+        "entry_id" => "entry_id",
+        _ => return Err(anyhow!("Unsupported entry ID repair column: {column}")),
+    };
+
+    for row in changed_rows {
+        let Some(previous_reference) = row.reference_id else {
+            continue;
+        };
+        if previous_reference == row.repaired_id {
+            continue;
+        }
+        connection.execute(
+            &format!("UPDATE {table} SET {column} = ?1 WHERE {column} = ?2"),
+            params![-row.repaired_id, previous_reference],
+        )?;
+    }
+    connection.execute(
+        &format!("UPDATE {table} SET {column} = -{column} WHERE {column} < 0"),
+        [],
+    )?;
+    Ok(())
+}
+
+fn entry_id_column_info(connection: &Connection) -> Result<EntryIdColumnInfo> {
+    let mut statement = connection.prepare("PRAGMA table_info(entries)")?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(1)?, row.get::<_, i64>(5)?))
+    })?;
+
+    for row in rows {
+        let (name, primary_key) = row?;
+        if name.eq_ignore_ascii_case("id") {
+            return Ok(EntryIdColumnInfo {
+                exists: true,
+                primary_key: primary_key > 0,
+            });
+        }
+    }
+
+    Ok(EntryIdColumnInfo {
+        exists: false,
+        primary_key: false,
+    })
+}
+
+fn next_entry_id(connection: &Connection) -> Result<i64> {
+    connection
+        .query_row("SELECT COALESCE(MAX(id), 0) + 1 FROM entries", [], |row| {
+            row.get(0)
+        })
+        .context("failed to calculate next entry id")
 }
 
 fn rebuild_entries_fts(connection: &Connection) -> Result<()> {
@@ -2220,6 +2492,73 @@ mod tests {
     }
 
     #[test]
+    fn list_entries_exposes_entry_numbers_from_ids() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_fixture_database(temp_dir.path());
+
+        let response = list_entries_for_database(
+            &db_path,
+            EntryFilters {
+                include_hidden: Some(true),
+                sort: Some(EntrySort::Asc),
+                ..EntryFilters::default()
+            },
+        )
+        .expect("entries");
+
+        let ids = response
+            .entries
+            .iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn create_entry_returns_next_entry_number() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_fixture_database(temp_dir.path());
+
+        let response = create_entry_for_database(
+            &db_path,
+            EntryCreate {
+                text: "Numbered new entry".to_string(),
+                when: Some("2026-02-01T09:30".to_string()),
+                ..EntryCreate::default()
+            },
+        )
+        .expect("create entry");
+
+        assert_eq!(response.entry.id, 5);
+    }
+
+    #[test]
+    fn ensure_entry_ids_repairs_nullable_legacy_ids() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_nullable_id_fixture_database(temp_dir.path());
+
+        ensure_entry_ids_for_database(&db_path).expect("repair ids");
+
+        let response = list_entries_for_database(
+            &db_path,
+            EntryFilters {
+                include_hidden: Some(true),
+                sort: Some(EntrySort::Asc),
+                ..EntryFilters::default()
+            },
+        )
+        .expect("entries");
+        assert_eq!(
+            response
+                .entries
+                .iter()
+                .map(|entry| (entry.id, entry.uuid.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(1, "legacy_one"), (2, "legacy_two"), (3, "legacy_three")]
+        );
+    }
+
+    #[test]
     fn get_entry_accepts_uuid_or_numeric_id() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let db_path = create_fixture_database(temp_dir.path());
@@ -2539,6 +2878,59 @@ mod tests {
             )
             .expect("location tombstones");
         assert_eq!(location_tombstones, 1);
+    }
+
+    fn create_nullable_id_fixture_database(path: &Path) -> std::path::PathBuf {
+        let db_path = path.join("legacy-nullable-id.db");
+        let connection = Connection::open(&db_path).expect("open db");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE entries (
+                    id INTEGER,
+                    uuid TEXT UNIQUE,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT,
+                    text TEXT NOT NULL,
+                    text_plain TEXT NOT NULL DEFAULT '',
+                    content_format TEXT NOT NULL DEFAULT 'plain',
+                    title TEXT,
+                    summary TEXT,
+                    mood TEXT,
+                    starred INTEGER DEFAULT 0,
+                    pinned INTEGER DEFAULT 0,
+                    hidden INTEGER DEFAULT 0
+                );
+                CREATE TABLE tags (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE
+                );
+                CREATE TABLE entry_tags (
+                    entry_id INTEGER NOT NULL,
+                    tag_id INTEGER NOT NULL,
+                    PRIMARY KEY (entry_id, tag_id)
+                );
+                CREATE TABLE entries_fts (text);
+                INSERT INTO entries
+                    (id, uuid, created_at, updated_at, text, text_plain, content_format, hidden)
+                VALUES
+                    (NULL, 'legacy_two', '2026-01-02 08:00', '2026-01-02 08:00', 'Two', 'Two', 'plain', 0),
+                    (NULL, 'legacy_one', '2026-01-01 08:00', '2026-01-01 08:00', 'One', 'One', 'plain', 0),
+                    (NULL, 'legacy_three', '2026-01-03 08:00', '2026-01-03 08:00', 'Three', 'Three', 'plain', 0);
+                INSERT INTO tags (name) VALUES ('legacy');
+                INSERT INTO entry_tags (entry_id, tag_id) VALUES (1, 1), (2, 1), (3, 1);
+                INSERT INTO entries_fts(rowid, text) VALUES (1, 'Two'), (2, 'One'), (3, 'Three');
+                ",
+            )
+            .expect("fixture");
+        drop(connection);
+        std::fs::write(
+            path.join("config.json"),
+            r#"{"location.auto_capture": "false"}"#,
+        )
+        .expect("config");
+
+        db_path
     }
 
     fn create_fixture_database(path: &Path) -> std::path::PathBuf {

@@ -13,7 +13,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Map, Value as JsonValue};
 
 use crate::{
-    backup, db,
+    backup, db, entries,
     models::{SyncRunRequest, SyncRunResponse},
 };
 
@@ -716,6 +716,7 @@ fn run_sync_with_retries(db_path: &Path, sync_dir: &Path) -> Result<SyncRunRespo
 }
 
 fn run_sync_once(db_path: &Path, sync_dir: &Path, attempt: usize) -> Result<SyncAttempt> {
+    entries::ensure_entry_ids_for_database(db_path)?;
     let sync_file = sync_dir.join(MAIN_SYNC_FILE);
     let threads_sync_file = sync_dir.join(THREADS_SYNC_FILE);
     let ai_chat_sync_file = sync_dir.join(AI_CHATS_SYNC_FILE);
@@ -1182,12 +1183,14 @@ fn insert_entry_for_sync(
     hidden: bool,
 ) -> Result<i64> {
     let text_plain = build_text_plain(text);
+    let entry_id = next_entry_id(connection)?;
     connection.execute(
         "INSERT INTO entries
-            (uuid, created_at, updated_at, text, text_plain, content_format,
+            (id, uuid, created_at, updated_at, text, text_plain, content_format,
              title, summary, mood, starred, pinned, hidden)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
+            entry_id,
             uuid,
             created_at,
             updated_at,
@@ -1202,7 +1205,6 @@ fn insert_entry_for_sync(
             bool_to_int(hidden),
         ],
     )?;
-    let entry_id = connection.last_insert_rowid();
     refresh_fts_for_entry(connection, entry_id, &text_plain)?;
     Ok(entry_id)
 }
@@ -1364,6 +1366,14 @@ fn refresh_fts_for_entry(connection: &Connection, entry_id: i64, text_plain: &st
         )
         .ok();
     Ok(())
+}
+
+fn next_entry_id(connection: &Connection) -> Result<i64> {
+    connection
+        .query_row("SELECT COALESCE(MAX(id), 0) + 1 FROM entries", [], |row| {
+            row.get(0)
+        })
+        .context("failed to calculate next entry id")
 }
 
 fn rebuild_entries_fts(connection: &Connection) -> Result<()> {

@@ -18,13 +18,14 @@ explicit capability-gated AI/sync surfaces:
 - Browser-only mock backend for `npm run dev`.
 - Read-only database status for the active Capsule database.
 - Dashboard counts for total entries, total tags, current year, and current month.
-- Recent entries, pinned entries, and random entry panels.
-- Entries list with text, tag, mood, location, date, image, hidden, and sort
-  filters.
-- Entry detail view with full text, tags, mood, location, attachment count, and
-  thread metadata when those tables are available, including stored weather
-  condition, Celsius-first temperature, humidity, wind, icon, source, and
-  fetched timestamp.
+- Recent entries, pinned entries, and random entry panels with old-Capsule-style
+  entry numbers.
+- Entries list with old-Capsule-style entry numbers, text, tag, mood, location,
+  date, image, hidden, and sort filters.
+- Entry detail view with entry number, full text, tags, mood, location,
+  attachment count, and thread metadata when those tables are available,
+  including stored weather condition, Celsius-first temperature, humidity, wind,
+  icon, source, and fetched timestamp.
 - Backup-guarded entry creation and editing, with Capsule-compatible location
   and weather auto-capture for new entries.
 - Backup-guarded star, unstar, pin, unpin, hide, unhide, and confirmed delete
@@ -41,8 +42,8 @@ explicit capability-gated AI/sync surfaces:
 - Structured search tokens for `tag:`, `mood:`, `before:`, `after:`, and
   `NOT tag:` queries, plus include/exclude tag and mood filters and a location
   text filter.
-- Search results with the same star, pin, edit, continue, delete, and hide/unhide
-  actions used by the Entries view.
+- Search results with old-Capsule-style entry numbers and the same star, pin,
+  edit, continue, delete, and hide/unhide actions used by the Entries view.
 - Thread groups built from Capsule continuation links with ordered entries,
   latest activity, titles, and summaries.
 - Backup-guarded thread title/summary updates, bulk link commands, leaf detach,

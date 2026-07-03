@@ -182,7 +182,8 @@ body {
 
 :root[data-theme="dark"] .tag-chip,
 :root[data-theme="dark"] .tag-input-chip,
-:root[data-theme="dark"] .icon-stat {
+:root[data-theme="dark"] .icon-stat,
+:root[data-theme="dark"] .entry-number {
   background: #29342d;
   color: #dcebe1;
 }
@@ -562,6 +563,7 @@ body {
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .tag-chip,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .tag-input-chip,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .icon-stat,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .entry-number,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .state-panel code,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .thread-entry-index,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .word-cloud strong {
@@ -1206,6 +1208,28 @@ button:active:not(:disabled) {
   line-height: 1.35;
 }
 
+.entry-mini-heading,
+.entry-card-side {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.entry-mini-heading {
+  justify-content: space-between;
+}
+
+.entry-mini-heading h4,
+.entry-card-heading > div {
+  min-width: 0;
+}
+
+.entry-card-side {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .entry-mini p,
 .entry-card p,
 .thread-card p,
@@ -1331,7 +1355,8 @@ button:active:not(:disabled) {
 
 .tag-chip,
 .mood-chip,
-.icon-stat {
+.icon-stat,
+.entry-number {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1355,6 +1380,14 @@ button:active:not(:disabled) {
 .icon-stat {
   background: #edf1ee;
   color: #3b4941;
+}
+
+.entry-number {
+  background: #e0eadf;
+  color: #214c2f;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .entries-workspace {
