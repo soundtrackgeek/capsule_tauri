@@ -11,8 +11,8 @@ Capsule database:
 - Native window restoration for the last size, position, maximized, and
   fullscreen state used before closing the app.
 - System tray support with Open Interface, Writer, Settings, and Quit actions,
-  plus a Settings option to hide Capsule to the tray when the main window is
-  closed.
+  plus a global `Ctrl+Alt+W` Writer shortcut and a Settings option to hide
+  Capsule to the tray when the main window is closed.
 - React + TypeScript + Vite frontend.
 - Browser-only mock backend for `npm run dev`.
 - Read-only database status for the active Capsule database.
@@ -32,7 +32,8 @@ Capsule database:
   chip-style tag entry with autocomplete and Tab/Enter pill creation, save-time
   entry dating, continuation UUID support, multi-select queued local image
   attachments with thumbnail previews, writing stats, and local draft recovery.
-- Distraction-free Writer Mode with local display preferences.
+- Distraction-free Writer Mode with local display preferences and a global
+  `Ctrl+Alt+W` shortcut that opens Capsule directly into Writer Mode.
 - Entry history review for legacy Capsule edit snapshots.
 - Keyword search using `entries_fts` when available, with a compatibility
   fallback to entry text matching.

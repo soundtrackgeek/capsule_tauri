@@ -37,6 +37,8 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager,
 };
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, ShortcutState};
 
 const APP_ICON_BYTES: &[u8] = include_bytes!("../icons/icon-256.png");
 const WINDOWS_APP_USER_MODEL_ID: &str = "com.local.capsule";
@@ -662,6 +664,19 @@ pub fn run() {
 
     let builder = tauri::Builder::default().plugin(tauri_plugin_updater::Builder::new().build());
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let builder = builder.plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(|app, shortcut, event| {
+                if event.state == ShortcutState::Pressed
+                    && shortcut.matches(Modifiers::CONTROL | Modifiers::ALT, Code::KeyW)
+                {
+                    let _ = open_app_view(app, "writer");
+                }
+            })
+            .build(),
+    );
+
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
 
@@ -669,6 +684,8 @@ pub fn run() {
         .setup(|app| {
             set_main_window_icon(app)?;
             setup_tray(app)?;
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            setup_global_shortcuts(app.handle());
             Ok(())
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -818,6 +835,13 @@ fn setup_tray<R: tauri::Runtime>(
         .build(app)?;
 
     Ok(())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn setup_global_shortcuts<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Err(error) = app.global_shortcut().register("ctrl+alt+w") {
+        eprintln!("Failed to register Ctrl+Alt+W global shortcut: {error}");
+    }
 }
 
 fn open_app_view<R: tauri::Runtime>(app: &tauri::AppHandle<R>, view: &str) -> tauri::Result<()> {

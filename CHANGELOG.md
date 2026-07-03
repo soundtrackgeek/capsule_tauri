@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.19.0 - 2026-07-03
+
+### Added
+
+- Added a global `Ctrl+Alt+W` shortcut that opens Capsule directly into Writer
+  Mode from any Windows app while Capsule is running.
+
+### Changed
+
+- Bumped the app version to 0.19.0.
+
 ## 0.18.0 - 2026-07-03
 
 ### Added
