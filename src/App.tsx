@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
+import changelogMarkdown from "../CHANGELOG.md?raw";
 import {
   Archive,
   BarChart3,
@@ -125,6 +126,7 @@ import {
   type AppUpdateProgress,
 } from "./backend";
 import { StatusPill } from "./components/StatusPill";
+import { parseChangelog } from "./lib/changelog";
 import { formatBytes, formatDateTime } from "./lib/format";
 import type {
   BackupInfo,
@@ -310,6 +312,8 @@ const navItems: Array<{ id: ActiveView; label: string; icon: ReactNode }> = [
   { id: "settings", label: "Settings", icon: <Settings size={18} /> },
   { id: "about", label: "About", icon: <Info size={18} /> },
 ];
+
+const changelogReleases = parseChangelog(changelogMarkdown);
 
 const trayOpenViewEvent = "capsule://open-view";
 
@@ -6607,17 +6611,55 @@ function UnavailableState({
 
 function AboutView() {
   return (
-    <section className="about-panel">
-      <h3>Capsule Tauri</h3>
-      <p>
-        Capsule is a local-first desktop journal for writing, reading, searching,
-        and organizing personal entries in your own SQLite database.
-      </p>
-      <p>
-        It wraps everyday journaling with Writer Mode, image attachments, tags,
-        moods, location and weather context, analytics, threaded continuations,
-        backups, restore tools, and explicit sync/update controls.
-      </p>
+    <section className="about-stack" aria-label="About Capsule">
+      <article className="about-panel">
+        <h3>Capsule Tauri</h3>
+        <p>
+          Capsule is a local-first desktop journal for writing, reading, searching,
+          and organizing personal entries in your own SQLite database.
+        </p>
+        <p>
+          It wraps everyday journaling with Writer Mode, image attachments, tags,
+          moods, location and weather context, analytics, threaded continuations,
+          backups, restore tools, and explicit sync/update controls.
+        </p>
+      </article>
+
+      <article className="about-panel about-panel--changelog" aria-labelledby="about-changelog-title">
+        <div className="about-changelog-heading">
+          <div>
+            <p className="eyebrow">Release notes</p>
+            <h3 id="about-changelog-title">Changelog</h3>
+          </div>
+          <History size={20} />
+        </div>
+        {changelogReleases.length > 0 ? (
+          <div className="changelog-list">
+            {changelogReleases.map((release) => (
+              <article className="changelog-release" key={`${release.version}-${release.date ?? "undated"}`}>
+                <header>
+                  <h4>{release.version}</h4>
+                  {release.date && <time dateTime={release.date}>{release.date}</time>}
+                </header>
+                <div className="changelog-section-list">
+                  {release.sections.map((section) => (
+                    <section className="changelog-section" key={section.title}>
+                      <h5>{section.title}</h5>
+                      <ul>
+                        {section.items.map((item, index) => (
+                          <li key={`${release.version}-${section.title}-${index}`}>{item}</li>
+                        ))}
+                      </ul>
+                    </section>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">No changelog entries found.</p>
+        )}
+      </article>
     </section>
   );
 }

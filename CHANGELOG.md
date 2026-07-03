@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.20.0 - 2026-07-03
+
+### Added
+
+- Added a Changelog box under the About panel, backed by the bundled
+  `CHANGELOG.md` release history.
+- Added Vitest coverage for the changelog Markdown parser and an `npm test`
+  command.
+
+### Changed
+
+- Bumped the app version to 0.20.0.
+
 ## 0.19.2 - 2026-07-03
 
 ### Fixed

@@ -66,6 +66,8 @@ body {
 :root[data-theme="dark"] .quest-card p,
 :root[data-theme="dark"] .suggestion-card p,
 :root[data-theme="dark"] .cover-tile span,
+:root[data-theme="dark"] .changelog-release time,
+:root[data-theme="dark"] .changelog-section h5,
 :root[data-theme="dark"] .bar-row em,
 :root[data-theme="dark"] .about-panel p,
 :root[data-theme="dark"] .metadata-block p,
@@ -109,6 +111,7 @@ body {
 :root[data-theme="dark"] .media-tile,
 :root[data-theme="dark"] .quest-card,
 :root[data-theme="dark"] .suggestion-card,
+:root[data-theme="dark"] .changelog-release,
 :root[data-theme="dark"] .toolbar-panel,
 :root[data-theme="dark"] .cover-wall-panel,
 :root[data-theme="dark"] .cover-tile,
@@ -405,6 +408,7 @@ body {
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .capability-card,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .quest-card,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .suggestion-card,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .changelog-release,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .calendar-month,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .cover-tile,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .skeleton-card {
@@ -518,6 +522,8 @@ body {
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .quest-card p,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .suggestion-card p,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .cover-tile span,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .changelog-release time,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .changelog-section h5,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .bar-row em,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .about-panel p,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .metadata-block p,
@@ -1029,6 +1035,7 @@ button:active:not(:disabled) {
 .dashboard,
 .backup-view,
 .settings-grid,
+.about-stack,
 .about-panel,
 .threads-workspace,
 .images-workspace,
@@ -1050,6 +1057,11 @@ button:active:not(:disabled) {
 .settings-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.16fr) minmax(320px, 0.84fr);
+  gap: 16px;
+}
+
+.about-stack {
+  display: grid;
   gap: 16px;
 }
 
@@ -1206,6 +1218,93 @@ button:active:not(:disabled) {
   margin: 8px 0 0;
   color: #66756d;
   line-height: 1.55;
+}
+
+.about-changelog-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.about-changelog-heading .eyebrow,
+.about-changelog-heading h3 {
+  margin: 0;
+}
+
+.about-changelog-heading h3 {
+  margin-top: 3px;
+}
+
+.about-changelog-heading svg {
+  flex: 0 0 auto;
+  color: currentColor;
+  opacity: 0.7;
+}
+
+.changelog-list {
+  display: grid;
+  gap: 12px;
+  max-height: min(62dvh, 720px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.changelog-release {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #e1e7e2;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 13px;
+}
+
+.changelog-release header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.changelog-release h4,
+.changelog-section h5 {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.changelog-release h4 {
+  font-size: 15px;
+}
+
+.changelog-release time,
+.changelog-section h5 {
+  color: #66756d;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.changelog-section-list {
+  display: grid;
+  gap: 12px;
+}
+
+.changelog-section {
+  display: grid;
+  gap: 6px;
+}
+
+.changelog-section ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.changelog-section li {
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .entry-mini p,

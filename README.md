@@ -95,6 +95,8 @@ explicit capability-gated AI/sync surfaces:
   Settings. Capsule reopens the main window after an update restart, and the
   Settings Application panel reports the installed Tauri runtime version so it
   matches updater decisions.
+- About screen changelog panel backed by the bundled `CHANGELOG.md` release
+  history.
 - Legacy plugin-prefixed media and location tables remain supported for Capsule
   compatibility, while plugin registry navigation and activation toggles are not
   exposed in the UI.
@@ -158,6 +160,7 @@ Norway.
 ```powershell
 npm install
 npm run dev
+npm test
 npm run build
 npm run tauri:dev
 npm run tauri:build
