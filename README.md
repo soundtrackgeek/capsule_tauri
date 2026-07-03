@@ -10,8 +10,9 @@ Capsule database:
 - Tauri 2 desktop configuration.
 - Native window restoration for the last size, position, maximized, and
   fullscreen state used before closing the app.
-- System tray support with Open Interface and Quit actions, plus a Settings
-  option to hide Capsule to the tray when the main window is closed.
+- System tray support with Open Interface, Writer, Settings, and Quit actions,
+  plus a Settings option to hide Capsule to the tray when the main window is
+  closed.
 - React + TypeScript + Vite frontend.
 - Browser-only mock backend for `npm run dev`.
 - Read-only database status for the active Capsule database.

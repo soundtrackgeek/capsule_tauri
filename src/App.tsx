@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
   Archive,
   BarChart3,
@@ -186,6 +187,8 @@ type ActiveView =
   | "settings"
   | "about";
 
+type TrayOpenView = Extract<ActiveView, "writer" | "settings">;
+
 type EntryFilterForm = {
   text: string;
   tag: string;
@@ -307,6 +310,8 @@ const navItems: Array<{ id: ActiveView; label: string; icon: ReactNode }> = [
   { id: "settings", label: "Settings", icon: <Settings size={18} /> },
   { id: "about", label: "About", icon: <Info size={18} /> },
 ];
+
+const trayOpenViewEvent = "capsule://open-view";
 
 const emptyComposerDraft: ComposerDraft = {
   text: "",
@@ -520,6 +525,17 @@ function configBooleanValue(
 
 function fileNameFromPath(path: string) {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
+function isTauriRuntime() {
+  return (
+    typeof window !== "undefined" &&
+    Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
+  );
+}
+
+function isTrayOpenView(value: unknown): value is TrayOpenView {
+  return value === "writer" || value === "settings";
 }
 
 function App() {
@@ -2106,6 +2122,34 @@ function App() {
     } finally {
       setHistoryLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+
+    void listen<unknown>(trayOpenViewEvent, (event) => {
+      if (isTrayOpenView(event.payload)) {
+        setActiveView(event.payload);
+      }
+    })
+      .then((nextUnlisten) => {
+        if (cancelled) {
+          nextUnlisten();
+          return;
+        }
+        unlisten = nextUnlisten;
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   useEffect(() => {

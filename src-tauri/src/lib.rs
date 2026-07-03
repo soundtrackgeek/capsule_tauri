@@ -35,12 +35,15 @@ use models::{
 use tauri::{
     menu::MenuBuilder,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager,
+    Emitter, Manager,
 };
 
 const APP_ICON_BYTES: &[u8] = include_bytes!("../icons/icon-256.png");
 const WINDOWS_APP_USER_MODEL_ID: &str = "com.local.capsule";
+const TRAY_OPEN_VIEW_EVENT: &str = "capsule://open-view";
 const TRAY_OPEN_INTERFACE_ID: &str = "tray-open-interface";
+const TRAY_OPEN_WRITER_ID: &str = "tray-open-writer";
+const TRAY_OPEN_SETTINGS_ID: &str = "tray-open-settings";
 const TRAY_QUIT_ID: &str = "tray-quit";
 
 #[tauri::command]
@@ -672,6 +675,12 @@ pub fn run() {
             TRAY_OPEN_INTERFACE_ID => {
                 let _ = open_main_window(app);
             }
+            TRAY_OPEN_WRITER_ID => {
+                let _ = open_app_view(app, "writer");
+            }
+            TRAY_OPEN_SETTINGS_ID => {
+                let _ = open_app_view(app, "settings");
+            }
             TRAY_QUIT_ID => app.exit(0),
             _ => {}
         })
@@ -796,6 +805,8 @@ fn setup_tray<R: tauri::Runtime>(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let menu = MenuBuilder::new(app)
         .text(TRAY_OPEN_INTERFACE_ID, "Open Interface")
+        .text(TRAY_OPEN_WRITER_ID, "Writer")
+        .text(TRAY_OPEN_SETTINGS_ID, "Settings")
         .text(TRAY_QUIT_ID, "Quit")
         .build()?;
 
@@ -806,6 +817,12 @@ fn setup_tray<R: tauri::Runtime>(
         .show_menu_on_left_click(false)
         .build(app)?;
 
+    Ok(())
+}
+
+fn open_app_view<R: tauri::Runtime>(app: &tauri::AppHandle<R>, view: &str) -> tauri::Result<()> {
+    open_main_window(app)?;
+    app.emit(TRAY_OPEN_VIEW_EVENT, view)?;
     Ok(())
 }
 

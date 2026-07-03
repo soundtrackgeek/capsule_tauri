@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.18.0 - 2026-07-03
+
+### Added
+
+- Added system tray Writer and Settings actions that open Capsule directly to
+  Writer Mode or the Settings page.
+
+### Changed
+
+- Bumped the app version to 0.18.0.
+
 ## 0.17.0 - 2026-07-03
 
 ### Added
