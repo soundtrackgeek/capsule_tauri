@@ -399,6 +399,7 @@ const defaultWriterSettings: WriterSettings = {
 
 const draftStorageKey = "capsule-tauri-composer-draft-v1";
 const uiSettingsStorageKey = "capsule-tauri-ui-settings-v1";
+const noticeAutoDismissMs = 5 * 1000;
 const appUpdateCheckIntervalMs = 60 * 60 * 1000;
 
 const uiThemeOptions: Array<{ value: UiTheme; label: string }> = [
@@ -1076,6 +1077,18 @@ function App() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!notice) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setNotice(null);
+    }, noticeAutoDismissMs);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [notice]);
 
   useEffect(() => {
     const rawDraft = window.localStorage.getItem(draftStorageKey);

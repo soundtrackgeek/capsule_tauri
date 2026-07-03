@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.21.3 - 2026-07-03
+
+### Fixed
+
+- Fixed success and information banners lingering across screens by
+  automatically dismissing them after five seconds.
+
+### Changed
+
+- Bumped the app version to 0.21.3.
+
 ## 0.21.2 - 2026-07-03
 
 ### Fixed
