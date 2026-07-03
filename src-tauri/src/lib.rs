@@ -48,6 +48,17 @@ const TRAY_OPEN_WRITER_ID: &str = "tray-open-writer";
 const TRAY_OPEN_SETTINGS_ID: &str = "tray-open-settings";
 const TRAY_QUIT_ID: &str = "tray-quit";
 
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
+    use tauri_plugin_window_state::StateFlags;
+
+    StateFlags::SIZE
+        | StateFlags::POSITION
+        | StateFlags::MAXIMIZED
+        | StateFlags::DECORATIONS
+        | StateFlags::FULLSCREEN
+}
+
 #[tauri::command]
 async fn get_database_status() -> Result<DatabaseStatus, String> {
     tauri::async_runtime::spawn_blocking(db::database_status)
@@ -697,7 +708,11 @@ pub fn run() {
     );
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
-    let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
+    let builder = builder.plugin(
+        tauri_plugin_window_state::Builder::default()
+            .with_state_flags(window_state_flags())
+            .build(),
+    );
 
     builder
         .setup(|app| {
@@ -705,7 +720,7 @@ pub fn run() {
             setup_tray(app)?;
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             setup_global_shortcuts(app.handle());
-            show_main_window_after_update_restart(app.handle());
+            show_main_window_on_startup(app.handle());
             Ok(())
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -865,15 +880,14 @@ fn setup_global_shortcuts<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
-fn show_main_window_after_update_restart<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+fn show_main_window_on_startup<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     match db::consume_show_window_after_update_restart() {
-        Ok(true) => {
-            if let Err(error) = open_main_window(app) {
-                eprintln!("Failed to show Capsule after update restart: {error}");
-            }
-        }
-        Ok(false) => {}
+        Ok(_) => {}
         Err(error) => eprintln!("Failed to read Capsule update restart window request: {error}"),
+    }
+
+    if let Err(error) = open_main_window(app) {
+        eprintln!("Failed to show Capsule on startup: {error}");
     }
 }
 

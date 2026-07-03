@@ -10,7 +10,8 @@ explicit capability-gated AI/sync surfaces:
 
 - Tauri 2 desktop configuration.
 - Native window restoration for the last size, position, maximized, and
-  fullscreen state used before closing the app.
+  fullscreen state used before closing the app, while every fresh launch opens
+  the main window even if the previous session ended from the tray.
 - Single-instance startup protection so launching Capsule again hands off to
   the running app instead of creating duplicate tray icons.
 - System tray support with Open Interface, Writer, Settings, and Quit actions,
@@ -124,7 +125,8 @@ storage resolves `CAPSULE_BACKUP_DIR` first, then the saved local backup path
 from Settings, then the active database directory. Saved local paths are stored
 outside the journal database in the app path settings file shown in Settings.
 The same local settings file stores whether closing the main window should hide
-Capsule to the system tray instead of exiting.
+Capsule to the system tray instead of exiting. Tray-hidden sessions do not
+become the next launch mode; starting Capsule opens the main window.
 Shared-folder sync resolves `CAPSULE_SYNC_PATH` first, then the saved sync path
 from Settings, and writes the same three sync files used by the older Capsule
 app. GitHub Gist sync resolves `CAPSULE_GITHUB_GIST_ID` and

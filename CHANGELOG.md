@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.21.2 - 2026-07-03
+
+### Fixed
+
+- Fixed normal launches reopening only in the system tray after quitting while
+  the main window was hidden to the tray.
+
+### Changed
+
+- Bumped the app version to 0.21.2.
+
 ## 0.21.1 - 2026-07-03
 
 ### Fixed
