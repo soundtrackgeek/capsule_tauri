@@ -32,10 +32,16 @@ use models::{
     TagCatalogResponse, TagDeleteRequest, TagMergeRequest, TagMutationResponse, TagRenameRequest,
     ThreadListResponse, ThreadMetadataUpdate, ThreadMutationResponse, WritingCalendarResponse,
 };
-use tauri::Manager;
+use tauri::{
+    menu::MenuBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager,
+};
 
 const APP_ICON_BYTES: &[u8] = include_bytes!("../icons/icon-256.png");
 const WINDOWS_APP_USER_MODEL_ID: &str = "com.local.capsule";
+const TRAY_OPEN_INTERFACE_ID: &str = "tray-open-interface";
+const TRAY_QUIT_ID: &str = "tray-quit";
 
 #[tauri::command]
 async fn get_database_status() -> Result<DatabaseStatus, String> {
@@ -659,7 +665,44 @@ pub fn run() {
     builder
         .setup(|app| {
             set_main_window_icon(app)?;
+            setup_tray(app)?;
             Ok(())
+        })
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            TRAY_OPEN_INTERFACE_ID => {
+                let _ = open_main_window(app);
+            }
+            TRAY_QUIT_ID => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|app, event| match event {
+            TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            }
+            | TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            } => {
+                let _ = open_main_window(app);
+            }
+            _ => {}
+        })
+        .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if db::read_local_path_settings()
+                    .minimize_to_tray_on_close
+                    .unwrap_or(false)
+                {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_database_status,
@@ -742,13 +785,48 @@ fn set_main_window_icon<R: tauri::Runtime>(
     app: &mut tauri::App<R>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(window) = app.get_webview_window("main") {
-        let icon_rgba = ::image::load_from_memory(APP_ICON_BYTES)?.into_rgba8();
-        let (width, height) = icon_rgba.dimensions();
-        let icon = tauri::image::Image::new_owned(icon_rgba.into_raw(), width, height);
-        window.set_icon(icon)?;
+        window.set_icon(load_app_icon()?)?;
     }
 
     Ok(())
+}
+
+fn setup_tray<R: tauri::Runtime>(
+    app: &mut tauri::App<R>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let menu = MenuBuilder::new(app)
+        .text(TRAY_OPEN_INTERFACE_ID, "Open Interface")
+        .text(TRAY_QUIT_ID, "Quit")
+        .build()?;
+
+    TrayIconBuilder::new()
+        .icon(load_app_icon()?)
+        .tooltip("Capsule")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .build(app)?;
+
+    Ok(())
+}
+
+fn open_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.show()?;
+        window.unminimize()?;
+        window.set_focus()?;
+    }
+
+    Ok(())
+}
+
+fn load_app_icon() -> Result<tauri::image::Image<'static>, ::image::ImageError> {
+    let icon_rgba = ::image::load_from_memory(APP_ICON_BYTES)?.into_rgba8();
+    let (width, height) = icon_rgba.dimensions();
+    Ok(tauri::image::Image::new_owned(
+        icon_rgba.into_raw(),
+        width,
+        height,
+    ))
 }
 
 #[cfg(windows)]

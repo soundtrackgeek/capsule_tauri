@@ -112,6 +112,7 @@ export type PathSettingsResponse = {
   githubGistTokenConfigured: boolean;
   autoSyncEnabled: boolean;
   autoSyncIntervalMinutes: number;
+  minimizeToTrayOnClose: boolean;
   settingsPath: string;
   warnings: string[];
 };
@@ -127,6 +128,7 @@ export type PathSettingsUpdateRequest = {
   clearGithubGistToken?: boolean | null;
   autoSyncEnabled?: boolean | null;
   autoSyncIntervalMinutes?: number | null;
+  minimizeToTrayOnClose?: boolean | null;
 };
 
 export type TagUsage = {

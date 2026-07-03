@@ -181,6 +181,7 @@ pub struct PathSettingsResponse {
     pub github_gist_token_configured: bool,
     pub auto_sync_enabled: bool,
     pub auto_sync_interval_minutes: i64,
+    pub minimize_to_tray_on_close: bool,
     pub settings_path: String,
     pub warnings: Vec<String>,
 }
@@ -198,6 +199,7 @@ pub struct PathSettingsUpdateRequest {
     pub clear_github_gist_token: Option<bool>,
     pub auto_sync_enabled: Option<bool>,
     pub auto_sync_interval_minutes: Option<i64>,
+    pub minimize_to_tray_on_close: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]

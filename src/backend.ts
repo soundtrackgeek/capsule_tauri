@@ -120,6 +120,7 @@ let mockGithubGistId = "";
 let mockGithubGistTokenConfigured = false;
 let mockAutoSyncEnabled = false;
 let mockAutoSyncIntervalMinutes = 15;
+let mockMinimizeToTrayOnClose = false;
 
 let mockStatus: DatabaseStatus = {
   dbPath: defaultMockDatabasePath,
@@ -829,6 +830,7 @@ export async function setPathSettings(
     }
     mockAutoSyncEnabled = Boolean(input.autoSyncEnabled);
     mockAutoSyncIntervalMinutes = autoSyncInterval;
+    mockMinimizeToTrayOnClose = Boolean(input.minimizeToTrayOnClose);
 
     return mockPathSettings();
   } catch (error) {
@@ -2508,6 +2510,7 @@ function mockPathSettings(): PathSettingsResponse {
     githubGistTokenConfigured: mockGithubGistTokenConfigured,
     autoSyncEnabled: mockAutoSyncEnabled,
     autoSyncIntervalMinutes: mockAutoSyncIntervalMinutes,
+    minimizeToTrayOnClose: mockMinimizeToTrayOnClose,
     settingsPath: mockPathSettingsPath,
     warnings: [],
   };

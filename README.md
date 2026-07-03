@@ -10,6 +10,8 @@ Capsule database:
 - Tauri 2 desktop configuration.
 - Native window restoration for the last size, position, maximized, and
   fullscreen state used before closing the app.
+- System tray support with Open Interface and Quit actions, plus a Settings
+  option to hide Capsule to the tray when the main window is closed.
 - React + TypeScript + Vite frontend.
 - Browser-only mock backend for `npm run dev`.
 - Read-only database status for the active Capsule database.
@@ -56,7 +58,8 @@ Capsule database:
   backup directory, and shared sync folder, with native browse buttons.
 - Local System, Light, Dark, MS-DOS, Commodore 64, and ZX Spectrum theme
   settings, Writer Mode defaults that follow the selected theme, and
-  sidebar-density settings stored outside the journal database.
+  sidebar-density and close-to-tray settings stored outside the journal
+  database.
 - Tag rename, merge, and delete tools guarded by verified database backups.
 - Mood rename and clear tools guarded by verified database backups.
 - Template and prompt library management for custom rows, with built-in rows
@@ -111,6 +114,8 @@ config, then the default `C:\Users\jtill\OneDrive\_capsule\images`. Backup
 storage resolves `CAPSULE_BACKUP_DIR` first, then the saved local backup path
 from Settings, then the active database directory. Saved local paths are stored
 outside the journal database in the app path settings file shown in Settings.
+The same local settings file stores whether closing the main window should hide
+Capsule to the system tray instead of exiting.
 Shared-folder sync resolves `CAPSULE_SYNC_PATH` first, then the saved sync path
 from Settings, and writes the same three sync files used by the older Capsule
 app. GitHub Gist sync resolves `CAPSULE_GITHUB_GIST_ID` and

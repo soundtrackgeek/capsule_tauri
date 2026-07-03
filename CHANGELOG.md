@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.17.0 - 2026-07-03
+
+### Added
+
+- Added a system tray icon with Open Interface and Quit actions.
+- Added a Settings option to hide the app to the tray when the main window is
+  closed.
+
+### Changed
+
+- Bumped the app version to 0.17.0.
+
 ## 0.16.3 - 2026-07-02
 
 ### Fixed

@@ -5171,6 +5171,7 @@ function SettingsView({
     clearGithubGistToken: false,
     autoSyncEnabled: false,
     autoSyncIntervalMinutes: 15,
+    minimizeToTrayOnClose: false,
   });
   const [configDraft, setConfigDraft] = useState({ key: "", value: "" });
   const [locationDraft, setLocationDraft] = useState<LocationCaptureDraft>({
@@ -5206,6 +5207,7 @@ function SettingsView({
       clearGithubGistToken: false,
       autoSyncEnabled: pathSettings?.autoSyncEnabled ?? false,
       autoSyncIntervalMinutes: pathSettings?.autoSyncIntervalMinutes ?? 15,
+      minimizeToTrayOnClose: pathSettings?.minimizeToTrayOnClose ?? false,
     });
   }, [
     backupDirectory,
@@ -5217,6 +5219,7 @@ function SettingsView({
     pathSettings?.databasePath,
     pathSettings?.githubGistId,
     pathSettings?.imageMediaRoot,
+    pathSettings?.minimizeToTrayOnClose,
     pathSettings?.syncPath,
     status?.dbPath,
   ]);
@@ -5242,6 +5245,20 @@ function SettingsView({
       ? `Last checked ${formatDateTime(updateCheckedAt)}`
       : "Not checked yet";
   const canRunSyncFromSettings = Boolean(pathDraft.syncPath.trim() || pathDraft.githubGistId.trim());
+  const savePathSettingsDraft = () =>
+    onSavePathSettings({
+      databasePath: pathDraft.databasePath,
+      imageMediaRoot: pathDraft.imageMediaRoot,
+      coverWallRoot: pathDraft.coverWallRoot,
+      backupDirectory: pathDraft.backupDirectory,
+      syncPath: pathDraft.syncPath,
+      githubGistId: pathDraft.githubGistId,
+      githubGistToken: pathDraft.githubGistToken,
+      clearGithubGistToken: pathDraft.clearGithubGistToken,
+      autoSyncEnabled: pathDraft.autoSyncEnabled,
+      autoSyncIntervalMinutes: pathDraft.autoSyncIntervalMinutes,
+      minimizeToTrayOnClose: pathDraft.minimizeToTrayOnClose,
+    });
 
   return (
     <section className="settings-grid" aria-label="Settings">
@@ -5451,22 +5468,7 @@ function SettingsView({
             <button
               className="primary-button"
               disabled={dataToolMutating}
-              onClick={() =>
-                onRunMutation(() =>
-                  onSavePathSettings({
-                    databasePath: pathDraft.databasePath,
-                    imageMediaRoot: pathDraft.imageMediaRoot,
-                    coverWallRoot: pathDraft.coverWallRoot,
-                    backupDirectory: pathDraft.backupDirectory,
-                    syncPath: pathDraft.syncPath,
-                    githubGistId: pathDraft.githubGistId,
-                    githubGistToken: pathDraft.githubGistToken,
-                    clearGithubGistToken: pathDraft.clearGithubGistToken,
-                    autoSyncEnabled: pathDraft.autoSyncEnabled,
-                    autoSyncIntervalMinutes: pathDraft.autoSyncIntervalMinutes,
-                  }),
-                )
-              }
+              onClick={() => onRunMutation(savePathSettingsDraft)}
               type="button"
             >
               <Save size={17} />
@@ -5596,6 +5598,32 @@ function SettingsView({
               ))}
             </select>
           </label>
+        </div>
+        <div className="settings-form-grid settings-form-grid--toggles">
+          <label className="check-row">
+            <input
+              checked={pathDraft.minimizeToTrayOnClose}
+              onChange={(event) =>
+                setPathDraft({
+                  ...pathDraft,
+                  minimizeToTrayOnClose: event.target.checked,
+                })
+              }
+              type="checkbox"
+            />
+            <span>Minimize to tray on close</span>
+          </label>
+        </div>
+        <div className="path-action-row">
+          <button
+            className="secondary-button"
+            disabled={dataToolMutating}
+            onClick={() => onRunMutation(savePathSettingsDraft)}
+            type="button"
+          >
+            <Save size={17} />
+            Save interface setting
+          </button>
         </div>
       </Panel>
 
