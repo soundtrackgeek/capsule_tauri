@@ -672,7 +672,16 @@ async fn claim_quest(input: QuestClaimRequest) -> Result<QuestClaimResponse, Str
 pub fn run() {
     set_windows_app_user_model_id();
 
-    let builder = tauri::Builder::default().plugin(tauri_plugin_updater::Builder::new().build());
+    let builder = tauri::Builder::default();
+
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Err(error) = open_main_window(app) {
+            eprintln!("Failed to show running Capsule instance: {error}");
+        }
+    }));
+
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder.plugin(

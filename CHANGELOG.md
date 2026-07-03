@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.21.1 - 2026-07-03
+
+### Fixed
+
+- Fixed duplicate Capsule instances by adding single-instance startup
+  protection that hands secondary launches to the already running app.
+
+### Changed
+
+- Bumped the app version to 0.21.1.
+
 ## 0.21.0 - 2026-07-03
 
 ### Added

@@ -11,6 +11,8 @@ explicit capability-gated AI/sync surfaces:
 - Tauri 2 desktop configuration.
 - Native window restoration for the last size, position, maximized, and
   fullscreen state used before closing the app.
+- Single-instance startup protection so launching Capsule again hands off to
+  the running app instead of creating duplicate tray icons.
 - System tray support with Open Interface, Writer, Settings, and Quit actions,
   plus a global `Ctrl+Alt+W` Writer shortcut and a Settings option to hide
   Capsule to the tray when the main window is closed.
