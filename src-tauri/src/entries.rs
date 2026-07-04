@@ -632,7 +632,7 @@ fn delete_entry_inner(db_path: &Path, identifier: &str) -> Result<DeletedEntry> 
             &connection,
             "entry_thread_titles",
             "title",
-            &[entry_uuid.clone()],
+            std::slice::from_ref(&entry_uuid),
         )?;
         if !thread_title_rows.is_empty() {
             additional_data.insert("thread_titles".to_string(), json!(thread_title_rows));
@@ -642,7 +642,7 @@ fn delete_entry_inner(db_path: &Path, identifier: &str) -> Result<DeletedEntry> 
             &connection,
             "entry_thread_summaries",
             "summary",
-            &[entry_uuid.clone()],
+            std::slice::from_ref(&entry_uuid),
         )?;
         if !thread_summary_rows.is_empty() {
             additional_data.insert("thread_summaries".to_string(), json!(thread_summary_rows));
@@ -1641,8 +1641,7 @@ fn add_in_filter(
         return;
     }
 
-    let placeholders = std::iter::repeat("?")
-        .take(values.len())
+    let placeholders = std::iter::repeat_n("?", values.len())
         .collect::<Vec<_>>()
         .join(", ");
     let operator = if negated { "NOT IN" } else { "IN" };
@@ -2382,8 +2381,7 @@ fn bool_to_int(value: bool) -> i64 {
 }
 
 fn placeholders(count: usize) -> String {
-    std::iter::repeat("?")
-        .take(count)
+    std::iter::repeat_n("?", count)
         .collect::<Vec<_>>()
         .join(", ")
 }

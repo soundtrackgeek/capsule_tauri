@@ -1144,6 +1144,7 @@ struct ExistingEntry {
     hidden: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn entry_changed(
     existing: &ExistingEntry,
     text: &str,
@@ -1168,6 +1169,7 @@ fn entry_changed(
         || local_tags != tags
 }
 
+#[allow(clippy::too_many_arguments)]
 fn insert_entry_for_sync(
     connection: &Connection,
     uuid: &str,
@@ -1209,6 +1211,7 @@ fn insert_entry_for_sync(
     Ok(entry_id)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_entry_for_sync(
     connection: &Connection,
     entry_id: i64,
@@ -2626,6 +2629,7 @@ fn apply_thread_summaries(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_thread_text_upsert(
     connection: &Connection,
     table: &str,

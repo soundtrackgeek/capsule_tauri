@@ -661,7 +661,7 @@ fn list_plugins(connection: &Connection, tables: &HashSet<String>) -> Result<Vec
         });
     }
 
-    plugins.sort_by(|left, right| left.label.to_lowercase().cmp(&right.label.to_lowercase()));
+    plugins.sort_by_key(|plugin| plugin.label.to_lowercase());
     Ok(plugins)
 }
 

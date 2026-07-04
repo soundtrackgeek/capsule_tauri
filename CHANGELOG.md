@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.21.7 - 2026-07-04
+
+### Added
+
+- Added ESLint frontend linting with TypeScript and React hooks checks.
+- Added Rust Clippy linting with warnings treated as errors.
+- Added frontend and Rust lint gates to GitHub Actions CI.
+
+### Changed
+
+- Fixed existing frontend unused-code findings and Rust Clippy warnings so the
+  new lint gates pass cleanly.
+- Documented the lint command and expanded the CI docs.
+- Bumped the app version to 0.21.7.
+
 ## 0.21.6 - 2026-07-04
 
 ### Added

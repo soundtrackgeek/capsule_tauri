@@ -278,7 +278,7 @@ fn read_local_path_settings_from_path(path: &Path) -> Result<LocalPathSettings> 
         return Ok(LocalPathSettings::default());
     }
 
-    let raw = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let raw = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
     let mut settings: LocalPathSettings = serde_json::from_slice(&raw)
         .with_context(|| format!("failed to parse {}", path.display()))?;
     settings.normalize();
@@ -296,7 +296,7 @@ fn write_local_path_settings_to_path(path: &Path, settings: &LocalPathSettings) 
     }
     let mut settings = settings.clone();
     settings.normalize();
-    fs::write(&path, serde_json::to_vec_pretty(&settings)?)
+    fs::write(path, serde_json::to_vec_pretty(&settings)?)
         .with_context(|| format!("failed to write {}", path.display()))
 }
 

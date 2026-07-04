@@ -59,7 +59,7 @@ pub(crate) struct TestAutoCaptureFixture {
 
 #[cfg(test)]
 thread_local! {
-    static TEST_AUTO_CAPTURE: RefCell<Option<TestAutoCaptureFixture>> = RefCell::new(None);
+    static TEST_AUTO_CAPTURE: RefCell<Option<TestAutoCaptureFixture>> = const { RefCell::new(None) };
 }
 
 #[cfg(test)]
@@ -144,6 +144,7 @@ pub(crate) fn auto_capture_location(db_path: &Path, entry_uuid: &str) -> Result<
     Ok(true)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn attach_location(
     db_path: &Path,
     entry_uuid: &str,

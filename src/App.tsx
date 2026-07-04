@@ -137,7 +137,7 @@ import {
   calendarSentimentClass,
 } from "./lib/calendar";
 import { parseChangelog } from "./lib/changelog";
-import { formatBytes, formatDateTime, formatEntryNumber } from "./lib/format";
+import { formatBytes, formatDateTime } from "./lib/format";
 import type {
   BackupInfo,
   BackupRestorePreview,
@@ -637,7 +637,7 @@ function App() {
   const [dataToolMutating, setDataToolMutating] = useState(false);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateInstalling, setUpdateInstalling] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  const [, setExporting] = useState(false);
   const [savingEntry, setSavingEntry] = useState(false);
   const [savingThread, setSavingThread] = useState(false);
   const [mutatingEntryUuid, setMutatingEntryUuid] = useState<string | null>(null);
@@ -1094,9 +1094,10 @@ function App() {
     }
 
     try {
-      const { when: _discardedWhen, ...parsedDraft } = JSON.parse(rawDraft) as Partial<ComposerDraft> & {
+      const parsedDraft = JSON.parse(rawDraft) as Partial<ComposerDraft> & {
         when?: string;
       };
+      delete parsedDraft.when;
       const recoveredDraft = { ...emptyComposerDraft, ...parsedDraft };
       if (draftHasContent(recoveredDraft)) {
         setComposerDraft(recoveredDraft);

@@ -92,7 +92,7 @@ pub(crate) fn list_entry_images_for_database(
     }
 
     let roots = media_roots_for_database(db_path, None);
-    let raws = query_attachments_for_uuids(&connection, &[entry_uuid.clone()])?;
+    let raws = query_attachments_for_uuids(&connection, std::slice::from_ref(&entry_uuid))?;
     let images = raws
         .into_iter()
         .map(|raw| attachment_from_raw(raw, &roots))
@@ -1228,8 +1228,7 @@ fn normalized_set(values: Option<&[String]>) -> HashSet<String> {
 }
 
 fn placeholders(count: usize) -> String {
-    std::iter::repeat("?")
-        .take(count)
+    std::iter::repeat_n("?", count)
         .collect::<Vec<_>>()
         .join(", ")
 }

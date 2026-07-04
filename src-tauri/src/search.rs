@@ -405,8 +405,7 @@ fn add_in_filter(
         return;
     }
 
-    let placeholders = std::iter::repeat("?")
-        .take(values.len())
+    let placeholders = std::iter::repeat_n("?", values.len())
         .collect::<Vec<_>>()
         .join(", ");
     let operator = if negated { "NOT IN" } else { "IN" };

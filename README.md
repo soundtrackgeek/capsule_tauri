@@ -165,6 +165,7 @@ Norway.
 ```powershell
 npm install
 npm run dev
+npm run lint
 npm test
 npm run test:e2e
 npm run build
@@ -215,10 +216,12 @@ cargo test
 
 GitHub Actions runs CI on pushes to `master` and pull requests targeting
 `master`. The workflow installs Node dependencies with `npm ci`, runs
-`npm test`, builds the frontend with `npm run build`, installs Playwright's
-Chromium browser, runs browser E2E coverage with `npm run test:e2e`, checks
-Rust formatting with `cargo fmt --check`, and runs the Tauri crate tests with
-`cargo test --locked`.
+frontend linting with `npm run lint:frontend`, runs `npm test`, builds the
+frontend with `npm run build`, installs Playwright's Chromium browser, runs
+browser E2E coverage with `npm run test:e2e`, checks Rust formatting with
+`cargo fmt --check`, runs Rust linting with
+`cargo clippy --all-targets -- -D warnings`, and runs the Tauri crate tests
+with `cargo test --locked`.
 
 ## Safety Baseline
 

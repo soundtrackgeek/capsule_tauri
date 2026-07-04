@@ -1,7 +1,7 @@
 {
   "name": "capsule-tauri",
   "private": true,
-  "version": "0.21.6",
+  "version": "0.21.7",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1430 --strictPort",
@@ -9,6 +9,9 @@
     "preview": "vite preview --host 127.0.0.1 --port 1430 --strictPort",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
+    "lint": "npm run lint:frontend && npm run lint:rust",
+    "lint:frontend": "eslint . --max-warnings 0",
+    "lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:e2e": "playwright test"
@@ -22,6 +25,7 @@
     "react-dom": "19.2.7"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.61.1",
     "@tauri-apps/cli": "2.11.4",
     "@testing-library/jest-dom": "^6.9.1",
@@ -30,8 +34,13 @@
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.2",
+    "eslint": "^10.6.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.7.0",
     "jsdom": "^29.1.1",
     "typescript": "5.9.3",
+    "typescript-eslint": "^8.62.1",
     "vite": "7.3.6",
     "vitest": "^4.1.9"
   }

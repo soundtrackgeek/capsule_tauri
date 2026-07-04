@@ -1253,9 +1253,9 @@ fn parse_string_list(raw: &str) -> Vec<String> {
         .map(|values| {
             values
                 .into_iter()
-                .filter_map(|value| match value {
-                    JsonValue::String(text) => Some(text),
-                    other => Some(other.to_string()),
+                .map(|value| match value {
+                    JsonValue::String(text) => text,
+                    other => other.to_string(),
                 })
                 .collect()
         })
@@ -1311,11 +1311,9 @@ fn slugify(value: &str) -> Result<String> {
         if ch.is_ascii_alphanumeric() || ch == '_' {
             slug.push(ch);
             previous_dash = false;
-        } else if ch.is_whitespace() || ch == '-' {
-            if !previous_dash && !slug.is_empty() {
-                slug.push('-');
-                previous_dash = true;
-            }
+        } else if (ch.is_whitespace() || ch == '-') && !previous_dash && !slug.is_empty() {
+            slug.push('-');
+            previous_dash = true;
         }
     }
     while slug.ends_with('-') {
