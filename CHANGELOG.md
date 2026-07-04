@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.21.4 - 2026-07-04
+
+### Changed
+
+- Split shared frontend UI, entry display, media image, analytics, and calendar
+  helpers out of `App.tsx` to start decomposing the large React surface without
+  changing behavior.
+- Added Vitest coverage for the extracted analytics and calendar helpers.
+- Bumped the app version to 0.21.4.
+
 ## 0.21.3 - 2026-07-03
 
 ### Fixed
