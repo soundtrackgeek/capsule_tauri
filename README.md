@@ -210,6 +210,14 @@ cd src-tauri
 cargo test
 ```
 
+## Continuous Integration
+
+GitHub Actions runs CI on pushes to `master` and pull requests targeting
+`master`. The workflow installs Node dependencies with `npm ci`, runs
+`npm test`, builds the frontend with `npm run build`, checks Rust formatting
+with `cargo fmt --check`, and runs the Tauri crate tests with
+`cargo test --locked`.
+
 ## Safety Baseline
 
 Every exposed journal and thread mutation runs through a backup guard before

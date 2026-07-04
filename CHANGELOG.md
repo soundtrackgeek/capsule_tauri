@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.21.5 - 2026-07-04
+
+### Added
+
+- Added a GitHub Actions CI workflow for pushes and pull requests that runs
+  frontend dependency installation, tests, frontend build, Rust formatting, and
+  Rust tests.
+
+### Changed
+
+- Documented the CI checks in the README.
+- Bumped the app version to 0.21.5.
+
 ## 0.21.4 - 2026-07-04
 
 ### Changed
