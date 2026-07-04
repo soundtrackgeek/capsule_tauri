@@ -172,6 +172,11 @@ body {
   color: #ffb4a8;
 }
 
+:root[data-theme="dark"] .safety-mark {
+  background: #173026;
+  color: #91d7ad;
+}
+
 :root[data-theme="dark"] .confirm-dialog p {
   color: #c2ccc4;
 }
@@ -2750,6 +2755,34 @@ button:active:not(:disabled) {
   border-radius: 8px;
   background: #f8e2de;
   color: #8f2727;
+}
+
+.sync-confirm-dialog {
+  width: min(640px, 100%);
+}
+
+.safety-mark {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  background: #dff2e6;
+  color: #0f5c3a;
+}
+
+.sync-confirm-details {
+  margin-top: 16px;
+}
+
+.sync-confirm-check {
+  align-items: flex-start;
+  margin-top: 16px;
+}
+
+.sync-confirm-check input {
+  margin-top: 3px;
 }
 
 .empty-state {

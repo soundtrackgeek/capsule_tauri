@@ -559,6 +559,7 @@ function App() {
   const [entryResponse, setEntryResponse] = useState<EntryListResponse | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Entry | null>(null);
+  const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
   const [searchForm, setSearchForm] = useState<SearchForm>(defaultSearchForm);
   const [searchLimit, setSearchLimit] = useState(40);
   const [searchResponse, setSearchResponse] = useState<SearchResponse | null>(null);
@@ -1504,6 +1505,17 @@ function App() {
     },
     [loadSyncOverview, refresh, status?.readable],
   );
+
+  const openSyncConfirmation = useCallback(() => {
+    setError(null);
+    setNotice(null);
+    setSyncConfirmOpen(true);
+  }, []);
+
+  const confirmManualSync = useCallback(() => {
+    setSyncConfirmOpen(false);
+    void handleRunSync(false);
+  }, [handleRunSync]);
 
   useEffect(() => {
     if (
@@ -2451,7 +2463,7 @@ function App() {
             loading={syncLoading}
             mutating={syncMutating}
             onRefresh={loadSyncOverview}
-            onRunSync={() => void handleRunSync(false)}
+            onRunSync={openSyncConfirmation}
             overview={syncOverview}
             status={status}
           />
@@ -2603,7 +2615,7 @@ function App() {
             onInstallUpdate={() => void handleInstallUpdate()}
             onRefresh={loadDataTools}
             onRunMutation={runDataToolMutation}
-            onRunSync={() => void handleRunSync(false)}
+            onRunSync={openSyncConfirmation}
             onSavePathSettings={handleSavePathSettings}
             pathSettings={pathSettings}
             status={status}
@@ -2630,6 +2642,17 @@ function App() {
           entry={deleteCandidate}
           onCancel={() => setDeleteCandidate(null)}
           onConfirm={handleConfirmDeleteEntry}
+        />
+      )}
+
+      {syncConfirmOpen && (
+        <SyncRunConfirmationDialog
+          mutating={syncMutating}
+          onCancel={() => setSyncConfirmOpen(false)}
+          onConfirm={confirmManualSync}
+          overview={syncOverview}
+          pathSettings={pathSettings}
+          status={status}
         />
       )}
     </div>
@@ -6327,6 +6350,134 @@ type SyncViewProps = {
   onRunSync: () => void;
 };
 
+type SyncRunConfirmationDialogProps = {
+  status: DatabaseStatus | null;
+  overview: SyncOverviewResponse | null;
+  pathSettings: PathSettingsResponse | null;
+  mutating: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+};
+
+function SyncRunConfirmationDialog({
+  status,
+  overview,
+  pathSettings,
+  mutating,
+  onCancel,
+  onConfirm,
+}: SyncRunConfirmationDialogProps) {
+  const [accepted, setAccepted] = useState(false);
+  const githubGistId = overview?.githubGistId ?? pathSettings?.githubGistId ?? null;
+  const githubGistTokenConfigured =
+    overview?.githubGistTokenConfigured ?? pathSettings?.githubGistTokenConfigured ?? false;
+  const configured = overview?.configured ?? Boolean(pathSettings?.syncPath || githubGistId);
+  const syncPath =
+    overview?.syncPath ??
+    pathSettings?.syncPath ??
+    (githubGistId ? "Local GitHub Gist cache folder" : null);
+  const syncFile =
+    overview?.syncFilePath ??
+    (pathSettings?.syncPath ? `${pathSettings.syncPath}\\capsule_sync.json` : null) ??
+    (githubGistId ? "capsule_sync.json in the local Gist cache" : null);
+  const syncStatus = overview?.status;
+  const tombstones = overview?.tombstones ?? [];
+  const tombstoneTotal = tombstones.reduce((sum, item) => sum + item.count, 0);
+  const gistMode = githubGistId
+    ? githubGistTokenConfigured
+      ? "Pull from Gist, merge locally, then push back"
+      : "Pull from Gist only"
+    : "Off";
+  const canConfirm = Boolean(status?.readable && configured && accepted && !mutating);
+  const warnings =
+    overview?.warnings ??
+    (configured ? [] : ["No sync folder or GitHub Gist is configured in Settings."]);
+
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <section
+        aria-labelledby="sync-confirm-title"
+        aria-modal="true"
+        className="confirm-dialog sync-confirm-dialog"
+        role="dialog"
+      >
+        <div className="confirm-dialog-header">
+          <div className="safety-mark" aria-hidden="true">
+            <ShieldCheck size={22} />
+          </div>
+          <div>
+            <p className="eyebrow">Sync safety check</p>
+            <h3 id="sync-confirm-title">Review Sync Run</h3>
+          </div>
+          <button
+            className="icon-button icon-button--small"
+            disabled={mutating}
+            onClick={onCancel}
+            title="Cancel"
+            type="button"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <p>
+          Capsule will create a verified database backup before merging local
+          journal data with the configured sync files.
+        </p>
+
+        <dl className="detail-list detail-list--compact sync-confirm-details">
+          <Detail label="Database" value={status?.dbPath ?? "No readable database"} />
+          <Detail label="Folder" value={syncPath ?? "Not configured"} />
+          <Detail label="Sync file" value={syncFile ?? "Not configured"} />
+          <Detail label="GitHub Gist" value={githubGistId ?? "None"} />
+          <Detail label="Gist mode" value={gistMode} />
+          <Detail
+            label="Auto sync"
+            value={
+              overview?.autoSyncEnabled ?? pathSettings?.autoSyncEnabled
+                ? `Every ${overview?.autoSyncIntervalMinutes ?? pathSettings?.autoSyncIntervalMinutes ?? 15} minutes`
+                : "Off"
+            }
+          />
+          <Detail label="Last success" value={formatDateTime(syncStatus?.lastSuccessfulSyncAt)} />
+          <Detail
+            label="Last result"
+            value={
+              syncStatus?.lastSyncError ?? syncStatus?.lastSyncSummary ?? "No previous sync status"
+            }
+          />
+          <Detail
+            label="Tombstones"
+            value={`${tombstoneTotal} pending deletion marker${tombstoneTotal === 1 ? "" : "s"}`}
+          />
+        </dl>
+
+        <label className="check-row sync-confirm-check">
+          <input
+            checked={accepted}
+            disabled={mutating || !configured || !status?.readable}
+            onChange={(event) => setAccepted(event.target.checked)}
+            type="checkbox"
+          />
+          <span>I understand this will merge local and remote sync data after creating a backup.</span>
+        </label>
+
+        <WarningList warnings={warnings} />
+
+        <div className="confirm-dialog-actions">
+          <button className="secondary-button" disabled={mutating} onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button className="primary-button" disabled={!canConfirm} onClick={onConfirm} type="button">
+            <RefreshCw size={17} />
+            {mutating ? "Syncing" : "Run sync"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function SyncView({ status, overview, loading, mutating, onRefresh, onRunSync }: SyncViewProps) {
   if (!status?.readable) {
     return <UnavailableState icon={<Cloud size={24} />} label="Sync needs a readable database." status={status} />;
@@ -6355,7 +6506,7 @@ function SyncView({ status, overview, loading, mutating, onRefresh, onRunSync }:
                 type="button"
               >
                 <RefreshCw size={15} />
-                {mutating ? "Syncing" : "Run"}
+                {mutating ? "Syncing" : "Review"}
               </button>
               <button className="secondary-button secondary-button--small" onClick={onRefresh} type="button">
                 <RefreshCw size={15} />

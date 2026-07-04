@@ -91,9 +91,11 @@ explicit capability-gated AI/sync surfaces:
   `capsule_threads_sync.json`, and `capsule_ai_chats_sync.json`, including entry,
   image metadata, location, custom library, thread, AI chat, and tombstone
   merging.
-- Sync controls in Settings for manual runs, configurable automatic sync
-  intervals, shared-folder paths, and per-user GitHub Gist ID/token links. The
-  Sync page reports status, history, tombstone counts, and Gist pull/push mode.
+- Sync controls in Settings for reviewed manual runs, configurable automatic
+  sync intervals, shared-folder paths, and per-user GitHub Gist ID/token links.
+  The Sync page reports status, history, tombstone counts, and Gist pull/push
+  mode, and manual runs require a safety confirmation that summarizes backups,
+  paths, Gist mode, auto-sync, and pending deletion markers before merging.
 - Signed in-app updates, including an hourly background check, an update banner
   when a new version is available, and a manual Check for updates button in
   Settings. Capsule reopens the main window after an update restart, and the

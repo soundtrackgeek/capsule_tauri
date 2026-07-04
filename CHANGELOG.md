@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.21.8 - 2026-07-04
+
+### Added
+
+- Added a manual sync safety confirmation that summarizes backup protection,
+  database and sync paths, GitHub Gist mode, auto-sync state, last result, and
+  pending deletion markers before a sync run starts.
+- Added Playwright coverage for the sync confirmation flow.
+
+### Changed
+
+- Changed manual Sync page and Settings sync actions to open the review dialog
+  before running, while automatic sync continues to run silently.
+- Bumped the app version to 0.21.8.
+
 ## 0.21.7 - 2026-07-04
 
 ### Added

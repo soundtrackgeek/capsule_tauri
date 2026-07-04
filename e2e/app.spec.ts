@@ -69,3 +69,32 @@ test("creates a journal entry through the composer", async ({ page }) => {
 
   expect(browserErrors).toEqual([]);
 });
+
+test("requires sync safety confirmation before manual sync", async ({ page }) => {
+  const browserErrors = trackBrowserErrors(page);
+
+  await page.goto("/");
+  await page
+    .getByRole("navigation", { name: "Primary" })
+    .getByRole("button", { name: "Sync" })
+    .click();
+
+  await expect(page.getByRole("heading", { name: "Sync Status" })).toBeVisible();
+  await page.getByRole("button", { name: "Review" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Review Sync Run" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText(/verified database backup/)).toBeVisible();
+
+  const runButton = dialog.getByRole("button", { name: "Run sync" });
+  await expect(runButton).toBeDisabled();
+
+  await dialog.getByRole("checkbox", { name: /I understand/ }).check();
+  await expect(runButton).toBeEnabled();
+  await runButton.click();
+
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Sync completed");
+
+  expect(browserErrors).toEqual([]);
+});
