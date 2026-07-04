@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.21.6 - 2026-07-04
+
+### Added
+
+- Added React Testing Library coverage for shared UI and entry components.
+- Added Playwright E2E coverage for dashboard, entries, search, and composer
+  flows against the browser mock backend.
+- Added `npm run test:e2e` and wired Playwright into GitHub Actions CI.
+
+### Changed
+
+- Documented the E2E test command and expanded the CI docs.
+- Bumped the app version to 0.21.6.
+
 ## 0.21.5 - 2026-07-04
 
 ### Added

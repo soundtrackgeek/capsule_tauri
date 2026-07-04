@@ -1,7 +1,7 @@
 {
   "name": "capsule-tauri",
   "private": true,
-  "version": "0.21.5",
+  "version": "0.21.6",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1430 --strictPort",
@@ -9,7 +9,9 @@
     "preview": "vite preview --host 127.0.0.1 --port 1430 --strictPort",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.1",
@@ -20,10 +22,15 @@
     "react-dom": "19.2.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tauri-apps/cli": "2.11.4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.2",
+    "jsdom": "^29.1.1",
     "typescript": "5.9.3",
     "vite": "7.3.6",
     "vitest": "^4.1.9"

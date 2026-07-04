@@ -39,6 +39,12 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Install Playwright browser
+        run: npx playwright install chromium
+
+      - name: Run end-to-end tests
+        run: npm run test:e2e
+
   rust:
     name: Rust checks
     runs-on: windows-latest
