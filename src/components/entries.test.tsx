@@ -75,6 +75,32 @@ describe("entry components", () => {
     expect(onDelete).toHaveBeenCalledWith(entry);
   });
 
+  test("renders entry detail as an embedded reader", () => {
+    const entry = makeEntry();
+    const { container } = render(
+      <EntryDetail
+        embedded
+        entry={entry}
+        entryHistory={null}
+        historyLoading={false}
+        loading={false}
+        mutating={false}
+        onContinue={vi.fn()}
+        onDelete={vi.fn()}
+        onEdit={vi.fn()}
+        onEntryAction={vi.fn()}
+        onExport={vi.fn()}
+        onLoadHistory={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".entry-reader")).toBeInTheDocument();
+    expect(container.querySelector(".detail-panel")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("A focused test entry with enough body text to render useful previews."),
+    ).toBeInTheDocument();
+  });
+
   test("confirms or cancels destructive delete dialog", async () => {
     const user = userEvent.setup();
     const onCancel = vi.fn();

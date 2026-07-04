@@ -589,6 +589,7 @@ function App() {
   const [coverLimit, setCoverLimit] = useState(60);
   const [coverWall, setCoverWall] = useState<CoverWallResponse | null>(null);
   const [selectedCover, setSelectedCover] = useState<EntryCover | null>(null);
+  const [selectedCoverEntry, setSelectedCoverEntry] = useState<Entry | null>(null);
   const [threadResponse, setThreadResponse] = useState<ThreadListResponse | null>(null);
   const [selectedThreadRoot, setSelectedThreadRoot] = useState<string | null>(null);
   const [threadDraft, setThreadDraft] = useState<ThreadMetadataDraft>(emptyThreadDraft);
@@ -630,6 +631,7 @@ function App() {
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [coverLoading, setCoverLoading] = useState(false);
+  const [coverDetailLoading, setCoverDetailLoading] = useState(false);
   const [threadsLoading, setThreadsLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [creatingBackup, setCreatingBackup] = useState(false);
@@ -645,6 +647,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const autoSyncRunningRef = useRef(false);
+  const coverEntryLoadIdRef = useRef(0);
   const updateCheckRunningRef = useRef(false);
 
   const statusTone = useMemo(() => {
@@ -932,6 +935,7 @@ function App() {
     if (!status?.readable) {
       setCoverWall(null);
       setSelectedCover(null);
+      setSelectedCoverEntry(null);
       return;
     }
 
@@ -941,8 +945,11 @@ function App() {
       const response = await listCoverWall(builtCoverRequest);
       setCoverWall(response);
       setSelectedCover((current) => {
-        if (current && response.covers.some((cover) => cover.filename === current.filename)) {
-          return current;
+        if (current) {
+          const matchingCover = response.covers.find((cover) => cover.filename === current.filename);
+          if (matchingCover) {
+            return matchingCover;
+          }
         }
         return response.covers[0] ?? null;
       });
@@ -1230,6 +1237,48 @@ function App() {
       void loadCoverWall();
     }
   }, [activeView, loadCoverWall]);
+
+  useEffect(() => {
+    if (activeView !== "covers" || !status?.readable || !selectedCover) {
+      setSelectedCoverEntry(null);
+      setCoverDetailLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const loadId = coverEntryLoadIdRef.current + 1;
+    coverEntryLoadIdRef.current = loadId;
+    const entryUuid = selectedCover.entryUuid;
+
+    setCoverDetailLoading(true);
+    setSelectedCoverEntry((current) => (current?.uuid === entryUuid ? current : null));
+    setEntryHistory(null);
+    setError(null);
+
+    void getEntry(entryUuid)
+      .then((entry) => {
+        if (cancelled || coverEntryLoadIdRef.current !== loadId) {
+          return;
+        }
+        setSelectedCoverEntry(entry);
+        setSelectedEntry(entry);
+      })
+      .catch((detailError) => {
+        if (cancelled || coverEntryLoadIdRef.current !== loadId) {
+          return;
+        }
+        setError(detailError instanceof Error ? detailError.message : "Unable to open cover entry");
+      })
+      .finally(() => {
+        if (!cancelled && coverEntryLoadIdRef.current === loadId) {
+          setCoverDetailLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView, selectedCover, status?.readable]);
 
   useEffect(() => {
     if (activeView === "threads") {
@@ -1622,6 +1671,12 @@ function App() {
     }
   }, []);
 
+  const handleSelectCover = useCallback((cover: EntryCover) => {
+    setSelectedCover(cover);
+    setSelectedCoverEntry((current) => (current?.uuid === cover.entryUuid ? current : null));
+    setEntryHistory(null);
+  }, []);
+
   const handleRandomRefresh = useCallback(async () => {
     setError(null);
     try {
@@ -1671,6 +1726,14 @@ function App() {
     async (response: EntryMutationResponse) => {
       setNotice(`Saved with backup: ${response.audit.backupPath}`);
       setSelectedEntry(response.entry);
+      setSelectedCoverEntry((current) =>
+        current?.uuid === response.entry.uuid ? response.entry : current,
+      );
+      setSelectedCover((current) =>
+        current?.entryUuid === response.entry.uuid
+          ? { ...current, entry: coverEntrySummaryFromEntry(response.entry) }
+          : current,
+      );
       setEntryHistory(null);
       await refresh();
       if (activeView === "entries") {
@@ -1716,6 +1779,9 @@ function App() {
       );
       setSelectedCover((current) =>
         current?.entryUuid === response.entryUuid ? null : current,
+      );
+      setSelectedCoverEntry((current) =>
+        current?.uuid === response.entryUuid ? null : current,
       );
       setEntryHistory(null);
       setEditingEntry((current) => (current?.uuid === response.entryUuid ? null : current));
@@ -2513,13 +2579,24 @@ function App() {
         {activeView === "covers" && (
           <CoverWallView
             coverWall={coverWall}
+            coverEntryLoading={coverDetailLoading}
+            entryHistory={entryHistory}
             filters={coverFilters}
+            historyLoading={historyLoading}
             limit={coverLimit}
             loading={coverLoading}
+            mutatingEntryUuid={mutatingEntryUuid}
+            onContinueEntry={openContinueEntry}
+            onDeleteEntry={handleRequestDeleteEntry}
+            onEditEntry={openEditEntry}
+            onEntryAction={handleEntryAction}
+            onExportEntry={handleExportEntry}
+            onLoadHistory={handleLoadHistory}
             onLoadMore={() => setCoverLimit((current) => current + 60)}
             onRefresh={loadCoverWall}
-            onSelectCover={setSelectedCover}
+            onSelectCover={handleSelectCover}
             selectedCover={selectedCover}
+            selectedCoverEntry={selectedCoverEntry}
             setFilters={(next) => {
               setCoverLimit(60);
               setCoverFilters(next);
@@ -3708,11 +3785,22 @@ type CoverWallViewProps = {
   status: DatabaseStatus | null;
   coverWall: CoverWallResponse | null;
   selectedCover: EntryCover | null;
+  selectedCoverEntry: Entry | null;
+  entryHistory: EntryHistoryResponse | null;
   filters: CoverWallFilters;
   limit: number;
   loading: boolean;
+  coverEntryLoading: boolean;
+  historyLoading: boolean;
+  mutatingEntryUuid: string | null;
   setFilters: (next: CoverWallFilters) => void;
   onSelectCover: (cover: EntryCover) => void;
+  onEditEntry: (entry: Entry) => void;
+  onContinueEntry: (entry: Entry) => void;
+  onDeleteEntry: (entry: Entry) => void;
+  onEntryAction: (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => void;
+  onExportEntry: (entry: Entry, format: ExportFormat) => void;
+  onLoadHistory: (entry: Entry) => void;
   onLoadMore: () => void;
   onRefresh: () => void;
 };
@@ -3721,11 +3809,22 @@ function CoverWallView({
   status,
   coverWall,
   selectedCover,
+  selectedCoverEntry,
+  entryHistory,
   filters,
   limit,
   loading,
+  coverEntryLoading,
+  historyLoading,
+  mutatingEntryUuid,
   setFilters,
   onSelectCover,
+  onEditEntry,
+  onContinueEntry,
+  onDeleteEntry,
+  onEntryAction,
+  onExportEntry,
+  onLoadHistory,
   onLoadMore,
   onRefresh,
 }: CoverWallViewProps) {
@@ -3872,6 +3971,26 @@ function CoverWallView({
                   {tag}
                 </span>
               ))}
+            </div>
+            <div className="cover-linked-entry">
+              <div className="cover-linked-entry-heading">
+                <BookOpen size={16} />
+                <h4>Linked entry</h4>
+              </div>
+              <EntryDetail
+                embedded
+                entry={selectedCoverEntry}
+                entryHistory={entryHistory}
+                historyLoading={historyLoading}
+                loading={coverEntryLoading}
+                mutating={Boolean(selectedCoverEntry && mutatingEntryUuid === selectedCoverEntry.uuid)}
+                onContinue={onContinueEntry}
+                onDelete={onDeleteEntry}
+                onEdit={onEditEntry}
+                onEntryAction={onEntryAction}
+                onExport={onExportEntry}
+                onLoadHistory={onLoadHistory}
+              />
             </div>
           </>
         ) : (
@@ -6817,6 +6936,17 @@ function draftFromEntry(entry: Entry): ComposerDraft {
     starred: entry.starred,
     pinned: entry.pinned,
     continueFromUuid: entry.thread?.parentUuid ?? "",
+  };
+}
+
+function coverEntrySummaryFromEntry(entry: Entry): EntryCover["entry"] {
+  return {
+    id: entry.id,
+    uuid: entry.uuid,
+    createdAt: entry.createdAt,
+    title: entry.title,
+    mood: entry.mood,
+    tags: entry.tags.map((tag) => tag.name),
   };
 }
 

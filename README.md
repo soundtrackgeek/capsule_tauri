@@ -83,7 +83,8 @@ explicit capability-gated AI/sync surfaces:
 - Writing Calendar heatmap for active days, words, images, mood metadata, and
   mood sentiment markers.
 - Cover Wall view backed by ignored local cover files under `local-assets/covers`
-  with generated thumbnails cached under the local app settings directory.
+  with generated thumbnails cached under the local app settings directory and
+  an inline reader for the linked entry behind a selected cover.
 - AI overview for provider/model readiness, persisted conversations, AI Time
   Capsules, embedding models, and local metadata suggestions that do not make
   cloud requests.

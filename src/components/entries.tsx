@@ -23,6 +23,7 @@ import { Detail, SkeletonList } from "./ui";
 type EntryDetailProps = {
   entry: Entry | null;
   entryHistory: EntryHistoryResponse | null;
+  embedded?: boolean;
   historyLoading: boolean;
   loading: boolean;
   mutating: boolean;
@@ -49,6 +50,7 @@ function formatWeatherTemperature(location: NonNullable<Entry["location"]>) {
 export function EntryDetail({
   entry,
   entryHistory,
+  embedded = false,
   historyLoading,
   loading,
   mutating,
@@ -59,30 +61,34 @@ export function EntryDetail({
   onExport,
   onLoadHistory,
 }: EntryDetailProps) {
+  const Wrapper = embedded ? "div" : "aside";
+  const panelClassName = embedded ? "entry-reader" : "detail-panel";
+  const emptyClassName = embedded ? "entry-reader entry-reader--empty" : "detail-panel detail-panel--empty";
+
   if (loading) {
     return (
-      <aside className="detail-panel">
+      <Wrapper className={panelClassName}>
         <div className="skeleton skeleton-title" />
         <div className="skeleton skeleton-line" />
         <div className="skeleton skeleton-block" />
-      </aside>
+      </Wrapper>
     );
   }
 
   if (!entry) {
     return (
-      <aside className="detail-panel detail-panel--empty">
+      <Wrapper className={emptyClassName}>
         <Search size={22} />
         <h3>No entry selected</h3>
         <p>Select an entry to inspect it.</p>
-      </aside>
+      </Wrapper>
     );
   }
 
   const weatherTemperature = entry.location ? formatWeatherTemperature(entry.location) : null;
 
   return (
-    <aside className="detail-panel">
+    <Wrapper className={panelClassName}>
       <div className="entry-detail-heading">
         <p className="eyebrow">{formatDateTime(entry.createdAt)}</p>
         <h3>{entry.title || entry.textPlain.slice(0, 72) || "Untitled entry"}</h3>
@@ -246,7 +252,7 @@ export function EntryDetail({
           <p>Version snapshots appear here after loading.</p>
         )}
       </div>
-    </aside>
+    </Wrapper>
   );
 }
 

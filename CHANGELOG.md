@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.22.0 - 2026-07-04
+
+### Added
+
+- Added an inline linked-entry reader to Cover Wall so selecting a cover loads
+  the full referenced entry with the existing entry actions and history review.
+- Added unit and Playwright coverage for the Cover Wall linked-entry reader.
+
+### Changed
+
+- Bumped the app version to 0.22.0.
+
 ## 0.21.8 - 2026-07-04
 
 ### Added

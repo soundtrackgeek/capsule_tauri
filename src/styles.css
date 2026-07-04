@@ -71,6 +71,7 @@ body {
 :root[data-theme="dark"] .bar-row em,
 :root[data-theme="dark"] .about-panel p,
 :root[data-theme="dark"] .metadata-block p,
+:root[data-theme="dark"] .entry-reader--empty p,
 :root[data-theme="dark"] .detail-panel--empty p {
   color: #aab8ae;
 }
@@ -79,6 +80,7 @@ body {
 :root[data-theme="dark"] .metric dt,
 :root[data-theme="dark"] .field span,
 :root[data-theme="dark"] .check-row span,
+:root[data-theme="dark"] .cover-linked-entry-heading,
 :root[data-theme="dark"] .token-status-row {
   color: #b8c7bd;
 }
@@ -200,6 +202,12 @@ body {
 :root[data-theme="dark"] .mood-chip {
   background: #3a3028;
   color: #f4e0c5;
+}
+
+:root[data-theme="dark"] .entry-body,
+:root[data-theme="dark"] .metadata-block,
+:root[data-theme="dark"] .cover-linked-entry {
+  border-color: #34433a;
 }
 
 :root[data-theme="dark"] .media-placeholder,
@@ -539,6 +547,7 @@ body {
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .composer-attached-image p,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .update-summary p,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .update-progress span,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .entry-reader--empty p,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .detail-panel--empty p {
   color: var(--retro-muted);
 }
@@ -549,6 +558,7 @@ body {
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .check-row span,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .token-status-row,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .metadata-block h4,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .cover-linked-entry-heading,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .composer-image-row-heading span,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .calendar-weekdays,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .quest-footer {
@@ -662,6 +672,7 @@ body {
 
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .entry-body,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .metadata-block,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .cover-linked-entry,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .composer-image-draft,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .composer-existing-images {
   border-color: var(--retro-card-border);
@@ -1675,6 +1686,19 @@ button:active:not(:disabled) {
   text-align: center;
 }
 
+.entry-reader {
+  min-width: 0;
+}
+
+.entry-reader--empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  min-height: 220px;
+  color: #66756d;
+  text-align: center;
+}
+
 .state-panel code {
   max-width: 100%;
   overflow-wrap: anywhere;
@@ -1719,6 +1743,34 @@ button:active:not(:disabled) {
   font-size: 13px;
   text-transform: uppercase;
   color: #516158;
+}
+
+.cover-linked-entry {
+  margin-top: 16px;
+  border-top: 1px solid #e1e7e2;
+  padding-top: 14px;
+}
+
+.cover-linked-entry-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: #516158;
+}
+
+.cover-linked-entry-heading h4 {
+  margin: 0;
+  font-size: 13px;
+  text-transform: uppercase;
+}
+
+.cover-linked-entry .entry-detail-heading h3 {
+  font-size: 18px;
+}
+
+.cover-linked-entry .entry-action-bar {
+  margin: 10px 0;
 }
 
 .history-list {

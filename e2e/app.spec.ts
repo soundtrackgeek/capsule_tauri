@@ -47,6 +47,24 @@ test("loads the mock dashboard and navigates entries and search", async ({ page 
   expect(browserErrors).toEqual([]);
 });
 
+test("reads the linked entry from Cover Wall", async ({ page }) => {
+  const browserErrors = trackBrowserErrors(page);
+
+  await page.goto("/");
+  await page
+    .getByRole("navigation", { name: "Primary" })
+    .getByRole("button", { name: "Cover Wall" })
+    .click();
+
+  await expect(page.getByRole("region", { name: "Cover wall" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Linked entry" })).toBeVisible();
+  await expect(page.locator(".cover-detail-panel")).toContainText(
+    "Read-only journal browsing starts to feel real.",
+  );
+
+  expect(browserErrors).toEqual([]);
+});
+
 test("creates a journal entry through the composer", async ({ page }) => {
   const browserErrors = trackBrowserErrors(page);
   const title = `Playwright smoke ${Date.now()}`;
