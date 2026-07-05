@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.24.1 - 2026-07-05
+
+### Fixed
+
+- Fixed diagnostics bundle creation so a missing `debug.log` is represented by
+  a placeholder file instead of a warning about an optional file.
+
+### Changed
+
+- Bumped the app version to 0.24.1.
+
 ## 0.24.0 - 2026-07-05
 
 ### Added

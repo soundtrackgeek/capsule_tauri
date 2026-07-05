@@ -150,13 +150,7 @@ pub fn create_debug_bundle() -> Result<DebugBundleResponse> {
         },
     ];
 
-    push_optional_file(
-        &mut items,
-        &mut warnings,
-        "debug.log",
-        &debug_log_path(),
-        Redaction::None,
-    );
+    push_debug_log_file(&mut items, &mut warnings, &debug_log_path());
     push_optional_file(
         &mut items,
         &mut warnings,
@@ -581,6 +575,19 @@ fn push_optional_file(
     }
 }
 
+fn push_debug_log_file(items: &mut Vec<ZipItem>, warnings: &mut Vec<String>, path: &Path) {
+    if path.exists() {
+        push_optional_file(items, warnings, "debug.log", path, Redaction::None);
+        return;
+    }
+
+    items.push(ZipItem {
+        name: "debug.log".to_string(),
+        bytes: b"No debug log entries were recorded before this diagnostics bundle was created.\n"
+            .to_vec(),
+    });
+}
+
 fn redact_json_bytes(bytes: Vec<u8>) -> Result<Vec<u8>> {
     let mut value: JsonValue = serde_json::from_slice(&bytes)?;
     redact_json_value(&mut value);
@@ -787,5 +794,20 @@ mod tests {
             .windows(4)
             .any(|window| window == 0x0201_4b50u32.to_le_bytes()));
         assert!(bytes.ends_with(&[0, 0]));
+    }
+
+    #[test]
+    fn missing_debug_log_adds_placeholder_without_warning() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let missing_log = temp.path().join("debug.log");
+        let mut items = Vec::new();
+        let mut warnings = Vec::new();
+
+        push_debug_log_file(&mut items, &mut warnings, &missing_log);
+
+        assert!(warnings.is_empty());
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "debug.log");
+        assert!(String::from_utf8_lossy(&items[0].bytes).contains("No debug log entries"));
     }
 }
