@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.22.3 - 2026-07-05
+
+### Fixed
+
+- Fixed Cloud AI Settings so a missing `cloud_provider` uses the Gemini default
+  without showing an invalid-provider warning.
+
+### Changed
+
+- Bumped the app version to 0.22.3.
+
 ## 0.22.2 - 2026-07-05
 
 ### Fixed

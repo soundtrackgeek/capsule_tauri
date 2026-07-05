@@ -5447,6 +5447,7 @@ function SettingsView({
     defaultSince: "",
     defaultUntil: "",
   });
+  const [aiDraftDirty, setAiDraftDirty] = useState(false);
   const [aiKeyDraft, setAiKeyDraft] = useState<Record<AICloudProvider, string>>({
     gemini: "",
     openai: "",
@@ -5512,7 +5513,7 @@ function SettingsView({
   }, [config]);
 
   useEffect(() => {
-    if (!aiSettings) {
+    if (!aiSettings || aiDraftDirty) {
       return;
     }
     setAiDraft({
@@ -5525,7 +5526,7 @@ function SettingsView({
       defaultSince: aiSettings.defaultSince ?? "",
       defaultUntil: aiSettings.defaultUntil ?? "",
     });
-  }, [aiSettings]);
+  }, [aiDraftDirty, aiSettings]);
 
   const normalizedDefaultLocationName = locationDraft.defaultLocationName.trim();
   const fixedLocationReady = locationDraft.useDefaultLocation && Boolean(normalizedDefaultLocationName);
@@ -5580,6 +5581,7 @@ function SettingsView({
       await onSetAiApiKey(provider, apiKey);
       clearAiKeyDraft(provider);
     }
+    setAiDraftDirty(false);
     return keyDrafts.length
       ? `${message}; saved ${keyDrafts.length} API ${keyDrafts.length === 1 ? "key" : "keys"}`
       : message;
@@ -5911,10 +5913,13 @@ function SettingsView({
             <span>Provider</span>
             <select
               onChange={(event) =>
-                setAiDraft({
-                  ...aiDraft,
-                  cloudProvider: event.target.value as AICloudProvider,
-                })
+                {
+                  setAiDraftDirty(true);
+                  setAiDraft((draft) => ({
+                    ...draft,
+                    cloudProvider: event.target.value as AICloudProvider,
+                  }));
+                }
               }
               value={aiDraft.cloudProvider}
             >
@@ -5926,7 +5931,12 @@ function SettingsView({
           <label className="field">
             <span>Gemini model</span>
             <select
-              onChange={(event) => setAiDraft({ ...aiDraft, geminiModel: event.target.value })}
+              onChange={(event) =>
+                {
+                  setAiDraftDirty(true);
+                  setAiDraft((draft) => ({ ...draft, geminiModel: event.target.value }));
+                }
+              }
               value={aiDraft.geminiModel}
             >
               {modelsForProvider(aiProviderStatuses, "gemini", ["gemini-3.5-flash"]).map(
@@ -5941,7 +5951,12 @@ function SettingsView({
           <label className="field">
             <span>OpenAI model</span>
             <select
-              onChange={(event) => setAiDraft({ ...aiDraft, openaiModel: event.target.value })}
+              onChange={(event) =>
+                {
+                  setAiDraftDirty(true);
+                  setAiDraft((draft) => ({ ...draft, openaiModel: event.target.value }));
+                }
+              }
               value={aiDraft.openaiModel}
             >
               {modelsForProvider(aiProviderStatuses, "openai", ["gpt-5.4-mini"]).map((model) => (
@@ -5955,7 +5970,10 @@ function SettingsView({
             <span>OpenRouter model</span>
             <select
               onChange={(event) =>
-                setAiDraft({ ...aiDraft, openrouterModel: event.target.value })
+                {
+                  setAiDraftDirty(true);
+                  setAiDraft((draft) => ({ ...draft, openrouterModel: event.target.value }));
+                }
               }
               value={aiDraft.openrouterModel}
             >
@@ -5973,7 +5991,10 @@ function SettingsView({
             <input
               aria-invalid={aiContextLimitInvalid}
               onChange={(event) =>
-                setAiDraft({ ...aiDraft, defaultContextLimit: event.target.value })
+                {
+                  setAiDraftDirty(true);
+                  setAiDraft((draft) => ({ ...draft, defaultContextLimit: event.target.value }));
+                }
               }
               placeholder="all"
               value={aiDraft.defaultContextLimit}
@@ -5982,7 +6003,12 @@ function SettingsView({
           <label className="field">
             <span>Context since</span>
             <input
-              onChange={(event) => setAiDraft({ ...aiDraft, defaultSince: event.target.value })}
+              onChange={(event) =>
+                {
+                  setAiDraftDirty(true);
+                  setAiDraft((draft) => ({ ...draft, defaultSince: event.target.value }));
+                }
+              }
               type="date"
               value={aiDraft.defaultSince}
             />
@@ -5990,7 +6016,12 @@ function SettingsView({
           <label className="field">
             <span>Context until</span>
             <input
-              onChange={(event) => setAiDraft({ ...aiDraft, defaultUntil: event.target.value })}
+              onChange={(event) =>
+                {
+                  setAiDraftDirty(true);
+                  setAiDraft((draft) => ({ ...draft, defaultUntil: event.target.value }));
+                }
+              }
               type="date"
               value={aiDraft.defaultUntil}
             />
@@ -6030,10 +6061,12 @@ function SettingsView({
                 <input
                   aria-label={`${providerStatus.label} API key`}
                   onChange={(event) =>
-                    setAiKeyDraft({
-                      ...aiKeyDraft,
-                      [providerStatus.provider]: event.target.value,
-                    })
+                    {
+                      setAiKeyDraft((draft) => ({
+                        ...draft,
+                        [providerStatus.provider]: event.target.value,
+                      }));
+                    }
                   }
                   type="password"
                   value={aiKeyDraft[providerStatus.provider]}

@@ -248,13 +248,18 @@ fn ai_settings_from_config(values: &[crate::models::CapsuleConfigValue]) -> AiSe
         .map(|item| (item.key.to_lowercase(), item.value.clone()))
         .collect::<HashMap<_, _>>();
     let mut warnings = Vec::new();
-    let cloud_provider = resolve_provider(values.get("cloud_provider").map(String::as_str))
-        .unwrap_or_else(|| {
+    let cloud_provider = match values
+        .get("cloud_provider")
+        .and_then(|value| normalize_string(Some(value)))
+    {
+        Some(value) => resolve_provider(Some(&value)).unwrap_or_else(|| {
             warnings.push(format!(
                 "Invalid cloud_provider; using default {DEFAULT_PROVIDER}."
             ));
             DEFAULT_PROVIDER.to_string()
-        });
+        }),
+        None => DEFAULT_PROVIDER.to_string(),
+    };
     let gemini_model = resolve_model(
         "gemini_model",
         values.get("gemini_model").map(String::as_str),
@@ -577,6 +582,38 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.contains("gemini_model was updated")));
+    }
+
+    #[test]
+    fn ai_settings_default_missing_provider_without_warning() {
+        let settings = ai_settings_from_config(&[]);
+
+        assert_eq!(settings.cloud_provider, DEFAULT_PROVIDER);
+        assert!(settings.warnings.is_empty());
+
+        let blank = ai_settings_from_config(&[crate::models::CapsuleConfigValue {
+            key: "cloud_provider".to_string(),
+            value: " ".to_string(),
+        }]);
+
+        assert_eq!(blank.cloud_provider, DEFAULT_PROVIDER);
+        assert!(blank.warnings.is_empty());
+    }
+
+    #[test]
+    fn ai_settings_warn_for_invalid_provider() {
+        let values = vec![crate::models::CapsuleConfigValue {
+            key: "cloud_provider".to_string(),
+            value: "not-a-provider".to_string(),
+        }];
+
+        let settings = ai_settings_from_config(&values);
+
+        assert_eq!(settings.cloud_provider, DEFAULT_PROVIDER);
+        assert!(settings
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Invalid cloud_provider")));
     }
 
     #[test]
