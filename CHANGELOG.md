@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.23.2 - 2026-07-05
+
+### Fixed
+
+- Fixed AI Chat New Chat so it stays on a blank conversation instead of
+  immediately reselecting the most recent saved chat and appending new messages
+  there.
+
+### Changed
+
+- Bumped the app version to 0.23.2.
+
 ## 0.23.1 - 2026-07-05
 
 ### Added

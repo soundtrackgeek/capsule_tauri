@@ -6912,6 +6912,7 @@ function AiView({
   const [privacyConfirmedAt, setPrivacyConfirmedAt] = useState<string | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
   const [chatNotice, setChatNotice] = useState<string | null>(null);
+  const aiConversationInitialLoadRef = useRef(false);
 
   const activeProviderStatus = useMemo(
     () => aiProviderStatuses.find((status) => status.provider === chatProvider) ?? null,
@@ -6955,6 +6956,7 @@ function AiView({
         setConversations([]);
         setActiveConversation(null);
         setSelectedConversationId(null);
+        aiConversationInitialLoadRef.current = false;
         return;
       }
       setChatLoading(true);
@@ -6963,10 +6965,13 @@ function AiView({
         const response = await listAiConversations();
         setConversations(response.conversations);
         const nextId =
-          preferredId ??
-          selectedConversationId ??
-          response.conversations[0]?.id ??
-          null;
+          preferredId !== undefined
+            ? preferredId
+            : selectedConversationId ??
+              (!aiConversationInitialLoadRef.current
+                ? response.conversations[0]?.id ?? null
+                : null);
+        aiConversationInitialLoadRef.current = true;
         setSelectedConversationId(nextId);
         setActiveConversation(nextId ? await getAiConversation(nextId) : null);
       } catch (conversationError) {
