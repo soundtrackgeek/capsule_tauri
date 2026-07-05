@@ -5561,8 +5561,10 @@ function SettingsView({
   );
   const activeProviderModel =
     activeProviderStatus?.selectedModel ?? selectedDraftModel(aiDraft);
-  const saveAiSettingsDraft = () =>
-    onSaveAiSettings({
+  const clearAiKeyDraft = (provider: AICloudProvider) =>
+    setAiKeyDraft((draft) => ({ ...draft, [provider]: "" }));
+  const saveAiSettingsDraft = async () => {
+    const message = await onSaveAiSettings({
       cloudProvider: aiDraft.cloudProvider,
       geminiModel: aiDraft.geminiModel,
       openaiModel: aiDraft.openaiModel,
@@ -5571,8 +5573,17 @@ function SettingsView({
       defaultSince: nullableFromText(aiDraft.defaultSince),
       defaultUntil: nullableFromText(aiDraft.defaultUntil),
     });
-  const clearAiKeyDraft = (provider: AICloudProvider) =>
-    setAiKeyDraft((draft) => ({ ...draft, [provider]: "" }));
+    const keyDrafts = (Object.entries(aiKeyDraft) as Array<[AICloudProvider, string]>).filter(
+      ([, apiKey]) => apiKey.trim(),
+    );
+    for (const [provider, apiKey] of keyDrafts) {
+      await onSetAiApiKey(provider, apiKey);
+      clearAiKeyDraft(provider);
+    }
+    return keyDrafts.length
+      ? `${message}; saved ${keyDrafts.length} API ${keyDrafts.length === 1 ? "key" : "keys"}`
+      : message;
+  };
 
   return (
     <section className="settings-grid" aria-label="Settings">
@@ -6009,7 +6020,11 @@ function SettingsView({
               <div className="token-status-row">
                 <span>{providerStatus.label}</span>
                 <strong>{providerStatus.configured ? "Configured" : "Missing"}</strong>
-                <em>{providerStatus.keySource ?? providerStatus.missingReason}</em>
+                <em>
+                  {aiKeyDraft[providerStatus.provider].trim()
+                    ? "Unsaved key entered"
+                    : (providerStatus.keySource ?? providerStatus.missingReason)}
+                </em>
               </div>
               <div className="ai-key-actions">
                 <input
@@ -6039,7 +6054,7 @@ function SettingsView({
                   type="button"
                 >
                   <Save size={15} />
-                  Save
+                  Save key
                 </button>
                 <button
                   className="icon-button icon-button--small"

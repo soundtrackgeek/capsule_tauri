@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use chrono::{NaiveDate, Utc};
-use keyring::{Entry, Error as KeyringError};
+use keyring_core::{Entry, Error as KeyringError};
 use serde_json::{Map, Value as JsonValue};
 
 use crate::{
@@ -160,12 +160,7 @@ pub fn set_ai_api_key(input: AiApiKeyUpdateRequest) -> Result<AiApiKeyMutationRe
     let provider = validate_provider(&input.provider)?;
     let api_key = normalize_string(Some(&input.api_key))
         .ok_or_else(|| anyhow!("API key cannot be empty."))?;
-    let entry = Entry::new(KEYRING_SERVICE, provider.env_key).with_context(|| {
-        format!(
-            "failed to open OS credential store for {}",
-            provider.env_key
-        )
-    })?;
+    let entry = keyring_entry(provider.env_key)?;
     entry
         .set_password(&api_key)
         .with_context(|| format!("failed to save {} to OS credential store", provider.env_key))?;
@@ -177,12 +172,7 @@ pub fn set_ai_api_key(input: AiApiKeyUpdateRequest) -> Result<AiApiKeyMutationRe
 
 pub fn clear_ai_api_key(provider: String) -> Result<AiApiKeyMutationResponse> {
     let provider = validate_provider(&provider)?;
-    let entry = Entry::new(KEYRING_SERVICE, provider.env_key).with_context(|| {
-        format!(
-            "failed to open OS credential store for {}",
-            provider.env_key
-        )
-    })?;
+    let entry = keyring_entry(provider.env_key)?;
     match entry.delete_credential() {
         Ok(()) | Err(KeyringError::NoEntry) => {}
         Err(error) => {
@@ -452,11 +442,36 @@ fn lookup_api_key_presence(db_path: &Path, provider: ProviderDefinition) -> ApiK
 }
 
 fn credential_store_has_key(env_key: &str) -> Result<bool> {
-    let entry = Entry::new(KEYRING_SERVICE, env_key)?;
+    let entry = keyring_entry(env_key)?;
     match entry.get_password() {
         Ok(value) => Ok(!value.trim().is_empty()),
         Err(KeyringError::NoEntry) => Ok(false),
         Err(error) => Err(error.into()),
+    }
+}
+
+fn keyring_entry(env_key: &str) -> Result<Entry> {
+    ensure_credential_store()?;
+    Entry::new(KEYRING_SERVICE, env_key)
+        .with_context(|| format!("failed to open OS credential store for {env_key}"))
+}
+
+fn ensure_credential_store() -> Result<()> {
+    if keyring_core::get_default_store().is_some() {
+        return Ok(());
+    }
+
+    #[cfg(windows)]
+    {
+        keyring_core::set_default_store(windows_native_keyring_store::Store::new()?);
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    {
+        Err(anyhow!(
+            "OS credential store is not configured for this platform."
+        ))
     }
 }
 

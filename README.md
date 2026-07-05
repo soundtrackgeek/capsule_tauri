@@ -158,8 +158,10 @@ Cloud AI Settings write non-secret defaults to Capsule `config.json` with a
 backup before every save: `cloud_provider`, `gemini_model`, `openai_model`,
 `openrouter_model`, `ai_chat_context_limit`, `ai_chat_context_since`, and
 `ai_chat_context_until`. API keys are stored only in the operating system
-credential store when entered in Settings. Readiness checks report only
-redacted key status, resolving key presence from the OS credential store,
+credential store, such as Windows Credential Manager, when saved in Settings;
+the main Cloud AI save action also stores any non-empty key fields shown in
+that panel. Readiness checks report
+only redacted key status, resolving key presence from the OS credential store,
 process environment variables, `CAPSULE_ENV_PATH`, a `.env` beside the active
 Capsule config, then the current working directory `.env`; `.env` files are
 ignored by Git. This configuration slice does not make live cloud AI requests.

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.22.2 - 2026-07-05
+
+### Fixed
+
+- Fixed Cloud AI Settings so the main save action also stores any entered API
+  key fields and clearly marks typed-but-unsaved keys before they are persisted.
+- Fixed API key persistence by explicitly initializing the Windows Credential
+  Manager store before reading, saving, or clearing Cloud AI keys.
+
+### Changed
+
+- Bumped the app version to 0.22.2.
+
 ## 0.22.1 - 2026-07-05
 
 ### Added
