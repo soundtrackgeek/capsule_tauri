@@ -10,7 +10,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
 
 use crate::{
-    backup, db, entries,
+    ai_config, backup, db, entries,
     models::{
         AiConversationSummary, AiMetadataSuggestionRequest, AiMetadataSuggestionResponse,
         AiOverviewResponse, AiTimeCapsuleSummary, EmbeddingModelSummary, GamificationBadge,
@@ -19,7 +19,6 @@ use crate::{
         QuestClaimRequest, QuestClaimResponse, SyncHistoryItem, SyncOverviewResponse,
         SyncStatusSummary, SyncTombstoneCount,
     },
-    settings,
 };
 
 #[cfg(test)]
@@ -42,7 +41,9 @@ pub fn get_ai_overview() -> Result<AiOverviewResponse> {
 pub(crate) fn get_ai_overview_for_database(db_path: &Path) -> Result<AiOverviewResponse> {
     let connection = db::open_read_only_connection(db_path)?;
     let tables = detected_tables(&connection)?;
-    let (provider, model) = ai_provider_and_model(db_path);
+    let (provider, model, active_provider_configured) =
+        ai_config::active_provider_and_model_for_database(db_path)
+            .unwrap_or_else(|_| ("gemini".to_string(), "gemini-3.5-flash".to_string(), false));
     let bridge_configured = python_bridge_configured();
 
     let conversation_count = count_if_table(&connection, &tables, "ai_conversations")?;
@@ -67,14 +68,30 @@ pub(crate) fn get_ai_overview_for_database(db_path: &Path) -> Result<AiOverviewR
                 .to_string(),
         );
     }
-    if provider.is_none() {
-        warnings.push("No AI provider setting was found in Capsule config.".to_string());
+    if !active_provider_configured {
+        warnings.push(format!(
+            "{} is selected, but its API key is not configured.",
+            provider
+        ));
     }
 
     Ok(AiOverviewResponse {
-        provider: provider.clone(),
-        model: model.clone(),
+        provider: Some(provider.clone()),
+        model: Some(model.clone()),
         capabilities: vec![
+            capability(
+                "cloud-ai-provider",
+                "Cloud AI provider",
+                true,
+                active_provider_configured,
+                true,
+                true,
+                if active_provider_configured {
+                    "The selected cloud provider has a redacted API key source configured."
+                } else {
+                    "Configure the selected provider API key in Settings before live cloud AI actions."
+                },
+            ),
             capability(
                 "metadata-suggestions",
                 "Metadata suggestions",
@@ -913,30 +930,6 @@ fn claim_quest_inner(
     tx.commit()?;
     let (level, xp_to_next_level) = level_from_xp(total_xp);
     Ok((updated, total_xp, level, xp_to_next_level))
-}
-
-fn ai_provider_and_model(db_path: &Path) -> (Option<String>, Option<String>) {
-    let config = settings::get_capsule_config_for_database(db_path).ok();
-    let Some(config) = config else {
-        return (None, None);
-    };
-    let values = config
-        .values
-        .into_iter()
-        .map(|item| (item.key.to_lowercase(), item.value))
-        .collect::<HashMap<_, _>>();
-    let provider = [
-        "ai_provider",
-        "llm_provider",
-        "cloud_provider",
-        "default_ai_provider",
-    ]
-    .into_iter()
-    .find_map(|key| normalized_string(values.get(key).map(String::as_str)));
-    let model = ["ai_model", "llm_model", "gemini_model", "openai_model"]
-        .into_iter()
-        .find_map(|key| normalized_string(values.get(key).map(String::as_str)));
-    (provider, model)
 }
 
 #[cfg(test)]

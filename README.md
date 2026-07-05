@@ -88,6 +88,9 @@ explicit capability-gated AI/sync surfaces:
 - AI overview for provider/model readiness, persisted conversations, AI Time
   Capsules, embedding models, and local metadata suggestions that do not make
   cloud requests.
+- Cloud AI Settings for Gemini, OpenAI, and OpenRouter provider/model defaults,
+  chat context defaults, and redacted API key status without exposing stored
+  secrets to the frontend.
 - Native Capsule-compatible shared-folder sync using `capsule_sync.json`,
   `capsule_threads_sync.json`, and `capsule_ai_chats_sync.json`, including entry,
   image metadata, location, custom library, thread, AI chat, and tombstone
@@ -150,6 +153,16 @@ settings directory, for example `%APPDATA%\Capsule\cover_thumbnails` on
 Windows.
 Mood sentiment scoring for Analytics and Calendar uses the bundled legacy mood
 scale in `src-tauri/mood_sentiment.json`.
+
+Cloud AI Settings write non-secret defaults to Capsule `config.json` with a
+backup before every save: `cloud_provider`, `gemini_model`, `openai_model`,
+`openrouter_model`, `ai_chat_context_limit`, `ai_chat_context_since`, and
+`ai_chat_context_until`. API keys are stored only in the operating system
+credential store when entered in Settings. Readiness checks report only
+redacted key status, resolving key presence from the OS credential store,
+process environment variables, `CAPSULE_ENV_PATH`, a `.env` beside the active
+Capsule config, then the current working directory `.env`; `.env` files are
+ignored by Git. This configuration slice does not make live cloud AI requests.
 
 Location auto-capture on entry creation uses the same Capsule configuration keys
 as the existing app: `location.auto_capture`, `location.auto_capture_method`,

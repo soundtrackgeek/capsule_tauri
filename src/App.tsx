@@ -54,6 +54,7 @@ import {
   createPrompt,
   createEntry,
   createBackup,
+  clearAiApiKey,
   createTemplate,
   deleteCapsuleConfigValue,
   deleteEntry,
@@ -65,6 +66,8 @@ import {
   exportEntries,
   getAnalytics,
   getAiOverview,
+  getAiProviderStatus,
+  getAiSettings,
   getAppVersion,
   getCapsuleConfig,
   getDatabaseStatus,
@@ -96,9 +99,11 @@ import {
   restoreBackup,
   runSync,
   searchEntries,
+  setAiApiKey,
   setCapsuleConfigValue,
   setLocationConfig,
   setPathSettings,
+  updateAiSettings,
   starEntry,
   suggestAiMetadata,
   unhideEntry,
@@ -139,6 +144,10 @@ import {
 import { parseChangelog } from "./lib/changelog";
 import { formatBytes, formatDateTime } from "./lib/format";
 import type {
+  AICloudProvider,
+  AIProviderStatus,
+  AISettings,
+  AISettingsUpdateRequest,
   BackupInfo,
   BackupRestorePreview,
   CapsuleConfigResponse,
@@ -547,6 +556,8 @@ function App() {
   const [backupDirectory, setBackupDirectory] = useState<string>("");
   const [imageMediaRoot, setImageMediaRoot] = useState<string>("");
   const [pathSettings, setPathSettingsState] = useState<PathSettingsResponse | null>(null);
+  const [aiSettings, setAiSettingsState] = useState<AISettings | null>(null);
+  const [aiProviderStatuses, setAiProviderStatuses] = useState<AIProviderStatus[]>([]);
   const [recentEntries, setRecentEntries] = useState<Entry[]>([]);
   const [pinnedEntries, setPinnedEntries] = useState<Entry[]>([]);
   const [randomEntry, setRandomEntry] = useState<Entry | null>(null);
@@ -988,15 +999,27 @@ function App() {
   const loadDataTools = useCallback(async () => {
     setDataToolsLoading(true);
     try {
-      const [nextConfig, nextPathSettings, nextTags, nextMoods, nextLibrary] = await Promise.all([
+      const [
+        nextConfig,
+        nextPathSettings,
+        nextAiSettings,
+        nextAiProviderStatuses,
+        nextTags,
+        nextMoods,
+        nextLibrary,
+      ] = await Promise.all([
         getCapsuleConfig(),
         getPathSettings(),
+        getAiSettings(),
+        getAiProviderStatus(),
         status?.readable ? listTags() : Promise.resolve<TagCatalogResponse | null>(null),
         status?.readable ? listMoods() : Promise.resolve<MoodCatalogResponse | null>(null),
         status?.readable ? listLibraryItems() : Promise.resolve<LibraryListResponse | null>(null),
       ]);
       setCapsuleConfig(nextConfig);
       setPathSettingsState(nextPathSettings);
+      setAiSettingsState(nextAiSettings);
+      setAiProviderStatuses(nextAiProviderStatuses);
       setImageMediaRoot(nextPathSettings.imageMediaRoot);
       setBackupDirectory(nextPathSettings.backupDirectory);
       setTagCatalog(nextTags);
@@ -1435,6 +1458,32 @@ function App() {
     setImageMediaRoot(response.imageMediaRoot);
     setBackupDirectory(response.backupDirectory);
     return `Saved local settings: ${response.settingsPath}`;
+  }, []);
+
+  const handleSaveAiSettings = useCallback(async (input: AISettingsUpdateRequest) => {
+    const response = await updateAiSettings(input);
+    setCapsuleConfig(response.config);
+    const [nextAiSettings, nextProviderStatuses] = await Promise.all([
+      getAiSettings(),
+      getAiProviderStatus(),
+    ]);
+    setAiSettingsState(nextAiSettings);
+    setAiProviderStatuses(nextProviderStatuses);
+    return `Saved Cloud AI settings with config backup: ${response.backupPath ?? "new config"}`;
+  }, []);
+
+  const handleSetAiApiKey = useCallback(async (provider: AICloudProvider, apiKey: string) => {
+    await setAiApiKey({ provider, apiKey });
+    const nextProviderStatuses = await getAiProviderStatus();
+    setAiProviderStatuses(nextProviderStatuses);
+    return `Saved ${providerEnvLabel(provider)} API key to the OS credential store`;
+  }, []);
+
+  const handleClearAiApiKey = useCallback(async (provider: AICloudProvider) => {
+    await clearAiApiKey(provider);
+    const nextProviderStatuses = await getAiProviderStatus();
+    setAiProviderStatuses(nextProviderStatuses);
+    return `Cleared saved ${providerEnvLabel(provider)} API key from the OS credential store`;
   }, []);
 
   const handleCheckForUpdates = useCallback(async (silent = false) => {
@@ -2678,6 +2727,8 @@ function App() {
         {activeView === "settings" && (
           <SettingsView
             appVersion={appVersion}
+            aiProviderStatuses={aiProviderStatuses}
+            aiSettings={aiSettings}
             availableUpdate={availableUpdate}
             backupDirectory={backupDirectory}
             config={capsuleConfig}
@@ -2693,7 +2744,10 @@ function App() {
             onRefresh={loadDataTools}
             onRunMutation={runDataToolMutation}
             onRunSync={openSyncConfirmation}
+            onClearAiApiKey={handleClearAiApiKey}
+            onSaveAiSettings={handleSaveAiSettings}
             onSavePathSettings={handleSavePathSettings}
+            onSetAiApiKey={handleSetAiApiKey}
             pathSettings={pathSettings}
             status={status}
             statusTone={statusTone}
@@ -5302,6 +5356,8 @@ type SettingsViewProps = {
   backupDirectory: string;
   imageMediaRoot: string;
   pathSettings: PathSettingsResponse | null;
+  aiSettings: AISettings | null;
+  aiProviderStatuses: AIProviderStatus[];
   statusTone: "good" | "warn" | "neutral";
   config: CapsuleConfigResponse | null;
   tagCatalog: TagCatalogResponse | null;
@@ -5325,7 +5381,10 @@ type SettingsViewProps = {
   onRefresh: () => void;
   onRunMutation: (mutation: () => Promise<string>) => Promise<void>;
   onRunSync: () => void;
+  onClearAiApiKey: (provider: AICloudProvider) => Promise<string>;
+  onSaveAiSettings: (input: AISettingsUpdateRequest) => Promise<string>;
   onSavePathSettings: (input: PathSettingsUpdateRequest) => Promise<string>;
+  onSetAiApiKey: (provider: AICloudProvider, apiKey: string) => Promise<string>;
   syncMutating: boolean;
 };
 
@@ -5335,6 +5394,8 @@ function SettingsView({
   backupDirectory,
   imageMediaRoot,
   pathSettings,
+  aiSettings,
+  aiProviderStatuses,
   statusTone,
   config,
   tagCatalog,
@@ -5358,7 +5419,10 @@ function SettingsView({
   onRefresh,
   onRunMutation,
   onRunSync,
+  onClearAiApiKey,
+  onSaveAiSettings,
   onSavePathSettings,
+  onSetAiApiKey,
   syncMutating,
 }: SettingsViewProps) {
   const [pathDraft, setPathDraft] = useState({
@@ -5373,6 +5437,20 @@ function SettingsView({
     autoSyncEnabled: false,
     autoSyncIntervalMinutes: 15,
     minimizeToTrayOnClose: false,
+  });
+  const [aiDraft, setAiDraft] = useState({
+    cloudProvider: "gemini" as AICloudProvider,
+    geminiModel: "gemini-3.5-flash",
+    openaiModel: "gpt-5.4-mini",
+    openrouterModel: "moonshotai/kimi-k2.5",
+    defaultContextLimit: "",
+    defaultSince: "",
+    defaultUntil: "",
+  });
+  const [aiKeyDraft, setAiKeyDraft] = useState<Record<AICloudProvider, string>>({
+    gemini: "",
+    openai: "",
+    openrouter: "",
   });
   const [configDraft, setConfigDraft] = useState({ key: "", value: "" });
   const [locationDraft, setLocationDraft] = useState<LocationCaptureDraft>({
@@ -5433,6 +5511,22 @@ function SettingsView({
     });
   }, [config]);
 
+  useEffect(() => {
+    if (!aiSettings) {
+      return;
+    }
+    setAiDraft({
+      cloudProvider: aiSettings.cloudProvider,
+      geminiModel: aiSettings.geminiModel,
+      openaiModel: aiSettings.openaiModel,
+      openrouterModel: aiSettings.openrouterModel,
+      defaultContextLimit:
+        aiSettings.defaultContextLimit === null ? "" : String(aiSettings.defaultContextLimit),
+      defaultSince: aiSettings.defaultSince ?? "",
+      defaultUntil: aiSettings.defaultUntil ?? "",
+    });
+  }, [aiSettings]);
+
   const normalizedDefaultLocationName = locationDraft.defaultLocationName.trim();
   const fixedLocationReady = locationDraft.useDefaultLocation && Boolean(normalizedDefaultLocationName);
   const locationMode = !locationDraft.autoCapture ? "Off" : fixedLocationReady ? "Fixed" : "IP lookup";
@@ -5460,6 +5554,25 @@ function SettingsView({
       autoSyncIntervalMinutes: pathDraft.autoSyncIntervalMinutes,
       minimizeToTrayOnClose: pathDraft.minimizeToTrayOnClose,
     });
+  const aiContextLimitInvalid = contextLimitDraftInvalid(aiDraft.defaultContextLimit);
+  const parsedAiContextLimit = parseContextLimitDraft(aiDraft.defaultContextLimit);
+  const activeProviderStatus = aiProviderStatuses.find(
+    (status) => status.provider === aiDraft.cloudProvider,
+  );
+  const activeProviderModel =
+    activeProviderStatus?.selectedModel ?? selectedDraftModel(aiDraft);
+  const saveAiSettingsDraft = () =>
+    onSaveAiSettings({
+      cloudProvider: aiDraft.cloudProvider,
+      geminiModel: aiDraft.geminiModel,
+      openaiModel: aiDraft.openaiModel,
+      openrouterModel: aiDraft.openrouterModel,
+      defaultContextLimit: parsedAiContextLimit,
+      defaultSince: nullableFromText(aiDraft.defaultSince),
+      defaultUntil: nullableFromText(aiDraft.defaultUntil),
+    });
+  const clearAiKeyDraft = (provider: AICloudProvider) =>
+    setAiKeyDraft((draft) => ({ ...draft, [provider]: "" }));
 
   return (
     <section className="settings-grid" aria-label="Settings">
@@ -5762,6 +5875,188 @@ function SettingsView({
             {updateInstalling ? "Installing" : "Install update"}
           </button>
         </div>
+      </Panel>
+
+      <Panel
+        action={
+          <StatusPill tone={activeProviderStatus?.configured ? "good" : "warn"}>
+            {activeProviderStatus?.configured ? "configured" : "missing key"}
+          </StatusPill>
+        }
+        icon={<Bot size={20} />}
+        title="Cloud AI"
+      >
+        <dl className="detail-list detail-list--compact">
+          <Detail label="Active provider" value={providerEnvLabel(aiDraft.cloudProvider)} />
+          <Detail label="Active model" value={activeProviderModel} />
+          <Detail
+            label="Key source"
+            value={activeProviderStatus?.keySource ?? activeProviderStatus?.missingReason ?? "Loading"}
+          />
+        </dl>
+
+        <div className="settings-form-grid settings-form-grid--ai">
+          <label className="field">
+            <span>Provider</span>
+            <select
+              onChange={(event) =>
+                setAiDraft({
+                  ...aiDraft,
+                  cloudProvider: event.target.value as AICloudProvider,
+                })
+              }
+              value={aiDraft.cloudProvider}
+            >
+              <option value="gemini">Gemini</option>
+              <option value="openai">OpenAI</option>
+              <option value="openrouter">OpenRouter</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Gemini model</span>
+            <select
+              onChange={(event) => setAiDraft({ ...aiDraft, geminiModel: event.target.value })}
+              value={aiDraft.geminiModel}
+            >
+              {modelsForProvider(aiProviderStatuses, "gemini", ["gemini-3.5-flash"]).map(
+                (model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ),
+              )}
+            </select>
+          </label>
+          <label className="field">
+            <span>OpenAI model</span>
+            <select
+              onChange={(event) => setAiDraft({ ...aiDraft, openaiModel: event.target.value })}
+              value={aiDraft.openaiModel}
+            >
+              {modelsForProvider(aiProviderStatuses, "openai", ["gpt-5.4-mini"]).map((model) => (
+                <option key={model} value={model}>
+                  {model}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field field--wide">
+            <span>OpenRouter model</span>
+            <select
+              onChange={(event) =>
+                setAiDraft({ ...aiDraft, openrouterModel: event.target.value })
+              }
+              value={aiDraft.openrouterModel}
+            >
+              {modelsForProvider(aiProviderStatuses, "openrouter", ["moonshotai/kimi-k2.5"]).map(
+                (model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ),
+              )}
+            </select>
+          </label>
+          <label className="field">
+            <span>Context limit</span>
+            <input
+              aria-invalid={aiContextLimitInvalid}
+              onChange={(event) =>
+                setAiDraft({ ...aiDraft, defaultContextLimit: event.target.value })
+              }
+              placeholder="all"
+              value={aiDraft.defaultContextLimit}
+            />
+          </label>
+          <label className="field">
+            <span>Context since</span>
+            <input
+              onChange={(event) => setAiDraft({ ...aiDraft, defaultSince: event.target.value })}
+              type="date"
+              value={aiDraft.defaultSince}
+            />
+          </label>
+          <label className="field">
+            <span>Context until</span>
+            <input
+              onChange={(event) => setAiDraft({ ...aiDraft, defaultUntil: event.target.value })}
+              type="date"
+              value={aiDraft.defaultUntil}
+            />
+          </label>
+        </div>
+        {aiContextLimitInvalid && (
+          <div className="inline-warning">
+            <TriangleAlert size={15} />
+            Context limit must be a positive integer or blank for all.
+          </div>
+        )}
+        <div className="path-action-row">
+          <button
+            className="primary-button"
+            disabled={dataToolMutating || aiContextLimitInvalid}
+            onClick={() => onRunMutation(saveAiSettingsDraft)}
+            type="button"
+          >
+            <Save size={17} />
+            Save Cloud AI
+          </button>
+        </div>
+
+        <div className="ai-key-list">
+          {aiProviderStatuses.map((providerStatus) => (
+            <article className="ai-key-row" key={providerStatus.provider}>
+              <div className="token-status-row">
+                <span>{providerStatus.label}</span>
+                <strong>{providerStatus.configured ? "Configured" : "Missing"}</strong>
+                <em>{providerStatus.keySource ?? providerStatus.missingReason}</em>
+              </div>
+              <div className="ai-key-actions">
+                <input
+                  aria-label={`${providerStatus.label} API key`}
+                  onChange={(event) =>
+                    setAiKeyDraft({
+                      ...aiKeyDraft,
+                      [providerStatus.provider]: event.target.value,
+                    })
+                  }
+                  type="password"
+                  value={aiKeyDraft[providerStatus.provider]}
+                />
+                <button
+                  className="secondary-button secondary-button--small"
+                  disabled={dataToolMutating || !aiKeyDraft[providerStatus.provider].trim()}
+                  onClick={() =>
+                    onRunMutation(async () => {
+                      const message = await onSetAiApiKey(
+                        providerStatus.provider,
+                        aiKeyDraft[providerStatus.provider],
+                      );
+                      clearAiKeyDraft(providerStatus.provider);
+                      return message;
+                    })
+                  }
+                  type="button"
+                >
+                  <Save size={15} />
+                  Save
+                </button>
+                <button
+                  className="icon-button icon-button--small"
+                  disabled={dataToolMutating || !providerStatus.configured}
+                  onClick={() =>
+                    onRunMutation(async () => onClearAiApiKey(providerStatus.provider))
+                  }
+                  title={`Clear ${providerStatus.label} API key`}
+                  type="button"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+        <WarningList warnings={aiSettings?.warnings ?? []} />
       </Panel>
 
       <Panel icon={<Settings size={20} />} title="Interface">
@@ -6969,6 +7264,56 @@ function splitFilter(value: string) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function providerEnvLabel(provider: AICloudProvider) {
+  return {
+    gemini: "Gemini",
+    openai: "OpenAI",
+    openrouter: "OpenRouter",
+  }[provider];
+}
+
+function modelsForProvider(
+  statuses: AIProviderStatus[],
+  provider: AICloudProvider,
+  fallback: string[],
+) {
+  const models = statuses.find((status) => status.provider === provider)?.availableModels;
+  return models && models.length > 0 ? models : fallback;
+}
+
+function selectedDraftModel(draft: {
+  cloudProvider: AICloudProvider;
+  geminiModel: string;
+  openaiModel: string;
+  openrouterModel: string;
+}) {
+  if (draft.cloudProvider === "openai") {
+    return draft.openaiModel;
+  }
+  if (draft.cloudProvider === "openrouter") {
+    return draft.openrouterModel;
+  }
+  return draft.geminiModel;
+}
+
+function contextLimitDraftInvalid(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || ["all", "none", "unlimited", "max"].includes(normalized)) {
+    return false;
+  }
+  const parsed = Number(normalized);
+  return !Number.isInteger(parsed) || parsed < 1;
+}
+
+function parseContextLimitDraft(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return contextLimitDraftInvalid(value) ||
+    !normalized ||
+    ["all", "none", "unlimited", "max"].includes(normalized)
+    ? null
+    : Number(normalized);
 }
 
 function uniqueTagList(tags: string[]) {

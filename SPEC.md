@@ -1,13 +1,13 @@
 # Capsule Tauri App Specification
 
-Date: 2026-06-29
+Date: 2026-07-05
 Status: Draft for upcoming build
 Target repo: `C:\_code\capsule_tauri`
 Reference repos inspected:
 
 - `C:\_code\music_backup_v5`
-- `C:\_code2\capsule_exp_ai`
-- `C:\_code2\capsule_exp_ai\capsule-web`
+- `C:\_code\capsule_exp_ai`
+- `C:\_code\capsule_exp_ai\capsule-web`
 
 ## 1. Product Goal
 
@@ -99,7 +99,7 @@ The current web app provides the product vocabulary and UX shape:
 - Search page with keyword, semantic, and hybrid modes, structured query tokens, date/tag/mood filters, presets, export, and entry actions.
 - Analytics page with period filters, overview metrics, trends, mood/tag charts, writing calendar, word frequency, reading time, weather/location analytics, correlations, and year review.
 - Writing Calendar and Wrapped pages.
-- AI Features page with search, chat, summaries, patterns, journey narration, time capsules, and metadata suggestions.
+- AI Features page with OpenAI, Google Gemini, and OpenRouter provider selection, scoped journal chat, persisted conversations, summaries, patterns, journey narration, time capsules, and metadata suggestions.
 - Settings with general preferences, Cover Wall, security, backups, AI configuration, export/import, template and prompt library, moods, tags, presets, cloud sync, plugins, and advanced history/undo.
 - Cover Wall for generated cover images linked to visible entries.
 - Built-in image attachments and location/weather metadata.
@@ -125,7 +125,6 @@ The first build should not try to replace every Capsule feature.
 
 Out of scope for MVP:
 
-- Full AI chat parity.
 - Full plugin management parity.
 - Full cloud sync setup.
 - Full encryption migration UI.
@@ -212,12 +211,14 @@ capsule_tauri/
       WriterMode.tsx
       Threads.tsx
       Search.tsx
+      AI.tsx
       Settings.tsx
       Backups.tsx
       About.tsx
     components/
       layout/
       entries/
+      ai/
       writer-mode/
       settings/
       ui/
@@ -239,6 +240,8 @@ capsule_tauri/
       entries.rs
       search.rs
       threads.rs
+      ai.rs
+      ai_providers.rs
       settings.rs
       images.rs
       stats.rs
@@ -287,6 +290,36 @@ Do not add new settings tables to the existing Capsule database in MVP unless ne
 ### Capsule Config
 
 Existing Capsule configuration lives in `config.json` and environment variables. The Tauri app should read config values needed for display and behavior, but must be conservative about writing config until a proper settings command exists.
+
+### Cloud AI Configuration
+
+The Tauri app should support the same cloud AI provider family selected for the old Capsule AI work, without local Ollama as an initial dependency:
+
+- `openai`
+- `gemini`
+- `openrouter`
+
+Config keys to preserve:
+
+- `cloud_provider`
+- `openai_model`
+- `gemini_model`
+- `openrouter_model`
+- `ai_chat_context_limit`
+- `ai_chat_context_since`
+- `ai_chat_context_until`
+
+Default models should be explicit and editable from Settings. The implementation may update default model IDs over time, but the Settings UI must always show the exact provider and model that will receive a request.
+
+API keys:
+
+- `OPENAI_API_KEY`
+- `GEMINI_API_KEY`
+- `OPENROUTER_API_KEY`
+
+Secrets must not be stored in the Capsule SQLite database, exported JSON, sync sidecars, backups, or conversation metadata. Preferred storage is the OS credential store through a Tauri-compatible secret plugin. Environment variables and an ignored local `.env` file are acceptable fallback sources. The Settings UI should report key presence as configured/missing without displaying full secret values.
+
+AI settings writes are file/settings mutations, not journal mutations. They should create a config backup before writing local config, but they do not need a database backup unless the operation also mutates SQLite rows.
 
 ## 9. Database Safety Contract
 
@@ -533,6 +566,124 @@ Create responses must include:
 - Backup path.
 - Optional XP award later.
 
+### AI Provider Types
+
+```ts
+export type AICloudProvider = "openai" | "gemini" | "openrouter";
+
+export type AIProviderStatus = {
+  provider: AICloudProvider;
+  label: string;
+  configured: boolean;
+  selectedModel: string;
+  availableModels: string[];
+  missingReason: string | null;
+};
+
+export type AISettings = {
+  cloudProvider: AICloudProvider;
+  openaiModel: string;
+  geminiModel: string;
+  openrouterModel: string;
+  defaultContextLimit: number;
+  defaultSince: string | null;
+  defaultUntil: string | null;
+};
+```
+
+### AI Chat Types
+
+```ts
+export type AIChatScope = "search" | "entry" | "entries" | "thread";
+export type AIChatMessageStatus = "streaming" | "complete" | "interrupted" | "error";
+
+export type AIChatContextFilters = {
+  text?: string;
+  since?: string | null;
+  until?: string | null;
+  tags?: string[];
+  excludeTags?: string[];
+  moods?: string[];
+  excludeMoods?: string[];
+  starred?: boolean | null;
+  pinned?: boolean | null;
+  includeHidden?: boolean;
+  hasImages?: boolean | null;
+  limit?: number;
+  sort?: "asc" | "desc" | "relevance";
+};
+
+export type AIChatRequest = {
+  message: string;
+  conversationId?: number | null;
+  cloudProvider?: AICloudProvider;
+  scope: AIChatScope;
+  scopeIdentifiers: string[];
+  contextFilters?: AIChatContextFilters;
+  contextLimit?: number | null;
+  since?: string | null;
+  until?: string | null;
+};
+
+export type AIConversationSummary = {
+  id: number;
+  uuid: string;
+  title: string;
+  preview: string;
+  cloudProvider: AICloudProvider;
+  model: string | null;
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
+  lastMessageAt: string;
+};
+
+export type AIConversationMessage = {
+  id: number;
+  uuid: string;
+  role: "user" | "assistant";
+  content: string;
+  status: AIChatMessageStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AIConversationDetail = AIConversationSummary & {
+  scope: AIChatScope;
+  scopeIdentifiers: string[];
+  contextLimit: number | null;
+  since: string | null;
+  until: string | null;
+  messages: AIConversationMessage[];
+};
+```
+
+### AI Metadata Suggestions
+
+```ts
+export type AIEntryMetadataSuggestionRequest = {
+  text: string;
+  contentFormat?: "plain" | "markdown";
+  cloudProvider?: AICloudProvider;
+};
+
+export type AIEntryMetadataSuggestion = {
+  title: string | null;
+  summary: string | null;
+  cloudProvider: AICloudProvider;
+  model: string;
+};
+
+export type AIThreadMetadataSuggestionRequest = {
+  rootUuid: string;
+  cloudProvider?: AICloudProvider;
+};
+
+export type AIThreadMetadataSuggestion = AIEntryMetadataSuggestion & {
+  entryCount: number;
+};
+```
+
 ## 12. Command API
 
 The frontend should call one `src/backend.ts` facade. Desktop mode uses Tauri commands. Browser-only Vite mode returns mock data.
@@ -629,6 +780,35 @@ Structured query syntax should be ported from the web app:
 - `before:2025-06-01`
 - `after:2025-01-01`
 - `NOT tag:work`
+
+Semantic and hybrid search should not depend on local Ollama for the initial Tauri AI implementation. Keep keyword search native. AI-assisted retrieval can be implemented as scoped cloud chat over selected entries and filters first; true semantic/vector ranking can come later if a cloud embedding or local indexing strategy is chosen deliberately.
+
+### AI Commands
+
+```text
+get_ai_provider_status() -> AIProviderStatus[]
+get_ai_settings() -> AISettings
+update_ai_settings(input: AISettingsUpdate) -> ConfigMutationResponse
+preview_ai_chat_context(input: AIChatContextPreviewRequest) -> AIChatContextPreviewResponse
+list_ai_conversations() -> AIConversationListResponse
+get_ai_conversation(conversation_id: number) -> AIConversationDetail
+delete_ai_conversation(conversation_id: number) -> DeleteAIConversationResponse
+start_ai_chat_stream(input: AIChatRequest) -> AIChatStreamStartResponse
+cancel_ai_chat_stream(stream_id: string) -> void
+suggest_entry_metadata(input: AIEntryMetadataSuggestionRequest) -> AIEntryMetadataSuggestion
+suggest_thread_metadata(input: AIThreadMetadataSuggestionRequest) -> AIThreadMetadataSuggestion
+```
+
+Streaming should use Tauri events:
+
+- `ai-chat-started` with `streamId`, `conversationId`, provider, and model.
+- `ai-chat-context` with the resolved context preview.
+- `ai-chat-chunk` with incremental assistant text.
+- `ai-chat-complete` when the assistant message is complete.
+- `ai-chat-interrupted` when the user cancels or navigation interrupts the stream.
+- `ai-chat-error` with a user-safe error and technical detail.
+
+The chat command must persist the user message before the provider call and persist the assistant draft as it streams. Stale `streaming` rows should reopen as `interrupted`.
 
 ### Backup Commands
 
@@ -751,6 +931,32 @@ Responsibilities:
 - Security degraded-feature checks.
 - Relevance sorting for search results.
 
+### `ai.rs`
+
+Responsibilities:
+
+- Provider readiness and settings read models.
+- AI context preview assembly from search filters, explicit entries, selected entry lists, and continuation threads.
+- Persistent conversation CRUD using `ai_conversations`, `ai_conversation_messages`, and `sync_ai_conversation_tombstones`.
+- Chat stream orchestration through Tauri events.
+- Entry title/summary and thread title/summary suggestion commands.
+- Prompt construction that includes only the entries visible in the resolved context preview.
+- Conversation status transitions for `streaming`, `complete`, `interrupted`, and `error`.
+- Audit metadata for provider/model used by each AI action.
+
+### `ai_providers.rs`
+
+Responsibilities:
+
+- Direct HTTPS clients for OpenAI, Google Gemini, and OpenRouter text generation.
+- Streaming adapters that normalize provider-specific chunk formats into plain text deltas.
+- Non-streaming generation for metadata suggestions and analysis workflows.
+- Consistent timeout, retry, cancellation, and error mapping behavior.
+- Secret lookup from OS credential storage, environment variables, or ignored local `.env` fallback.
+- Model allowlists and configured-model fallback.
+
+Provider modules should not have database access. They accept finalized prompts and return generated text or stream chunks.
+
 ### `security.rs`
 
 Responsibilities:
@@ -766,7 +972,7 @@ Important: do not silently show encrypted text blobs as journal content.
 
 Only for features not yet ported to Rust:
 
-- AI provider calls.
+- Temporary AI compatibility only if direct Rust provider calls are blocked.
 - SQLCipher/AES migrations.
 - Complex sync/import/export paths.
 - Plugin activation/update.
@@ -775,6 +981,7 @@ Rules:
 
 - Must be optional.
 - Must not be used for basic entry browsing.
+- Must not be the primary path for OpenAI, Gemini, or OpenRouter once `ai_providers.rs` exists.
 - Must not spawn a long-lived FastAPI server for the normal desktop app.
 - Must surface clear errors when Python or dependencies are missing.
 
@@ -868,11 +1075,11 @@ Required sidebar items for MVP:
 
 Later sidebar items:
 
+- AI
 - Cover Wall
 - Analytics
 - Writing Calendar
 - Wrapped
-- AI
 - Gamification
 - Profile
 - Plugins
@@ -955,6 +1162,7 @@ The full-page composer should preserve the web app's strongest writing ideas:
 - Markdown content stored as `content_format = markdown`.
 - Optional title.
 - Optional summary.
+- Generate title/summary button using the currently selected cloud AI provider.
 - Mood picker.
 - Tag input with suggestions.
 - Continuation picker.
@@ -967,6 +1175,18 @@ The full-page composer should preserve the web app's strongest writing ideas:
   - characters
   - reading time
 - Optional writing session timer.
+
+AI-generated title/summary behavior:
+
+- The button should be available in New Entry and Edit Entry when there is enough text to analyze.
+- The request must use the configured provider/model unless the user picks a different provider for the action.
+- The app should show the provider/model before sending the request.
+- The suggestion fills a preview state first; the user must accept, edit, or discard it.
+- No entry database write happens merely because a suggestion was generated.
+- On save, accepted title/summary values follow the normal backup-guarded entry create/edit flow.
+- Suggested titles are plain text, trimmed, and capped at 120 characters.
+- Suggested summaries are plain text, trimmed, and capped at 320 characters.
+- Markdown entries should be converted to plain text before sending context to the provider.
 
 ### Writer Mode MVP
 
@@ -1001,7 +1221,7 @@ Search should support:
 - Star/pin/edit/continue/delete actions.
 - Export current result set later.
 
-Semantic and hybrid modes can be visible but disabled until AI support lands.
+Semantic and hybrid modes should remain hidden or disabled until a non-Ollama strategy is chosen. The first AI search-like experience should be scoped cloud chat over explicit context, not background vector indexing.
 
 ### Threads MVP
 
@@ -1158,27 +1378,178 @@ Later:
 
 ## 20. AI Features
 
-AI features are later-phase.
+AI should be a first-class planned module for the Tauri app, not only a placeholder. It remains optional and capability-gated because it can send private journal content to a cloud provider.
 
-Preserve current concepts:
+### Supported Providers
 
-- AI search.
-- Related entries.
-- Mood suggestion.
-- Title/summary suggestion.
-- Thread metadata suggestion.
-- Summaries.
-- Patterns.
-- Sentiment journey.
-- AI chat with persisted conversations.
-- AI Time Capsule.
+Initial provider scope:
 
-Recommended implementation:
+- OpenAI
+- Google Gemini
+- OpenRouter
 
-- Keep AI behind a feature capability layer.
-- Use the existing Python core or provider-specific modules until a Rust implementation is justified.
-- Never send journal data to cloud providers unless the user explicitly enables the provider and invokes the AI feature.
-- Show provider/model in the UI for any cloud AI action.
+Out of initial scope:
+
+- Local Ollama.
+- Background local embedding/indexing.
+- Automatic cloud processing of entries without a direct user action.
+
+Provider behavior:
+
+- All three providers must expose the same internal generation interface.
+- Streaming chat should be supported for providers that offer streaming.
+- Non-streaming generation is sufficient for title/summary suggestions and analysis jobs.
+- Provider-specific errors should be mapped to user-friendly messages such as missing API key, unsupported model, rate limit, timeout, provider unavailable, and malformed provider response.
+- Every AI response shown in the UI should identify the provider and model used.
+
+### Privacy And Consent
+
+Rules:
+
+- Do not send journal content to any provider until the user explicitly enables a provider and invokes an AI action.
+- The first cloud AI use should show a concise privacy confirmation explaining that selected journal context will be sent to the chosen provider.
+- Hidden entries are excluded from AI context by default.
+- Include hidden entries only when the user explicitly enables that option for the action.
+- Show a context preview before chat requests that include more than one entry.
+- Allow the user to remove individual entries from a context preview before sending.
+- Do not include image files by default. Image attachment metadata may be shown in context only if useful; image upload/vision can be a separate future feature.
+- Do not store API keys in SQLite, sync payloads, exports, or backups.
+
+### AI Chat Interface
+
+The `/ai` route should be a two-pane workspace:
+
+- Left pane:
+  - saved conversations
+  - provider/model badge
+  - last updated time
+  - message count
+  - delete conversation action
+  - New chat action
+- Main pane:
+  - message transcript
+  - streaming assistant response
+  - stop/cancel button during streaming
+  - retry action after errors
+  - provider/model selector
+  - context controls
+  - context preview
+  - message composer
+
+Chat context scopes:
+
+- `search`: resolve context from filters and the user's message.
+- `entry`: include exactly one selected entry.
+- `entries`: include a user-selected ordered list of entries.
+- `thread`: include the visible continuation thread that contains the selected anchor entry.
+
+Context filters:
+
+- text query
+- date range
+- include tags
+- exclude tags
+- include moods
+- exclude moods
+- starred
+- pinned
+- include hidden
+- has images
+- context limit
+- newest/oldest/relevance sort
+
+Useful launch points:
+
+- Start chat from the AI page.
+- Ask about the current Search results.
+- Ask about the current Entry.
+- Ask about selected Entries.
+- Ask about a Thread from the Threads page.
+
+Prompt construction should include:
+
+- entry number and UUID
+- created date/time
+- title, if present
+- summary, if present
+- mood, if present
+- tags, if present
+- thread position/root when relevant
+- entry text/plain text
+
+The prompt should not include unrelated entries merely because they match old fuzzy search behavior. The context preview is the contract: only previewed entries are sent.
+
+### Persistent Conversations
+
+Reuse the existing Capsule database concepts:
+
+- `ai_conversations`
+- `ai_conversation_messages`
+- `sync_ai_conversation_tombstones`
+- `capsule_ai_chats_sync.json`
+
+Conversation rows should store:
+
+- stable conversation UUID
+- cloud provider
+- model used for the latest message or conversation default
+- scope
+- canonical scope identifiers using UUIDs where possible
+- context limit
+- date bounds
+- generated title
+- generated preview
+- created/updated/last-message timestamps
+
+Message rows should store:
+
+- stable message UUID
+- role: `user` or `assistant`
+- content
+- status: `streaming`, `complete`, `interrupted`, or `error`
+- sort key
+- created/updated timestamps
+
+If a stream is interrupted by navigation, app close, cancel, or provider error, preserve the partial assistant message and mark it `interrupted` or `error`. Loading a conversation should convert stale `streaming` messages to `interrupted`.
+
+### Entry Title/Summary Suggestions
+
+The composer and edit page should include a Generate title/summary action for posts.
+
+Behavior:
+
+- Use the selected cloud provider.
+- Send only the current entry draft text and content format.
+- Ask for JSON with `title` and `summary`.
+- Parse strict JSON, including JSON fenced blocks if needed.
+- Reject non-string field values except `null`.
+- Normalize and cap the title at 120 characters.
+- Normalize and cap the summary at 320 characters.
+- Insert into editable fields only after user acceptance.
+- Save through the normal backup-guarded entry create/edit mutation.
+
+### Thread Metadata Suggestions
+
+The Threads page should preserve the old app's useful extra:
+
+- Generate thread title/summary from the full thread, oldest post to newest post.
+- Include hidden entries only if the user has permission and explicitly includes them.
+- Return title, summary, entry count, provider, and model.
+- Save through the normal backup-guarded `update_thread_metadata` command only after user acceptance.
+
+### AI Analysis Follow-On
+
+After chat and metadata suggestions, preserve these old Capsule workflows behind the same provider layer:
+
+- tag suggestion
+- mood suggestion
+- date/tag-filtered journal summaries
+- pattern detection
+- sentiment journey narration
+- AI Time Capsule letters
+- related-entry suggestions using cloud ranking over an explicit context set
+
+These features should share the same privacy, provider/model display, context preview, and explicit-invocation rules.
 
 ## 21. Sync And Import/Export
 
@@ -1421,9 +1792,12 @@ Exit criteria:
 
 ### Phase 6: AI, Sync, Plugins, Gamification
 
-- AI metadata suggestions.
-- AI search if available.
-- AI chat bridge.
+- Cloud AI provider settings for OpenAI, Google Gemini, and OpenRouter.
+- Direct provider readiness checks and model selection.
+- Entry title/summary suggestions in New Entry and Edit Entry.
+- Thread title/summary suggestions in Threads.
+- Scoped AI chat with context preview, filters, persisted conversations, streaming, cancel, retry, and provider/model display.
+- AI analysis follow-ons: summaries, patterns, sentiment journey, Time Capsules, tag/mood suggestions, and related-entry suggestions.
 - Shared-folder sync.
 - GitHub Gist import.
 - Plugin screens.
@@ -1433,7 +1807,8 @@ Exit criteria:
 
 - Advanced features are capability-gated.
 - No cloud request happens without explicit user action/configuration.
-- Python bridge usage is documented and replaceable.
+- AI provider calls use direct Rust/Tauri integration unless a temporary compatibility shim is explicitly documented.
+- Persisted AI chats remain compatible with old Capsule sync sidecars.
 
 ## 27. Build And Run Commands
 
@@ -1529,7 +1904,10 @@ These should be resolved before implementation reaches write support:
 
 - Should hard delete match the current CLI resequencing behavior, or should the Tauri UI default to hide/soft-delete?
 - Should MVP support only plain SQLite, with encrypted databases displayed as locked/unsupported?
-- Should the Python bridge be included in the initial build or introduced only when AI/sync/plugins are tackled?
+- Which Tauri-compatible secret storage should hold OpenAI, Gemini, and OpenRouter API keys?
+- Should AI chat be enabled before AES/SQLCipher write support, or should encrypted databases show AI as unavailable until compatible decryption is native?
+- Should cloud AI context previews support full manual entry picking in the first AI slice, or only current search/entry/thread launch points?
+- Should the first cloud AI implementation use direct Rust HTTP clients for all three providers, or temporarily wrap the old provider modules while the Rust clients are built?
 - Should app settings live only in localStorage/Tauri app data, or should a `capsule_tauri_settings` table eventually be added?
 - Should backup rotation be disabled until after several real-database writes are validated?
 - Should the first implementation use React 19 to match Capsule Web or React 18 to match Music Backup V5?

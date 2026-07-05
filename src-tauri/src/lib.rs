@@ -1,3 +1,4 @@
+mod ai_config;
 mod backup;
 mod db;
 mod entries;
@@ -14,23 +15,25 @@ mod sync;
 mod threads;
 
 use models::{
-    AiMetadataSuggestionRequest, AiMetadataSuggestionResponse, AiOverviewResponse,
-    AnalyticsPeriodRequest, AnalyticsResponse, BackupCreateRequest, BackupCreateResponse,
-    BackupListResponse, BackupRestorePreview, BackupRestorePreviewRequest, BackupRestoreRequest,
-    BackupRestoreResponse, BulkThreadDetachRequest, BulkThreadLinkRequest, CapsuleConfigResponse,
-    ConfigMutationResponse, CoverWallRequest, CoverWallResponse, DatabaseStatus,
-    DeleteEntryResponse, Entry, EntryCreate, EntryFilters, EntryHistoryResponse, EntryListResponse,
-    EntryMutationResponse, EntryUpdate, ExportEntriesRequest, ExportEntriesResponse,
-    GamificationOverviewResponse, ImageAttachRequest, ImageEntriesListResponse,
-    ImageEntryListResponse, ImageMutationResponse, ImageUploadAttachRequest, ImageUploadResponse,
-    ImageVariant, LibraryListResponse, LibraryPromptInput, LibraryPromptMutationResponse,
-    LibraryPromptUpdate, LibraryTemplateInput, LibraryTemplateMutationResponse,
-    LibraryTemplateUpdate, LocationConfigUpdateRequest, MoodCatalogResponse, MoodDeleteRequest,
-    MoodMutationResponse, MoodRenameRequest, PathSettingsResponse, PathSettingsUpdateRequest,
-    PluginOverviewResponse, QuestClaimRequest, QuestClaimResponse, RandomEntryFilters,
-    SearchRequest, SearchResponse, SyncOverviewResponse, SyncRunRequest, SyncRunResponse,
-    TagCatalogResponse, TagDeleteRequest, TagMergeRequest, TagMutationResponse, TagRenameRequest,
-    ThreadListResponse, ThreadMetadataUpdate, ThreadMutationResponse, WritingCalendarResponse,
+    AiApiKeyMutationResponse, AiApiKeyUpdateRequest, AiMetadataSuggestionRequest,
+    AiMetadataSuggestionResponse, AiOverviewResponse, AiProviderStatus, AiSettings,
+    AiSettingsUpdateRequest, AnalyticsPeriodRequest, AnalyticsResponse, BackupCreateRequest,
+    BackupCreateResponse, BackupListResponse, BackupRestorePreview, BackupRestorePreviewRequest,
+    BackupRestoreRequest, BackupRestoreResponse, BulkThreadDetachRequest, BulkThreadLinkRequest,
+    CapsuleConfigResponse, ConfigMutationResponse, CoverWallRequest, CoverWallResponse,
+    DatabaseStatus, DeleteEntryResponse, Entry, EntryCreate, EntryFilters, EntryHistoryResponse,
+    EntryListResponse, EntryMutationResponse, EntryUpdate, ExportEntriesRequest,
+    ExportEntriesResponse, GamificationOverviewResponse, ImageAttachRequest,
+    ImageEntriesListResponse, ImageEntryListResponse, ImageMutationResponse,
+    ImageUploadAttachRequest, ImageUploadResponse, ImageVariant, LibraryListResponse,
+    LibraryPromptInput, LibraryPromptMutationResponse, LibraryPromptUpdate, LibraryTemplateInput,
+    LibraryTemplateMutationResponse, LibraryTemplateUpdate, LocationConfigUpdateRequest,
+    MoodCatalogResponse, MoodDeleteRequest, MoodMutationResponse, MoodRenameRequest,
+    PathSettingsResponse, PathSettingsUpdateRequest, PluginOverviewResponse, QuestClaimRequest,
+    QuestClaimResponse, RandomEntryFilters, SearchRequest, SearchResponse, SyncOverviewResponse,
+    SyncRunRequest, SyncRunResponse, TagCatalogResponse, TagDeleteRequest, TagMergeRequest,
+    TagMutationResponse, TagRenameRequest, ThreadListResponse, ThreadMetadataUpdate,
+    ThreadMutationResponse, WritingCalendarResponse,
 };
 use tauri::{
     menu::MenuBuilder,
@@ -612,6 +615,48 @@ async fn export_entries(input: ExportEntriesRequest) -> Result<ExportEntriesResp
 }
 
 #[tauri::command]
+async fn get_ai_settings() -> Result<AiSettings, String> {
+    tauri::async_runtime::spawn_blocking(ai_config::get_ai_settings)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_ai_provider_status() -> Result<Vec<AiProviderStatus>, String> {
+    tauri::async_runtime::spawn_blocking(ai_config::get_ai_provider_status)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn update_ai_settings(
+    input: AiSettingsUpdateRequest,
+) -> Result<ConfigMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || ai_config::update_ai_settings(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn set_ai_api_key(input: AiApiKeyUpdateRequest) -> Result<AiApiKeyMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || ai_config::set_ai_api_key(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn clear_ai_api_key(provider: String) -> Result<AiApiKeyMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || ai_config::clear_ai_api_key(provider))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn get_ai_overview() -> Result<AiOverviewResponse, String> {
     tauri::async_runtime::spawn_blocking(phase6::get_ai_overview)
         .await
@@ -830,6 +875,11 @@ pub fn run() {
             update_prompt,
             delete_prompt,
             export_entries,
+            get_ai_settings,
+            get_ai_provider_status,
+            update_ai_settings,
+            set_ai_api_key,
+            clear_ai_api_key,
             get_ai_overview,
             suggest_ai_metadata,
             get_sync_overview,

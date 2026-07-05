@@ -3,6 +3,12 @@ import { getVersion } from "@tauri-apps/api/app";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 import packageJson from "../package.json";
 import type {
+  AIApiKeyMutationResponse,
+  AIApiKeyUpdateRequest,
+  AICloudProvider,
+  AIProviderStatus,
+  AISettings,
+  AISettingsUpdateRequest,
   AiMetadataSuggestionRequest,
   AiMetadataSuggestionResponse,
   AiOverviewResponse,
@@ -114,6 +120,16 @@ const defaultMockBackupDirectory = "C:\\Users\\jtill\\.capsule";
 const defaultMockCoverWallRoot = "C:\\_code\\capsule_tauri\\local-assets\\covers";
 const mockImageMediaRoot = "C:\\Users\\jtill\\OneDrive\\_capsule\\images";
 const mockPathSettingsPath = "C:\\Users\\jtill\\AppData\\Roaming\\Capsule\\path_settings.json";
+const geminiModels = ["gemini-3.5-flash", "gemini-3.1-flash-lite-preview"];
+const openAIModels = ["gpt-5.4-mini", "gpt-5.4-nano"];
+const openRouterModels = [
+  "z-ai/glm-5.2",
+  "moonshotai/kimi-k2.5",
+  "qwen/qwen3.7-plus",
+  "deepseek/deepseek-v4-flash",
+  "xiaomi/mimo-v2.5",
+  "minimax/minimax-m3",
+];
 let mockCoverWallRoot = defaultMockCoverWallRoot;
 let mockSyncPath = "C:\\Users\\jtill\\OneDrive\\_capsule\\sync";
 let mockGithubGistId = "";
@@ -121,6 +137,11 @@ let mockGithubGistTokenConfigured = false;
 let mockAutoSyncEnabled = false;
 let mockAutoSyncIntervalMinutes = 15;
 let mockMinimizeToTrayOnClose = false;
+const mockAiKeysConfigured: Record<AICloudProvider, boolean> = {
+  gemini: false,
+  openai: false,
+  openrouter: false,
+};
 
 let mockStatus: DatabaseStatus = {
   dbPath: defaultMockDatabasePath,
@@ -167,6 +188,11 @@ let mockConfig: CapsuleConfigResponse = {
   configPath: "C:\\Users\\jtill\\.capsule\\config.json",
   exists: true,
   values: [
+    { key: "cloud_provider", value: "gemini" },
+    { key: "gemini_model", value: "gemini-3.5-flash" },
+    { key: "openai_model", value: "gpt-5.4-mini" },
+    { key: "openrouter_model", value: "moonshotai/kimi-k2.5" },
+    { key: "ai_chat_context_limit", value: "all" },
     { key: "images.media_root", value: "C:\\Users\\jtill\\OneDrive\\_capsule\\images" },
     { key: "backup_count", value: "3" },
     { key: "theme", value: "system" },
@@ -1007,6 +1033,132 @@ export async function setLocationConfig(
   }
 }
 
+export async function getAiSettings(): Promise<AISettings> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<AISettings>("get_ai_settings");
+    }
+
+    await pause(120);
+    return mockAiSettings();
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function getAiProviderStatus(): Promise<AIProviderStatus[]> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<AIProviderStatus[]>("get_ai_provider_status");
+    }
+
+    await pause(120);
+    return mockAiProviderStatuses();
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function updateAiSettings(
+  input: AISettingsUpdateRequest,
+): Promise<ConfigMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<ConfigMutationResponse>("update_ai_settings", { input });
+    }
+
+    await pause(180);
+    if (input.defaultContextLimit !== null && input.defaultContextLimit < 1) {
+      throw new Error("Default context limit must be a positive integer or all.");
+    }
+    const nextValues = mockConfig.values.filter(
+      (item) =>
+        ![
+          "cloud_provider",
+          "gemini_model",
+          "openai_model",
+          "openrouter_model",
+          "ai_chat_context_limit",
+          "ai_chat_context_since",
+          "ai_chat_context_until",
+        ].includes(item.key),
+    );
+    nextValues.push({ key: "cloud_provider", value: input.cloudProvider });
+    nextValues.push({ key: "gemini_model", value: normalizeLegacyModel(input.geminiModel) });
+    nextValues.push({ key: "openai_model", value: normalizeLegacyModel(input.openaiModel) });
+    nextValues.push({
+      key: "openrouter_model",
+      value: normalizeLegacyModel(input.openrouterModel),
+    });
+    nextValues.push({
+      key: "ai_chat_context_limit",
+      value: input.defaultContextLimit === null ? "all" : String(input.defaultContextLimit),
+    });
+    if (input.defaultSince) {
+      nextValues.push({ key: "ai_chat_context_since", value: input.defaultSince });
+    }
+    if (input.defaultUntil) {
+      nextValues.push({ key: "ai_chat_context_until", value: input.defaultUntil });
+    }
+    mockConfig = {
+      ...mockConfig,
+      exists: true,
+      values: nextValues.sort((a, b) => a.key.localeCompare(b.key)),
+    };
+    return {
+      config: mockConfig,
+      backupPath: "C:\\Users\\jtill\\.capsule\\config_backup_20260705_120000.json",
+      operation: "config.ai.set",
+      completedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function setAiApiKey(
+  input: AIApiKeyUpdateRequest,
+): Promise<AIApiKeyMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<AIApiKeyMutationResponse>("set_ai_api_key", { input });
+    }
+
+    await pause(160);
+    if (!input.apiKey.trim()) {
+      throw new Error("API key cannot be empty.");
+    }
+    mockAiKeysConfigured[input.provider] = true;
+    return {
+      providerStatus: mockAiProviderStatuses().find(
+        (status) => status.provider === input.provider,
+      )!,
+      completedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function clearAiApiKey(
+  provider: AICloudProvider,
+): Promise<AIApiKeyMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<AIApiKeyMutationResponse>("clear_ai_api_key", { provider });
+    }
+
+    await pause(120);
+    mockAiKeysConfigured[provider] = false;
+    return {
+      providerStatus: mockAiProviderStatuses().find((status) => status.provider === provider)!,
+      completedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
 export async function listTags(): Promise<TagCatalogResponse> {
   try {
     if (runningInTauri()) {
@@ -1373,10 +1525,27 @@ export async function getAiOverview(): Promise<AiOverviewResponse> {
     }
 
     await pause(160);
+    const settings = mockAiSettings();
+    const activeStatus = mockAiProviderStatuses().find(
+      (status) => status.provider === settings.cloudProvider,
+    );
     return {
-      provider: "local",
-      model: "mock-read-model",
-      capabilities: phase6Capabilities.ai,
+      provider: settings.cloudProvider,
+      model: activeStatus?.selectedModel ?? settings.geminiModel,
+      capabilities: [
+        {
+          key: "cloud-ai-provider",
+          label: "Cloud AI provider",
+          available: true,
+          configured: Boolean(activeStatus?.configured),
+          requiresCloud: true,
+          readOnly: true,
+          detail: activeStatus?.configured
+            ? "The selected cloud provider has a redacted API key source configured."
+            : "Configure the selected provider API key in Settings before live cloud AI actions.",
+        },
+        ...phase6Capabilities.ai,
+      ],
       conversations: [
         {
           id: 1,
@@ -2526,6 +2695,118 @@ function mockPathSettings(): PathSettingsResponse {
     settingsPath: mockPathSettingsPath,
     warnings: [],
   };
+}
+
+function mockAiSettings(): AISettings {
+  const cloudProvider = normalizeMockProvider(
+    mockConfig.values.find((item) => item.key === "cloud_provider")?.value,
+  );
+  const geminiModel = normalizeMockModel(
+    mockConfig.values.find((item) => item.key === "gemini_model")?.value,
+    geminiModels,
+    "gemini-3.5-flash",
+  );
+  const openaiModel = normalizeMockModel(
+    mockConfig.values.find((item) => item.key === "openai_model")?.value,
+    openAIModels,
+    "gpt-5.4-mini",
+  );
+  const openrouterModel = normalizeMockModel(
+    mockConfig.values.find((item) => item.key === "openrouter_model")?.value,
+    openRouterModels,
+    "moonshotai/kimi-k2.5",
+  );
+  return {
+    cloudProvider,
+    geminiModel,
+    openaiModel,
+    openrouterModel,
+    defaultContextLimit: parseMockContextLimit(
+      mockConfig.values.find((item) => item.key === "ai_chat_context_limit")?.value,
+    ),
+    defaultSince:
+      normalizeNullable(
+        mockConfig.values.find((item) => item.key === "ai_chat_context_since")?.value,
+      ) ?? null,
+    defaultUntil:
+      normalizeNullable(
+        mockConfig.values.find((item) => item.key === "ai_chat_context_until")?.value,
+      ) ?? null,
+    warnings: [],
+  };
+}
+
+function mockAiProviderStatuses(): AIProviderStatus[] {
+  const settings = mockAiSettings();
+  const baseStatuses: Array<
+    Pick<AIProviderStatus, "provider" | "label" | "selectedModel" | "availableModels">
+  > = [
+    {
+      provider: "gemini",
+      label: "Google Gemini",
+      selectedModel: settings.geminiModel,
+      availableModels: geminiModels,
+    },
+    {
+      provider: "openai",
+      label: "OpenAI",
+      selectedModel: settings.openaiModel,
+      availableModels: openAIModels,
+    },
+    {
+      provider: "openrouter",
+      label: "OpenRouter",
+      selectedModel: settings.openrouterModel,
+      availableModels: openRouterModels,
+    },
+  ];
+
+  return baseStatuses.map((status) => ({
+    ...status,
+    configured: mockAiKeysConfigured[status.provider],
+    keySource: mockAiKeysConfigured[status.provider] ? "OS credential store" : null,
+    missingReason: mockAiKeysConfigured[status.provider]
+      ? null
+      : `${providerEnvKey(status.provider)} is not configured in the OS credential store, environment, or local .env.`,
+  }));
+}
+
+function normalizeMockProvider(value: string | null | undefined): AICloudProvider {
+  return value === "openai" || value === "openrouter" || value === "gemini" ? value : "gemini";
+}
+
+function normalizeMockModel(
+  value: string | null | undefined,
+  availableModels: string[],
+  defaultModel: string,
+) {
+  const normalized = normalizeLegacyModel(value ?? "");
+  return availableModels.includes(normalized) ? normalized : defaultModel;
+}
+
+function normalizeLegacyModel(value: string) {
+  return {
+    "gemini-3-flash-preview": "gemini-3.5-flash",
+    "z-ai/glm-5.1": "z-ai/glm-5.2",
+    "qwen/qwen3.5-397b-a17b": "qwen/qwen3.7-plus",
+  }[value.trim()] ?? value.trim();
+}
+
+function parseMockContextLimit(value: string | null | undefined) {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized || ["all", "none", "unlimited", "max"].includes(normalized)) {
+    return null;
+  }
+  const parsed = Number(normalized);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function providerEnvKey(provider: AICloudProvider) {
+  return {
+    gemini: "GEMINI_API_KEY",
+    openai: "OPENAI_API_KEY",
+    openrouter: "OPENROUTER_API_KEY",
+  }[provider];
 }
 
 function upsertConfigValue(

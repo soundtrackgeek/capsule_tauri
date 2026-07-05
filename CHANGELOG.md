@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.22.1 - 2026-07-05
+
+### Added
+
+- Added Cloud AI Settings for Gemini, OpenAI, and OpenRouter provider/model
+  selection, chat context defaults, and redacted API key status backed by the OS
+  credential store.
+- Added updated Gemini and OpenRouter model lists with legacy model ID
+  replacement for saved configuration values.
+
+### Changed
+
+- Bumped the app version to 0.22.1.
+
 ## 0.22.0 - 2026-07-04
 
 ### Added

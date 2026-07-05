@@ -531,7 +531,15 @@ fn mutate_capsule_config(
     mutate: impl FnOnce(&mut Map<String, JsonValue>) -> Result<()>,
 ) -> Result<ConfigMutationResponse> {
     let db_path = db::resolve_database_path();
-    let config_path = config_path_for_database(&db_path);
+    mutate_capsule_config_for_database(&db_path, operation, mutate)
+}
+
+pub(crate) fn mutate_capsule_config_for_database(
+    db_path: &Path,
+    operation: &str,
+    mutate: impl FnOnce(&mut Map<String, JsonValue>) -> Result<()>,
+) -> Result<ConfigMutationResponse> {
+    let config_path = config_path_for_database(db_path);
     let mut object = if config_path.exists() {
         read_config_object(&config_path)?
     } else {
@@ -551,14 +559,14 @@ fn mutate_capsule_config(
     .with_context(|| format!("failed to write {}", config_path.display()))?;
 
     Ok(ConfigMutationResponse {
-        config: get_capsule_config_for_database(&db_path)?,
+        config: get_capsule_config_for_database(db_path)?,
         backup_path: backup_path.map(|path| db::path_to_string(&path)),
         operation: operation.to_string(),
         completed_at: Utc::now().to_rfc3339(),
     })
 }
 
-fn config_path_for_database(db_path: &Path) -> PathBuf {
+pub(crate) fn config_path_for_database(db_path: &Path) -> PathBuf {
     if let Ok(path) = env::var("CAPSULE_CONFIG_PATH") {
         let path = path.trim();
         if !path.is_empty() {

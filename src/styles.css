@@ -2280,8 +2280,47 @@ button:active:not(:disabled) {
   grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
+.settings-form-grid--ai {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .settings-form-grid .field--wide {
   grid-column: 1 / -1;
+}
+
+.ai-key-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.ai-key-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.7fr) minmax(0, 1.3fr);
+  gap: 12px;
+  align-items: end;
+  border: 1px solid #e1e7e2;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.ai-key-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 34px;
+  gap: 8px;
+  align-items: center;
+}
+
+.ai-key-actions input {
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+}
+
+.token-status-row em {
+  color: #7a8a80;
+  font-style: normal;
+  line-height: 1.35;
 }
 
 .catalog-cloud {
@@ -2974,6 +3013,8 @@ button:active:not(:disabled) {
     .phase6-grid,
     .phase6-grid--three,
     .settings-form-grid,
+    .ai-key-row,
+    .ai-key-actions,
     .composer-view {
     grid-template-columns: 1fr;
   }

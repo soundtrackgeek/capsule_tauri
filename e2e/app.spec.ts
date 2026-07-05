@@ -116,3 +116,32 @@ test("requires sync safety confirmation before manual sync", async ({ page }) =>
 
   expect(browserErrors).toEqual([]);
 });
+
+test("configures Cloud AI settings without exposing API keys", async ({ page }) => {
+  const browserErrors = trackBrowserErrors(page);
+
+  await page.goto("/");
+  await page
+    .getByRole("navigation", { name: "Primary" })
+    .getByRole("button", { name: "Settings" })
+    .click();
+
+  await expect(page.getByRole("heading", { name: "Cloud AI" })).toBeVisible();
+  await page.getByLabel("Provider").selectOption("openrouter");
+  await page.getByLabel("OpenRouter model").selectOption("deepseek/deepseek-v4-flash");
+  await page.getByLabel("Context limit").fill("12");
+  await page.getByRole("button", { name: "Save Cloud AI" }).click();
+
+  await expect(page.getByRole("status")).toContainText("Saved Cloud AI settings");
+  await expect(page.locator(".detail-list").filter({ hasText: "Active model" })).toContainText(
+    "deepseek/deepseek-v4-flash",
+  );
+
+  const geminiKeyRow = page.locator(".ai-key-row").filter({ hasText: "Google Gemini" });
+  await geminiKeyRow.getByLabel("Google Gemini API key").fill("mock-gemini-key");
+  await geminiKeyRow.getByRole("button", { name: "Save" }).click();
+  await expect(geminiKeyRow).toContainText("Configured");
+  await expect(geminiKeyRow).not.toContainText("mock-gemini-key");
+
+  expect(browserErrors).toEqual([]);
+});

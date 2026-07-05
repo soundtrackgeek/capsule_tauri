@@ -1,6 +1,6 @@
 [package]
 name = "capsule-tauri"
-version = "0.22.0"
+version = "0.22.1"
 description = "Capsule desktop app"
 authors = ["Capsule"]
 edition = "2021"
@@ -17,6 +17,8 @@ anyhow = "1"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+dotenvy = "0.15"
+keyring = "4.1"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "native-tls-no-alpn"] }
 rfd = "0.15"
 rusqlite = { version = "0.37", features = ["backup", "bundled"] }

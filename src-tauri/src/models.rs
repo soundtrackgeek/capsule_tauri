@@ -204,6 +204,57 @@ pub struct PathSettingsUpdateRequest {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AiSettings {
+    pub cloud_provider: String,
+    pub openai_model: String,
+    pub gemini_model: String,
+    pub openrouter_model: String,
+    pub default_context_limit: Option<i64>,
+    pub default_since: Option<String>,
+    pub default_until: Option<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSettingsUpdateRequest {
+    pub cloud_provider: String,
+    pub openai_model: String,
+    pub gemini_model: String,
+    pub openrouter_model: String,
+    pub default_context_limit: Option<i64>,
+    pub default_since: Option<String>,
+    pub default_until: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiProviderStatus {
+    pub provider: String,
+    pub label: String,
+    pub configured: bool,
+    pub selected_model: String,
+    pub available_models: Vec<String>,
+    pub missing_reason: Option<String>,
+    pub key_source: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiApiKeyUpdateRequest {
+    pub provider: String,
+    pub api_key: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiApiKeyMutationResponse {
+    pub provider_status: AiProviderStatus,
+    pub completed_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TagUsage {
     pub id: i64,
     pub name: String,

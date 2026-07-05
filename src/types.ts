@@ -131,6 +131,49 @@ export type PathSettingsUpdateRequest = {
   minimizeToTrayOnClose?: boolean | null;
 };
 
+export type AICloudProvider = "openai" | "gemini" | "openrouter";
+
+export type AISettings = {
+  cloudProvider: AICloudProvider;
+  openaiModel: string;
+  geminiModel: string;
+  openrouterModel: string;
+  defaultContextLimit: number | null;
+  defaultSince: string | null;
+  defaultUntil: string | null;
+  warnings: string[];
+};
+
+export type AISettingsUpdateRequest = {
+  cloudProvider: AICloudProvider;
+  openaiModel: string;
+  geminiModel: string;
+  openrouterModel: string;
+  defaultContextLimit: number | null;
+  defaultSince: string | null;
+  defaultUntil: string | null;
+};
+
+export type AIProviderStatus = {
+  provider: AICloudProvider;
+  label: string;
+  configured: boolean;
+  selectedModel: string;
+  availableModels: string[];
+  missingReason: string | null;
+  keySource: string | null;
+};
+
+export type AIApiKeyUpdateRequest = {
+  provider: AICloudProvider;
+  apiKey: string;
+};
+
+export type AIApiKeyMutationResponse = {
+  providerStatus: AIProviderStatus;
+  completedAt: string;
+};
+
 export type TagUsage = {
   id: number;
   name: string;
