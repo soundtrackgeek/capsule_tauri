@@ -635,31 +635,228 @@ fn diagnostic_readme() -> String {
 }
 
 fn environment_summary() -> String {
-    let names = [
+    let env_names = [
         "CAPSULE_DB_PATH",
         "CAPSULE_IMAGES_MEDIA_ROOT",
+        "CAPSULE_COVERS_ROOT",
         "CAPSULE_BACKUP_DIR",
         "CAPSULE_SYNC_PATH",
         "CAPSULE_GITHUB_GIST_ID",
         "CAPSULE_GITHUB_GIST_TOKEN",
+        "CAPSULE_PATH_SETTINGS_PATH",
         "CAPSULE_CONFIG_PATH",
         "CAPSULE_ENV_PATH",
         "OPENAI_API_KEY",
         "GEMINI_API_KEY",
         "OPENROUTER_API_KEY",
     ];
-    let values = names
-        .into_iter()
-        .map(|name| {
-            let state = std::env::var(name)
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-                .map(|_| "set")
-                .unwrap_or("not set");
-            format!("{name}: {state}")
-        })
-        .collect::<Vec<_>>();
-    values.join("\n") + "\n"
+    let db_path = db::resolve_database_path();
+    let local_settings = db::read_local_path_settings();
+    let config_path = settings::config_path_for_database(&db_path);
+    let image_media_root =
+        images::get_image_media_root().unwrap_or_else(|error| format!("unavailable ({error})"));
+    let sync_path = env_setting("CAPSULE_SYNC_PATH").or_else(|| local_settings.sync_path.clone());
+    let github_gist_id =
+        env_setting("CAPSULE_GITHUB_GIST_ID").or_else(|| local_settings.github_gist_id.clone());
+    let auto_sync_enabled = local_settings.auto_sync_enabled.unwrap_or(false);
+    let auto_sync_interval_minutes = local_settings
+        .auto_sync_interval_minutes
+        .unwrap_or(15)
+        .clamp(1, 24 * 60);
+
+    let mut lines = Vec::new();
+    lines.push("Environment overrides (process only)".to_string());
+    lines.push(
+        "If these are not set, Capsule may still be using saved Settings values, defaults, OS credential store keys, or local .env keys."
+            .to_string(),
+    );
+    lines.extend(
+        env_names
+            .into_iter()
+            .map(|name| format!("{name}: {}", env_state(name))),
+    );
+    lines.push(String::new());
+    lines.push("Effective Capsule settings".to_string());
+    lines.push(format!("Database path: {}", db::path_to_string(&db_path)));
+    lines.push(format!("Image media root: {image_media_root}"));
+    lines.push(format!(
+        "Cover Wall image root: {}",
+        images::get_cover_wall_root()
+    ));
+    lines.push(format!(
+        "Backup directory: {}",
+        db::path_to_string(&db::backup_directory_for_database(&db_path))
+    ));
+    lines.push(format!(
+        "Sync folder: {}",
+        display_optional_setting(sync_path.as_deref())
+    ));
+    lines.push(format!(
+        "GitHub Gist ID: {}",
+        display_redacted_identifier(github_gist_id.as_deref())
+    ));
+    lines.push(format!(
+        "GitHub Gist token: {}",
+        configured_source(
+            "CAPSULE_GITHUB_GIST_TOKEN",
+            local_settings.github_gist_token.as_deref(),
+            "saved settings"
+        )
+    ));
+    lines.push(format!(
+        "Auto sync: {}",
+        if auto_sync_enabled {
+            format!("enabled every {auto_sync_interval_minutes} minutes")
+        } else {
+            "disabled".to_string()
+        }
+    ));
+    lines.push(format!(
+        "Local path settings file: {}",
+        db::path_to_string(&db::local_path_settings_path())
+    ));
+    lines.push(format!(
+        "Capsule config file: {}",
+        db::path_to_string(&config_path)
+    ));
+    lines.push(String::new());
+    lines.extend(ai_environment_summary_lines(&db_path));
+    lines.join("\n") + "\n"
+}
+
+fn ai_environment_summary_lines(db_path: &Path) -> Vec<String> {
+    let mut lines = vec!["AI settings".to_string()];
+    let settings = match ai_config::get_ai_settings_for_database(db_path) {
+        Ok(settings) => settings,
+        Err(error) => {
+            lines.push(format!("AI settings: unavailable ({error})"));
+            return lines;
+        }
+    };
+    let provider_statuses = match ai_config::get_ai_provider_status() {
+        Ok(statuses) => statuses,
+        Err(error) => {
+            lines.push(format!("Provider status: unavailable ({error})"));
+            Vec::new()
+        }
+    };
+    let selected_provider_label = provider_statuses
+        .iter()
+        .find(|status| status.provider == settings.cloud_provider)
+        .map(|status| status.label.as_str())
+        .unwrap_or(settings.cloud_provider.as_str());
+    let selected_model =
+        ai_config::selected_model_for_provider(&settings, &settings.cloud_provider);
+
+    lines.push(format!(
+        "Selected provider: {selected_provider_label} ({})",
+        settings.cloud_provider
+    ));
+    lines.push(format!("Selected model: {selected_model}"));
+    lines.push(format!(
+        "Default context limit: {}",
+        settings
+            .default_context_limit
+            .map(|limit| limit.to_string())
+            .unwrap_or_else(|| "all".to_string())
+    ));
+    lines.push(format!(
+        "Default since: {}",
+        settings.default_since.as_deref().unwrap_or("not set")
+    ));
+    lines.push(format!(
+        "Default until: {}",
+        settings.default_until.as_deref().unwrap_or("not set")
+    ));
+    for warning in &settings.warnings {
+        lines.push(format!("AI settings warning: {warning}"));
+    }
+    lines.push(String::new());
+    lines.push("AI credential status".to_string());
+    if provider_statuses.is_empty() {
+        lines.push("Provider status: unavailable".to_string());
+        return lines;
+    }
+    for status in provider_statuses {
+        let state = if status.configured {
+            format!(
+                "configured via {}",
+                status.key_source.as_deref().unwrap_or("unknown source")
+            )
+        } else {
+            "not configured".to_string()
+        };
+        lines.push(format!(
+            "{}: {state} (model: {})",
+            status.label, status.selected_model
+        ));
+        if !status.configured {
+            if let Some(reason) = status.missing_reason {
+                lines.push(format!("{} detail: {reason}", status.label));
+            }
+        }
+    }
+    lines
+}
+
+fn env_state(name: &str) -> &'static str {
+    if env_setting(name).is_some() {
+        "set"
+    } else {
+        "not set"
+    }
+}
+
+fn env_setting(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| normalize_summary_string(Some(&value)))
+}
+
+fn configured_source(env_name: &str, saved_value: Option<&str>, saved_label: &str) -> String {
+    if env_setting(env_name).is_some() {
+        return "configured via environment".to_string();
+    }
+    if normalize_summary_string(saved_value).is_some() {
+        return format!("configured via {saved_label}");
+    }
+    "not configured".to_string()
+}
+
+fn display_optional_setting(value: Option<&str>) -> String {
+    normalize_summary_string(value).unwrap_or_else(|| "not configured".to_string())
+}
+
+fn display_redacted_identifier(value: Option<&str>) -> String {
+    match normalize_summary_string(value) {
+        Some(value) => format!("configured ({})", redact_identifier(&value)),
+        None => "not configured".to_string(),
+    }
+}
+
+fn redact_identifier(value: &str) -> String {
+    let value = value.trim();
+    let char_count = value.chars().count();
+    if char_count <= 8 {
+        return "[configured]".to_string();
+    }
+    let prefix = value.chars().take(4).collect::<String>();
+    let suffix = value
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    format!("{prefix}...{suffix}")
+}
+
+fn normalize_summary_string(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn write_zip(path: &Path, items: &[ZipItem]) -> Result<()> {
@@ -809,5 +1006,14 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].name, "debug.log");
         assert!(String::from_utf8_lossy(&items[0].bytes).contains("No debug log entries"));
+    }
+
+    #[test]
+    fn redacted_identifier_keeps_diagnostic_hint_without_full_value() {
+        assert_eq!(
+            redact_identifier("5f3d7920150f11c4578bdcf97cb8e4b1"),
+            "5f3d...e4b1"
+        );
+        assert_eq!(redact_identifier("short"), "[configured]");
     }
 }

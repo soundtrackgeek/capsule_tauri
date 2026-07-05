@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.24.2 - 2026-07-05
+
+### Fixed
+
+- Fixed diagnostics `environment.txt` so it distinguishes process environment
+  overrides from saved Capsule settings and OS credential store AI keys.
+
+### Changed
+
+- Bumped the app version to 0.24.2.
+
 ## 0.24.1 - 2026-07-05
 
 ### Fixed
