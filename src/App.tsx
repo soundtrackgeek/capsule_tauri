@@ -111,6 +111,7 @@ import {
   setCapsuleConfigValue,
   setLocationConfig,
   setPathSettings,
+  suggestAiEntryMetadata,
   updateAiSettings,
   starEntry,
   startAiChatStream,
@@ -164,6 +165,7 @@ import type {
   AIProviderStatus,
   AISettings,
   AISettingsUpdateRequest,
+  AiEntryMetadataSuggestionResponse,
   BackupInfo,
   BackupRestorePreview,
   CapsuleConfigResponse,
@@ -627,6 +629,8 @@ function App() {
   const [composerEntryImages, setComposerEntryImages] = useState<ImageEntryListResponse | null>(
     null,
   );
+  const [composerAiSuggestion, setComposerAiSuggestion] =
+    useState<AiEntryMetadataSuggestionResponse | null>(null);
   const [draftRecovered, setDraftRecovered] = useState(false);
   const [writerSettings, setWriterSettings] = useState<WriterSettings>(defaultWriterSettings);
   const [uiSettings, setUiSettings] = useState<UiSettings>(defaultUiSettings);
@@ -655,6 +659,7 @@ function App() {
   const [imageDetailLoading, setImageDetailLoading] = useState(false);
   const [imageMutating, setImageMutating] = useState(false);
   const [composerImagesLoading, setComposerImagesLoading] = useState(false);
+  const [composerAiSuggesting, setComposerAiSuggesting] = useState(false);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [coverLoading, setCoverLoading] = useState(false);
@@ -1763,6 +1768,7 @@ function App() {
     setEditingEntry(null);
     setComposerEntryImages(null);
     setComposerImageDrafts([]);
+    setComposerAiSuggestion(null);
     setComposerDraft((current) =>
       composerMode === "create" && draftHasContent(current) ? current : emptyComposerDraft,
     );
@@ -1775,6 +1781,7 @@ function App() {
     setComposerDraft(draftFromEntry(entry));
     setComposerEntryImages(null);
     setComposerImageDrafts([]);
+    setComposerAiSuggestion(null);
     setDraftRecovered(false);
     setActiveView("composer");
   }, []);
@@ -1784,6 +1791,7 @@ function App() {
     setEditingEntry(null);
     setComposerEntryImages(null);
     setComposerImageDrafts([]);
+    setComposerAiSuggestion(null);
     setComposerDraft({
       ...emptyComposerDraft,
       continueFromUuid: entry.uuid,
@@ -1934,6 +1942,92 @@ function App() {
     }
   }, [aiSuggestionIdentifier, recentEntries, selectedEntry?.uuid]);
 
+  const ensureAiMetadataPrivacyConfirmed = useCallback(async () => {
+    if (
+      capsuleConfig?.values.some(
+        (item) => item.key === "ai_metadata_privacy_confirmed_at" && item.value.trim(),
+      )
+    ) {
+      return true;
+    }
+
+    const confirmed = window.confirm(
+      "Generating a title and summary sends the current draft text to the selected cloud provider. Image files and API keys are not sent.",
+    );
+    if (!confirmed) {
+      return false;
+    }
+
+    const timestamp = new Date().toISOString();
+    const response = await setCapsuleConfigValue("ai_metadata_privacy_confirmed_at", timestamp);
+    setCapsuleConfig(response.config);
+    return true;
+  }, [capsuleConfig]);
+
+  const handleSuggestComposerMetadata = useCallback(async () => {
+    if (!composerDraft.text.trim()) {
+      setError("Entry text is required before generating metadata.");
+      return;
+    }
+
+    const provider = aiSettings?.cloudProvider ?? "gemini";
+    const providerStatus =
+      aiProviderStatuses.find((status) => status.provider === provider) ?? null;
+    if (isTauriRuntime() && !providerStatus?.configured) {
+      setError(`Configure ${providerEnvLabel(provider)} before generating metadata.`);
+      return;
+    }
+
+    setComposerAiSuggesting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      if (!(await ensureAiMetadataPrivacyConfirmed())) {
+        return;
+      }
+      const model =
+        providerStatus?.selectedModel ??
+        (aiSettings ? selectedDraftModel(aiSettings) : null);
+      const response = await suggestAiEntryMetadata({
+        text: composerDraft.text,
+        contentFormat: "markdown",
+        cloudProvider: provider,
+        model,
+      });
+      setComposerAiSuggestion(response);
+      setNotice(
+        `Generated title and summary with ${providerEnvLabel(response.cloudProvider)} / ${response.model}.`,
+      );
+    } catch (suggestError) {
+      setError(
+        suggestError instanceof Error
+          ? suggestError.message
+          : "Unable to generate title and summary",
+      );
+    } finally {
+      setComposerAiSuggesting(false);
+    }
+  }, [
+    aiProviderStatuses,
+    aiSettings,
+    composerDraft.text,
+    ensureAiMetadataPrivacyConfirmed,
+  ]);
+
+  const handleApplyComposerMetadataSuggestion = useCallback(() => {
+    if (!composerAiSuggestion) {
+      return;
+    }
+
+    setComposerDraft((current) => ({
+      ...current,
+      title: composerAiSuggestion.title ?? current.title,
+      summary: composerAiSuggestion.summary ?? current.summary,
+    }));
+    setNotice("Applied AI title and summary to the draft.");
+    setComposerAiSuggestion(null);
+  }, [composerAiSuggestion]);
+
   const handleClaimQuest = useCallback(
     async (quest: GamificationQuest) => {
       setQuestMutating(true);
@@ -2025,6 +2119,7 @@ function App() {
         setComposerMode("edit");
         setEditingEntry(response.entry);
         setComposerDraft(draftFromEntry(response.entry));
+        setComposerAiSuggestion(null);
         window.localStorage.removeItem(draftStorageKey);
         setDraftRecovered(false);
         setError(
@@ -2040,6 +2135,7 @@ function App() {
         setDraftRecovered(false);
       }
       setComposerImageDrafts([]);
+      setComposerAiSuggestion(null);
       await applyMutationResponse(response);
       if (attachedCount > 0) {
         const noun = attachedCount === 1 ? "image" : "images";
@@ -2719,15 +2815,26 @@ function App() {
             imagesMutating={imageMutating}
             mode={composerMode}
             moodCatalog={moodCatalog}
+            aiProviderStatuses={aiProviderStatuses}
+            aiSettings={aiSettings}
+            aiSuggestion={composerAiSuggestion}
+            aiSuggesting={composerAiSuggesting}
             onAddImageDraft={handleAddComposerImageDraft}
+            onApplyAiSuggestion={handleApplyComposerMetadataSuggestion}
             onBrowseImagePath={handleBrowseImagePath}
             onCancel={() => setActiveView("entries")}
             onChangeImageDraft={handleChangeComposerImageDraft}
-            onChange={setComposerDraft}
+            onChange={(next) => {
+              if (next.text !== composerDraft.text) {
+                setComposerAiSuggestion(null);
+              }
+              setComposerDraft(next);
+            }}
             onOpenWriter={() => setActiveView("writer")}
             onRemoveExistingImage={handleRemoveComposerImage}
             onRemoveImageDraft={handleRemoveComposerImageDraft}
             onSave={handleSaveEntry}
+            onSuggestAiMetadata={handleSuggestComposerMetadata}
             saving={savingEntry}
             status={status}
             tagCatalog={tagCatalog}
@@ -4289,9 +4396,14 @@ type ComposerViewProps = {
   draft: ComposerDraft;
   moodCatalog: MoodCatalogResponse | null;
   tagCatalog: TagCatalogResponse | null;
+  aiSettings: AISettings | null;
+  aiProviderStatuses: AIProviderStatus[];
+  aiSuggestion: AiEntryMetadataSuggestionResponse | null;
   imageDrafts: ComposerImageDraft[];
   existingImages: ImageEntryListResponse | null;
   onChange: (next: ComposerDraft) => void;
+  onSuggestAiMetadata: () => void;
+  onApplyAiSuggestion: () => void;
   onAddImageDraft: () => void;
   onChangeImageDraft: (id: string, next: ImageUploadDraft) => void;
   onRemoveImageDraft: (id: string) => void;
@@ -4301,6 +4413,7 @@ type ComposerViewProps = {
   onCancel: () => void;
   onOpenWriter: () => void;
   saving: boolean;
+  aiSuggesting: boolean;
   imagesLoading: boolean;
   imagesMutating: boolean;
 };
@@ -4312,9 +4425,14 @@ function ComposerView({
   draft,
   moodCatalog,
   tagCatalog,
+  aiSettings,
+  aiProviderStatuses,
+  aiSuggestion,
   imageDrafts,
   existingImages,
   onChange,
+  onSuggestAiMetadata,
+  onApplyAiSuggestion,
   onAddImageDraft,
   onChangeImageDraft,
   onRemoveImageDraft,
@@ -4324,6 +4442,7 @@ function ComposerView({
   onCancel,
   onOpenWriter,
   saving,
+  aiSuggesting,
   imagesLoading,
   imagesMutating,
 }: ComposerViewProps) {
@@ -4386,6 +4505,13 @@ function ComposerView({
     [composerTagCatalog?.tags],
   );
   const stats = writingStats(draft.text);
+  const activeAiProvider = aiSettings?.cloudProvider ?? "gemini";
+  const activeAiStatus =
+    aiProviderStatuses.find((status) => status.provider === activeAiProvider) ?? null;
+  const aiProviderReady = Boolean(activeAiStatus?.configured) || !isTauriRuntime();
+  const aiProviderLabel = `${providerEnvLabel(activeAiProvider)} / ${
+    activeAiStatus?.selectedModel ?? (aiSettings ? selectedDraftModel(aiSettings) : "")
+  }`;
 
   if (status && (!status.dbExists || !status.readable)) {
     return (
@@ -4449,7 +4575,53 @@ function ComposerView({
       </div>
 
       <aside className="composer-side">
-        <Panel icon={<FileText size={20} />} title="Metadata">
+        <Panel
+          action={
+            <button
+              className="secondary-button secondary-button--small"
+              disabled={aiSuggesting || !draft.text.trim() || !aiProviderReady}
+              onClick={onSuggestAiMetadata}
+              title={
+                aiProviderReady
+                  ? `Generate title and summary with ${aiProviderLabel}`
+                  : `Configure ${providerEnvLabel(activeAiProvider)} first`
+              }
+              type="button"
+            >
+              <Sparkles size={14} />
+              {aiSuggesting ? "Generating" : "Generate"}
+            </button>
+          }
+          icon={<FileText size={20} />}
+          title="Metadata"
+        >
+          {aiSuggestion && (
+            <div className="suggestion-card composer-ai-suggestion">
+              <div className="metadata-heading-row">
+                <h4>AI Suggestion</h4>
+                <StatusPill tone="neutral">
+                  {providerEnvLabel(aiSuggestion.cloudProvider)} / {aiSuggestion.model}
+                </StatusPill>
+              </div>
+              <dl className="detail-list detail-list--compact">
+                {aiSuggestion.title && (
+                  <Detail label="Title" value={aiSuggestion.title} />
+                )}
+                {aiSuggestion.summary && (
+                  <Detail label="Summary" value={aiSuggestion.summary} />
+                )}
+              </dl>
+              <WarningList warnings={aiSuggestion.warnings} />
+              <button
+                className="secondary-button secondary-button--full"
+                onClick={onApplyAiSuggestion}
+                type="button"
+              >
+                <CheckCircle2 size={16} />
+                Apply
+              </button>
+            </div>
+          )}
           <div className="composer-meta-grid">
             <label className="field">
               <span>Summary</span>

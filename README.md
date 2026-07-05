@@ -36,7 +36,9 @@ explicit capability-gated AI/sync surfaces:
 - Full-page markdown composer with metadata fields, mood autocomplete,
   chip-style tag entry with autocomplete and Tab/Enter pill creation, save-time
   entry dating, continuation UUID support, multi-select queued local image
-  attachments with thumbnail previews, writing stats, and local draft recovery.
+  attachments with thumbnail previews, writing stats, local draft recovery, and
+  apply-before-save AI title/summary generation through the selected cloud
+  provider and model.
 - Distraction-free Writer Mode with local display preferences and a global
   `Ctrl+Alt+W` shortcut that opens Capsule directly into Writer Mode.
 - Entry history review for legacy Capsule edit snapshots.
@@ -166,8 +168,11 @@ process environment variables, `CAPSULE_ENV_PATH`, a `.env` beside the active
 Capsule config, then the current working directory `.env`; `.env` files are
 ignored by Git. AI chat uses the selected provider/model and sends only the
 previewed text context after a first-use privacy confirmation; image files are
-not uploaded. Conversations and assistant drafts are persisted in the local
-database, and interrupted/error turns can be retried.
+not uploaded. Composer title/summary generation also uses the selected
+provider/model, sends only the current draft text after its own first-use
+privacy confirmation, and applies suggestions to editable fields only after
+review. Conversations and assistant drafts are persisted in the local database,
+and interrupted/error turns can be retried.
 
 Location auto-capture on entry creation uses the same Capsule configuration keys
 as the existing app: `location.auto_capture`, `location.auto_capture_method`,

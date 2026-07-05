@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.23.1 - 2026-07-05
+
+### Added
+
+- Added composer title/summary generation for entries using the selected cloud
+  AI provider and model, with first-use privacy confirmation, strict JSON
+  parsing, provider/model display, and an apply-before-save review step.
+
+### Changed
+
+- Bumped the app version to 0.23.1.
+
 ## 0.23.0 - 2026-07-05
 
 ### Added

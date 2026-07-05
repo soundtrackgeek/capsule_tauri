@@ -710,6 +710,25 @@ pub struct AiMetadataSuggestionResponse {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiEntryMetadataSuggestionRequest {
+    pub text: String,
+    pub content_format: Option<String>,
+    pub cloud_provider: Option<String>,
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiEntryMetadataSuggestionResponse {
+    pub title: Option<String>,
+    pub summary: Option<String>,
+    pub cloud_provider: String,
+    pub model: String,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncStatusSummary {

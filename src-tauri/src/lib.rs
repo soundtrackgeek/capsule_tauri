@@ -1,5 +1,6 @@
 mod ai_chat;
 mod ai_config;
+mod ai_metadata;
 mod ai_providers;
 mod backup;
 mod db;
@@ -19,14 +20,15 @@ mod threads;
 use models::{
     AiApiKeyMutationResponse, AiApiKeyUpdateRequest, AiChatContextPreviewRequest,
     AiChatContextPreviewResponse, AiChatRequest, AiChatRetryRequest, AiChatStreamStartResponse,
-    AiConversationDetail, AiConversationListResponse, AiMetadataSuggestionRequest,
-    AiMetadataSuggestionResponse, AiOverviewResponse, AiProviderStatus, AiSettings,
-    AiSettingsUpdateRequest, AnalyticsPeriodRequest, AnalyticsResponse, BackupCreateRequest,
-    BackupCreateResponse, BackupListResponse, BackupRestorePreview, BackupRestorePreviewRequest,
-    BackupRestoreRequest, BackupRestoreResponse, BulkThreadDetachRequest, BulkThreadLinkRequest,
-    CapsuleConfigResponse, ConfigMutationResponse, CoverWallRequest, CoverWallResponse,
-    DatabaseStatus, DeleteAiConversationResponse, DeleteEntryResponse, Entry, EntryCreate,
-    EntryFilters, EntryHistoryResponse, EntryListResponse, EntryMutationResponse, EntryUpdate,
+    AiConversationDetail, AiConversationListResponse, AiEntryMetadataSuggestionRequest,
+    AiEntryMetadataSuggestionResponse, AiMetadataSuggestionRequest, AiMetadataSuggestionResponse,
+    AiOverviewResponse, AiProviderStatus, AiSettings, AiSettingsUpdateRequest,
+    AnalyticsPeriodRequest, AnalyticsResponse, BackupCreateRequest, BackupCreateResponse,
+    BackupListResponse, BackupRestorePreview, BackupRestorePreviewRequest, BackupRestoreRequest,
+    BackupRestoreResponse, BulkThreadDetachRequest, BulkThreadLinkRequest, CapsuleConfigResponse,
+    ConfigMutationResponse, CoverWallRequest, CoverWallResponse, DatabaseStatus,
+    DeleteAiConversationResponse, DeleteEntryResponse, Entry, EntryCreate, EntryFilters,
+    EntryHistoryResponse, EntryListResponse, EntryMutationResponse, EntryUpdate,
     ExportEntriesRequest, ExportEntriesResponse, GamificationOverviewResponse, ImageAttachRequest,
     ImageEntriesListResponse, ImageEntryListResponse, ImageMutationResponse,
     ImageUploadAttachRequest, ImageUploadResponse, ImageVariant, LibraryListResponse,
@@ -745,6 +747,16 @@ async fn suggest_ai_metadata(
 }
 
 #[tauri::command]
+async fn suggest_ai_entry_metadata(
+    input: AiEntryMetadataSuggestionRequest,
+) -> Result<AiEntryMetadataSuggestionResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || ai_metadata::suggest_ai_entry_metadata(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn get_sync_overview() -> Result<SyncOverviewResponse, String> {
     tauri::async_runtime::spawn_blocking(phase6::get_sync_overview)
         .await
@@ -959,6 +971,7 @@ pub fn run() {
             cancel_ai_chat_stream,
             get_ai_overview,
             suggest_ai_metadata,
+            suggest_ai_entry_metadata,
             get_sync_overview,
             run_sync,
             get_plugin_overview,

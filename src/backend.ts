@@ -22,6 +22,8 @@ import type {
   AIConversationDetail,
   AIConversationListResponse,
   AIConversationMessage,
+  AiEntryMetadataSuggestionRequest,
+  AiEntryMetadataSuggestionResponse,
   AIProviderStatus,
   AISettings,
   AISettingsUpdateRequest,
@@ -1827,6 +1829,38 @@ export async function suggestAiMetadata(
   }
 }
 
+export async function suggestAiEntryMetadata(
+  input: AiEntryMetadataSuggestionRequest,
+): Promise<AiEntryMetadataSuggestionResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<AiEntryMetadataSuggestionResponse>("suggest_ai_entry_metadata", {
+        input,
+      });
+    }
+
+    await pause(260);
+    const settings = mockAiSettings();
+    const provider = input.cloudProvider ?? settings.cloudProvider;
+    const statuses = mockAiProviderStatuses();
+    const selectedModel =
+      input.model ||
+      statuses.find((status) => status.provider === provider)?.selectedModel ||
+      selectedDraftModelForProvider(settings, provider);
+    const plain = toTextPlain(input.text);
+    const words = plain.split(/\s+/).filter(Boolean);
+    return {
+      title: words.slice(0, 8).join(" ") || null,
+      summary: words.slice(0, 38).join(" ") || null,
+      cloudProvider: provider,
+      model: selectedModel,
+      warnings: ["Mock mode did not send text to a cloud provider."],
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
 export async function getSyncOverview(): Promise<SyncOverviewResponse> {
   try {
     if (runningInTauri()) {
@@ -3017,6 +3051,14 @@ function providerMockLabel(provider: AICloudProvider) {
     gemini: "Google Gemini",
     openai: "OpenAI",
     openrouter: "OpenRouter",
+  }[provider];
+}
+
+function selectedDraftModelForProvider(settings: AISettings, provider: AICloudProvider) {
+  return {
+    gemini: settings.geminiModel,
+    openai: settings.openaiModel,
+    openrouter: settings.openrouterModel,
   }[provider];
 }
 

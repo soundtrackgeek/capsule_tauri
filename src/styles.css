@@ -1943,6 +1943,12 @@ button:active:not(:disabled) {
   gap: 14px;
 }
 
+.composer-ai-suggestion {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+
 .composer-image-panel {
   display: grid;
   gap: 12px;

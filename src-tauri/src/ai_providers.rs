@@ -27,6 +27,23 @@ pub(crate) struct ProviderStreamRequest {
     pub messages: Vec<ProviderChatMessage>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ProviderJsonSchema {
+    pub name: String,
+    pub schema: JsonValue,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ProviderGenerateRequest {
+    pub provider: String,
+    pub model: String,
+    pub api_key: String,
+    pub system_prompt: String,
+    pub prompt: String,
+    pub max_output_tokens: Option<u32>,
+    pub json_schema: Option<ProviderJsonSchema>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProviderStreamOutcome {
     Complete,
@@ -42,6 +59,15 @@ pub(crate) fn stream_text(
         "openai" => stream_openai(request, cancelled, on_chunk),
         "gemini" => stream_gemini(request, cancelled, on_chunk),
         "openrouter" => stream_openrouter(request, cancelled, on_chunk),
+        _ => Err(anyhow!("Unsupported AI provider.")),
+    }
+}
+
+pub(crate) fn generate_text(request: ProviderGenerateRequest) -> Result<String> {
+    match request.provider.as_str() {
+        "openai" => generate_openai(request),
+        "gemini" => generate_gemini(request),
+        "openrouter" => generate_openrouter(request),
         _ => Err(anyhow!("Unsupported AI provider.")),
     }
 }
@@ -83,6 +109,43 @@ fn stream_openai(
     })
 }
 
+fn generate_openai(request: ProviderGenerateRequest) -> Result<String> {
+    let mut body = json!({
+        "model": request.model,
+        "instructions": request.system_prompt,
+        "input": [{
+            "role": "user",
+            "content": request.prompt,
+        }],
+        "stream": false,
+        "store": false,
+    });
+    if let Some(max_output_tokens) = request.max_output_tokens {
+        body["max_output_tokens"] = json!(max_output_tokens);
+    }
+    if let Some(schema) = request.json_schema {
+        body["text"] = json!({
+            "format": {
+                "type": "json_schema",
+                "name": schema.name,
+                "strict": true,
+                "schema": schema.schema,
+            }
+        });
+    }
+
+    let response = client()?
+        .post("https://api.openai.com/v1/responses")
+        .bearer_auth(&request.api_key)
+        .json(&body)
+        .send()
+        .context("OpenAI request failed before a response was returned.")?;
+    let value = read_json_response(response, "OpenAI")?;
+    openai_response_text(&value)
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| anyhow!("OpenAI completed without returning text."))
+}
+
 fn stream_gemini(
     request: ProviderStreamRequest,
     cancelled: Arc<AtomicBool>,
@@ -121,6 +184,40 @@ fn stream_gemini(
         }
         Ok(())
     })
+}
+
+fn generate_gemini(request: ProviderGenerateRequest) -> Result<String> {
+    let mut body = json!({
+        "systemInstruction": {
+            "parts": [{ "text": request.system_prompt }]
+        },
+        "contents": [{
+            "role": "user",
+            "parts": [{ "text": request.prompt }]
+        }],
+        "generationConfig": {
+            "temperature": 0.2,
+            "responseMimeType": if request.json_schema.is_some() { "application/json" } else { "text/plain" },
+        }
+    });
+    if let Some(max_output_tokens) = request.max_output_tokens {
+        body["generationConfig"]["maxOutputTokens"] = json!(max_output_tokens);
+    }
+
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+        request.model
+    );
+    let response = client()?
+        .post(url)
+        .header("x-goog-api-key", &request.api_key)
+        .json(&body)
+        .send()
+        .context("Gemini request failed before a response was returned.")?;
+    let value = read_json_response(response, "Gemini")?;
+    gemini_generated_text(&value)
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| anyhow!("Gemini completed without returning text."))
 }
 
 fn stream_openrouter(
@@ -165,12 +262,54 @@ fn stream_openrouter(
     })
 }
 
+fn generate_openrouter(request: ProviderGenerateRequest) -> Result<String> {
+    let mut body = json!({
+        "model": request.model,
+        "messages": [
+            {
+                "role": "system",
+                "content": request.system_prompt,
+            },
+            {
+                "role": "user",
+                "content": request.prompt,
+            }
+        ],
+        "temperature": 0.2,
+    });
+    if let Some(max_output_tokens) = request.max_output_tokens {
+        body["max_tokens"] = json!(max_output_tokens);
+    }
+    if request.json_schema.is_some() {
+        body["response_format"] = json!({ "type": "json_object" });
+    }
+
+    let response = client()?
+        .post("https://openrouter.ai/api/v1/chat/completions")
+        .bearer_auth(&request.api_key)
+        .header("HTTP-Referer", "https://capsule.local")
+        .header("X-OpenRouter-Title", "Capsule")
+        .json(&body)
+        .send()
+        .context("OpenRouter request failed before a response was returned.")?;
+    let value = read_json_response(response, "OpenRouter")?;
+    openrouter_generated_text(&value)
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| anyhow!("OpenRouter completed without returning text."))
+}
+
 fn client() -> Result<Client> {
     Client::builder()
         .timeout(Duration::from_secs(120))
         .connect_timeout(Duration::from_secs(20))
         .build()
         .context("failed to build AI provider HTTP client")
+}
+
+fn read_json_response(response: Response, provider: &str) -> Result<JsonValue> {
+    ensure_success(response, provider)?
+        .json::<JsonValue>()
+        .with_context(|| format!("{provider} returned malformed JSON."))
 }
 
 fn ensure_success(response: Response, provider: &str) -> Result<Response> {
@@ -327,6 +466,53 @@ pub(crate) fn openrouter_text_delta(data: &str) -> Result<Option<String>> {
         .map(str::to_string))
 }
 
+pub(crate) fn openai_response_text(value: &JsonValue) -> Option<String> {
+    if let Some(text) = value.get("output_text").and_then(JsonValue::as_str) {
+        return Some(text.to_string());
+    }
+    let output = value.get("output")?.as_array()?;
+    let chunks = output
+        .iter()
+        .flat_map(|item| {
+            item.get("content")
+                .and_then(JsonValue::as_array)
+                .into_iter()
+                .flatten()
+        })
+        .filter_map(|content| {
+            content
+                .get("text")
+                .or_else(|| content.get("json"))
+                .and_then(JsonValue::as_str)
+        })
+        .collect::<Vec<_>>();
+    (!chunks.is_empty()).then(|| chunks.join(""))
+}
+
+pub(crate) fn gemini_generated_text(value: &JsonValue) -> Option<String> {
+    value
+        .pointer("/candidates/0/content/parts/0/text")
+        .and_then(JsonValue::as_str)
+        .map(str::to_string)
+}
+
+pub(crate) fn openrouter_generated_text(value: &JsonValue) -> Option<String> {
+    let content = value.pointer("/choices/0/message/content")?;
+    if let Some(text) = content.as_str() {
+        return Some(text.to_string());
+    }
+    let chunks = content
+        .as_array()?
+        .iter()
+        .filter_map(|item| {
+            item.get("text")
+                .or_else(|| item.get("content"))
+                .and_then(JsonValue::as_str)
+        })
+        .collect::<Vec<_>>();
+    (!chunks.is_empty()).then(|| chunks.join(""))
+}
+
 fn truncate(value: &str, limit: usize) -> String {
     let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
     if normalized.chars().count() <= limit {
@@ -371,6 +557,46 @@ mod tests {
             openrouter_text_delta(r#"{"choices":[{"delta":{"content":"Yo"}}]}"#).expect("delta");
 
         assert_eq!(chunk.as_deref(), Some("Yo"));
+    }
+
+    #[test]
+    fn extracts_openai_response_output_text() {
+        let value = json!({
+            "output": [{
+                "type": "message",
+                "content": [
+                    { "type": "output_text", "text": "{\"title\":\"Hi\"}" }
+                ]
+            }]
+        });
+
+        assert_eq!(
+            openai_response_text(&value).as_deref(),
+            Some(r#"{"title":"Hi"}"#)
+        );
+    }
+
+    #[test]
+    fn extracts_non_streaming_provider_text() {
+        let gemini = json!({
+            "candidates": [{
+                "content": { "parts": [{ "text": "{\"summary\":\"Hej\"}" }] }
+            }]
+        });
+        let openrouter = json!({
+            "choices": [{
+                "message": { "content": "{\"summary\":\"Yo\"}" }
+            }]
+        });
+
+        assert_eq!(
+            gemini_generated_text(&gemini).as_deref(),
+            Some(r#"{"summary":"Hej"}"#)
+        );
+        assert_eq!(
+            openrouter_generated_text(&openrouter).as_deref(),
+            Some(r#"{"summary":"Yo"}"#)
+        );
     }
 
     #[test]

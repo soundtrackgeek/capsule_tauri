@@ -530,6 +530,21 @@ export type AiMetadataSuggestionResponse = {
   warnings: string[];
 };
 
+export type AiEntryMetadataSuggestionRequest = {
+  text: string;
+  contentFormat?: "plain" | "markdown" | string | null;
+  cloudProvider?: AICloudProvider | null;
+  model?: string | null;
+};
+
+export type AiEntryMetadataSuggestionResponse = {
+  title: string | null;
+  summary: string | null;
+  cloudProvider: AICloudProvider;
+  model: string;
+  warnings: string[];
+};
+
 export type SyncStatusSummary = {
   lastSuccessfulSyncAt: string | null;
   lastSyncFilePath: string | null;
