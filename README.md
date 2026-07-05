@@ -93,6 +93,9 @@ explicit capability-gated AI/sync surfaces:
 - Cloud AI Settings for Gemini, OpenAI, and OpenRouter provider/model defaults,
   chat context defaults, and redacted API key status without exposing stored
   secrets to the frontend.
+- Hidden Debug menu, off by default and enabled from Settings, with database
+  health checks, image thumbnail/add-image smoke testing, synthetic AI provider
+  testing, debug log notes, and a ZIP diagnostics bundle for support reports.
 - Native Capsule-compatible shared-folder sync using `capsule_sync.json`,
   `capsule_threads_sync.json`, and `capsule_ai_chats_sync.json`, including entry,
   image metadata, location, custom library, thread, AI chat, and tombstone
@@ -135,6 +138,8 @@ outside the journal database in the app path settings file shown in Settings.
 The same local settings file stores whether closing the main window should hide
 Capsule to the system tray instead of exiting. Tray-hidden sessions do not
 become the next launch mode; starting Capsule opens the main window.
+The hidden Debug menu flag is stored in the same local settings file and stays
+off until it is explicitly enabled in Settings.
 Shared-folder sync resolves `CAPSULE_SYNC_PATH` first, then the saved sync path
 from Settings, and writes the same three sync files used by the older Capsule
 app. GitHub Gist sync resolves `CAPSULE_GITHUB_GIST_ID` and

@@ -4,6 +4,7 @@ mod ai_metadata;
 mod ai_providers;
 mod backup;
 mod db;
+mod debug;
 mod entries;
 mod images;
 mod location;
@@ -27,6 +28,7 @@ use models::{
     BackupListResponse, BackupRestorePreview, BackupRestorePreviewRequest, BackupRestoreRequest,
     BackupRestoreResponse, BulkThreadDetachRequest, BulkThreadLinkRequest, CapsuleConfigResponse,
     ConfigMutationResponse, CoverWallRequest, CoverWallResponse, DatabaseStatus,
+    DebugBundleResponse, DebugDiagnosticsResponse, DebugLogRequest, DebugLogResponse,
     DeleteAiConversationResponse, DeleteEntryResponse, Entry, EntryCreate, EntryFilters,
     EntryHistoryResponse, EntryListResponse, EntryMutationResponse, EntryUpdate,
     ExportEntriesRequest, ExportEntriesResponse, GamificationOverviewResponse, ImageAttachRequest,
@@ -113,6 +115,30 @@ async fn restore_backup(input: BackupRestoreRequest) -> Result<BackupRestoreResp
 #[tauri::command]
 async fn open_backup_folder() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(backup::open_backup_folder)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_debug_diagnostics() -> Result<DebugDiagnosticsResponse, String> {
+    tauri::async_runtime::spawn_blocking(debug::get_debug_diagnostics)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn append_debug_log(input: DebugLogRequest) -> Result<DebugLogResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || debug::append_debug_log(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn create_debug_bundle() -> Result<DebugBundleResponse, String> {
+    tauri::async_runtime::spawn_blocking(debug::create_debug_bundle)
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())
@@ -899,6 +925,9 @@ pub fn run() {
             preview_restore_backup,
             restore_backup,
             open_backup_folder,
+            get_debug_diagnostics,
+            append_debug_log,
+            create_debug_bundle,
             list_entries,
             get_entry,
             get_random_entry,

@@ -182,6 +182,7 @@ pub struct PathSettingsResponse {
     pub auto_sync_enabled: bool,
     pub auto_sync_interval_minutes: i64,
     pub minimize_to_tray_on_close: bool,
+    pub debug_menu_enabled: bool,
     pub settings_path: String,
     pub warnings: Vec<String>,
 }
@@ -200,6 +201,7 @@ pub struct PathSettingsUpdateRequest {
     pub auto_sync_enabled: Option<bool>,
     pub auto_sync_interval_minutes: Option<i64>,
     pub minimize_to_tray_on_close: Option<bool>,
+    pub debug_menu_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -251,6 +253,103 @@ pub struct AiApiKeyUpdateRequest {
 pub struct AiApiKeyMutationResponse {
     pub provider_status: AiProviderStatus,
     pub completed_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugCheck {
+    pub label: String,
+    pub status: String,
+    pub detail: String,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugDatabaseReport {
+    pub status: DatabaseStatus,
+    pub integrity_check: Option<String>,
+    pub foreign_key_issue_count: Option<i64>,
+    pub wal_size_bytes: Option<u64>,
+    pub required_tables: Vec<DebugCheck>,
+    pub feature_tables: Vec<DebugCheck>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugImageReport {
+    pub media_root: String,
+    pub root_exists: bool,
+    pub root_writable: bool,
+    pub total_assets: i64,
+    pub total_attachments: i64,
+    pub attachments_with_originals: i64,
+    pub attachments_with_thumbnails: i64,
+    pub missing_originals: i64,
+    pub missing_thumbnails: i64,
+    pub sample_images: Vec<ImageAttachment>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugAiReport {
+    pub cloud_provider: String,
+    pub selected_model: String,
+    pub provider_configured: bool,
+    pub provider_statuses: Vec<AiProviderStatus>,
+    pub context_preview_ok: bool,
+    pub context_preview_entries: i64,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugLogEntry {
+    pub timestamp: String,
+    pub level: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugLogRequest {
+    pub level: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugLogResponse {
+    pub entry: DebugLogEntry,
+    pub recent_logs: Vec<DebugLogEntry>,
+    pub log_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugDiagnosticsResponse {
+    pub generated_at: String,
+    pub app_version: String,
+    pub settings_path: String,
+    pub debug_log_path: String,
+    pub bundle_directory: String,
+    pub database: DebugDatabaseReport,
+    pub images: DebugImageReport,
+    pub ai: DebugAiReport,
+    pub recent_logs: Vec<DebugLogEntry>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugBundleResponse {
+    pub path: String,
+    pub size_bytes: u64,
+    pub created_at: String,
+    pub included_files: Vec<String>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

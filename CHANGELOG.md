@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.24.0 - 2026-07-05
+
+### Added
+
+- Added a hidden Debug menu that is off by default and can be enabled from
+  Settings, with database health checks, image thumbnail/add-image smoke tests,
+  synthetic AI provider testing, debug log notes, and ZIP diagnostics bundle
+  creation for support reports.
+
+### Changed
+
+- Bumped the app version to 0.24.0.
+
 ## 0.23.2 - 2026-07-05
 
 ### Fixed

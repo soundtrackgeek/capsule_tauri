@@ -113,6 +113,7 @@ export type PathSettingsResponse = {
   autoSyncEnabled: boolean;
   autoSyncIntervalMinutes: number;
   minimizeToTrayOnClose: boolean;
+  debugMenuEnabled: boolean;
   settingsPath: string;
   warnings: string[];
 };
@@ -129,6 +130,7 @@ export type PathSettingsUpdateRequest = {
   autoSyncEnabled?: boolean | null;
   autoSyncIntervalMinutes?: number | null;
   minimizeToTrayOnClose?: boolean | null;
+  debugMenuEnabled?: boolean | null;
 };
 
 export type AICloudProvider = "openai" | "gemini" | "openrouter";
@@ -172,6 +174,85 @@ export type AIApiKeyUpdateRequest = {
 export type AIApiKeyMutationResponse = {
   providerStatus: AIProviderStatus;
   completedAt: string;
+};
+
+export type DebugCheck = {
+  label: string;
+  status: "ok" | "warn" | "error" | string;
+  detail: string;
+  warnings: string[];
+};
+
+export type DebugDatabaseReport = {
+  status: DatabaseStatus;
+  integrityCheck: string | null;
+  foreignKeyIssueCount: number | null;
+  walSizeBytes: number | null;
+  requiredTables: DebugCheck[];
+  featureTables: DebugCheck[];
+  warnings: string[];
+};
+
+export type DebugImageReport = {
+  mediaRoot: string;
+  rootExists: boolean;
+  rootWritable: boolean;
+  totalAssets: number;
+  totalAttachments: number;
+  attachmentsWithOriginals: number;
+  attachmentsWithThumbnails: number;
+  missingOriginals: number;
+  missingThumbnails: number;
+  sampleImages: ImageAttachment[];
+  warnings: string[];
+};
+
+export type DebugAiReport = {
+  cloudProvider: AICloudProvider | string;
+  selectedModel: string;
+  providerConfigured: boolean;
+  providerStatuses: AIProviderStatus[];
+  contextPreviewOk: boolean;
+  contextPreviewEntries: number;
+  warnings: string[];
+};
+
+export type DebugLogEntry = {
+  timestamp: string;
+  level: "info" | "warn" | "error" | string;
+  message: string;
+};
+
+export type DebugLogRequest = {
+  level?: "info" | "warn" | "error" | string | null;
+  message: string;
+};
+
+export type DebugLogResponse = {
+  entry: DebugLogEntry;
+  recentLogs: DebugLogEntry[];
+  logPath: string;
+};
+
+export type DebugDiagnosticsResponse = {
+  generatedAt: string;
+  appVersion: string;
+  settingsPath: string;
+  debugLogPath: string;
+  bundleDirectory: string;
+  database: DebugDatabaseReport;
+  images: DebugImageReport;
+  ai: DebugAiReport;
+  recentLogs: DebugLogEntry[];
+  warnings: string[];
+};
+
+export type DebugBundleResponse = {
+  path: string;
+  sizeBytes: number;
+  createdAt: string;
+  includedFiles: string[];
+  warnings: string[];
 };
 
 export type AIChatScope = "search" | "entry" | "entries" | "thread";

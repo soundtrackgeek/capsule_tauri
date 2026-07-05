@@ -44,6 +44,11 @@ import type {
   CoverWallRequest,
   CoverWallResponse,
   DatabaseStatus,
+  DebugBundleResponse,
+  DebugDiagnosticsResponse,
+  DebugLogEntry,
+  DebugLogRequest,
+  DebugLogResponse,
   DeleteAIConversationResponse,
   DeleteEntryResponse,
   Entry,
@@ -156,6 +161,14 @@ let mockGithubGistTokenConfigured = false;
 let mockAutoSyncEnabled = false;
 let mockAutoSyncIntervalMinutes = 15;
 let mockMinimizeToTrayOnClose = false;
+let mockDebugMenuEnabled = false;
+let mockDebugLogs: DebugLogEntry[] = [
+  {
+    timestamp: "2026-07-05T10:30:00Z",
+    level: "info",
+    message: "Mock debug log initialized.",
+  },
+];
 const mockAiKeysConfigured: Record<AICloudProvider, boolean> = {
   gemini: false,
   openai: false,
@@ -845,6 +858,71 @@ export async function openBackupFolder(): Promise<void> {
   }
 }
 
+export async function getDebugDiagnostics(): Promise<DebugDiagnosticsResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<DebugDiagnosticsResponse>("get_debug_diagnostics");
+    }
+
+    await pause(140);
+    return mockDebugDiagnostics();
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function appendDebugLog(input: DebugLogRequest): Promise<DebugLogResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<DebugLogResponse>("append_debug_log", { input });
+    }
+
+    await pause(100);
+    const entry: DebugLogEntry = {
+      timestamp: new Date().toISOString(),
+      level: normalizeDebugLogLevel(input.level),
+      message: input.message.trim().slice(0, 2_000),
+    };
+    if (!entry.message) {
+      throw new Error("Debug log message cannot be empty.");
+    }
+    mockDebugLogs = [...mockDebugLogs, entry].slice(-100);
+    return {
+      entry,
+      recentLogs: mockDebugLogs.slice(-20),
+      logPath: mockDebugLogPath(),
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function createDebugBundle(): Promise<DebugBundleResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<DebugBundleResponse>("create_debug_bundle");
+    }
+
+    await pause(240);
+    return {
+      path: `${mockDiagnosticsDirectory()}\\capsule_diagnostics_mock.zip`,
+      sizeBytes: 18_432,
+      createdAt: new Date().toISOString(),
+      includedFiles: [
+        "diagnostics.json",
+        "README.txt",
+        "environment.txt",
+        "debug.log",
+        "path_settings.redacted.json",
+        "capsule_config.redacted.json",
+      ],
+      warnings: [],
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
 export async function getImageMediaRoot(): Promise<string> {
   try {
     if (runningInTauri()) {
@@ -915,6 +993,7 @@ export async function setPathSettings(
     mockAutoSyncEnabled = Boolean(input.autoSyncEnabled);
     mockAutoSyncIntervalMinutes = autoSyncInterval;
     mockMinimizeToTrayOnClose = Boolean(input.minimizeToTrayOnClose);
+    mockDebugMenuEnabled = Boolean(input.debugMenuEnabled);
 
     return mockPathSettings();
   } catch (error) {
@@ -2929,9 +3008,102 @@ function mockPathSettings(): PathSettingsResponse {
     autoSyncEnabled: mockAutoSyncEnabled,
     autoSyncIntervalMinutes: mockAutoSyncIntervalMinutes,
     minimizeToTrayOnClose: mockMinimizeToTrayOnClose,
+    debugMenuEnabled: mockDebugMenuEnabled,
     settingsPath: mockPathSettingsPath,
     warnings: [],
   };
+}
+
+function mockDebugDiagnostics(): DebugDiagnosticsResponse {
+  const imageAttachments = Object.values(mockImageAttachments).flat();
+  const providerStatuses = mockAiProviderStatuses();
+  const aiSettings = mockAiSettings();
+  const selectedProvider =
+    providerStatuses.find((status) => status.provider === aiSettings.cloudProvider) ??
+    providerStatuses[0];
+  const requiredTables = [
+    debugCheck("Entries", mockStatus.schemaSummary.hasEntriesTable, `${mockStatus.entryCount ?? 0} rows`),
+    debugCheck("Tags", mockStatus.schemaSummary.hasTagsTable, `${mockStatus.tagCount ?? 0} rows`),
+    debugCheck("Entry tags", true, "mock relationship table"),
+  ];
+  const featureTables = [
+    debugCheck("Full-text search", mockStatus.schemaSummary.hasFtsTable, "entries_fts present"),
+    debugCheck("Image assets", true, `${imageAttachments.length} mock attachments`),
+    debugCheck("Image attachments", true, `${imageAttachments.length} mock attachments`),
+    debugCheck("AI conversations", true, `${mockAiConversations.length} conversations`),
+    debugCheck("Sync history", true, "mock sync history ready"),
+  ];
+
+  return {
+    generatedAt: new Date().toISOString(),
+    appVersion: packageJson.version,
+    settingsPath: mockPathSettingsPath,
+    debugLogPath: mockDebugLogPath(),
+    bundleDirectory: mockDiagnosticsDirectory(),
+    database: {
+      status: mockStatus,
+      integrityCheck: mockStatus.readable ? "ok" : null,
+      foreignKeyIssueCount: mockStatus.readable ? 0 : null,
+      walSizeBytes: 0,
+      requiredTables,
+      featureTables,
+      warnings: mockStatus.warnings,
+    },
+    images: {
+      mediaRoot: mockImageMediaRoot,
+      rootExists: true,
+      rootWritable: true,
+      totalAssets: imageAttachments.length,
+      totalAttachments: imageAttachments.length,
+      attachmentsWithOriginals: imageAttachments.filter((image) => image.originalAvailable).length,
+      attachmentsWithThumbnails: imageAttachments.filter((image) => image.thumbnailAvailable).length,
+      missingOriginals: imageAttachments.filter((image) => !image.originalAvailable).length,
+      missingThumbnails: imageAttachments.filter((image) => !image.thumbnailAvailable).length,
+      sampleImages: imageAttachments.slice(0, 6),
+      warnings: [],
+    },
+    ai: {
+      cloudProvider: aiSettings.cloudProvider,
+      selectedModel: selectedProvider?.selectedModel ?? selectedDraftModelForProvider(aiSettings, aiSettings.cloudProvider),
+      providerConfigured: selectedProvider?.configured ?? false,
+      providerStatuses,
+      contextPreviewOk: true,
+      contextPreviewEntries: Math.min(1, mockEntries.length),
+      warnings: selectedProvider?.configured
+        ? []
+        : [`${providerEnvKey(aiSettings.cloudProvider)} is not configured.`],
+    },
+    recentLogs: mockDebugLogs.slice(-20),
+    warnings: [],
+  };
+}
+
+function debugCheck(label: string, ok: boolean, detail: string) {
+  return {
+    label,
+    status: ok ? "ok" : "error",
+    detail: ok ? detail : "missing",
+    warnings: ok ? [] : [`${label} is missing.`],
+  };
+}
+
+function mockDebugLogPath() {
+  return "C:\\Users\\jtill\\AppData\\Roaming\\Capsule\\debug.log";
+}
+
+function mockDiagnosticsDirectory() {
+  return "C:\\Users\\jtill\\AppData\\Roaming\\Capsule\\diagnostics";
+}
+
+function normalizeDebugLogLevel(value: DebugLogRequest["level"]) {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "warning" || normalized === "warn") {
+    return "warn";
+  }
+  if (normalized === "error") {
+    return "error";
+  }
+  return "info";
 }
 
 function mockAiSettings(): AISettings {

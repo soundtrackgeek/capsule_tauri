@@ -829,7 +829,10 @@ fn detected_tables(connection: &Connection) -> Result<HashSet<String>> {
         .collect())
 }
 
-fn media_roots_for_database(db_path: &Path, override_root: Option<PathBuf>) -> Vec<PathBuf> {
+pub(crate) fn media_roots_for_database(
+    db_path: &Path,
+    override_root: Option<PathBuf>,
+) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Some(root) = override_root {
         push_unique_path(&mut roots, root);
@@ -934,7 +937,7 @@ fn safe_existing_path(root: &Path, storage_key: &str) -> Result<Option<PathBuf>>
     Ok(Some(candidate))
 }
 
-fn media_exists(roots: &[PathBuf], storage_key: &str) -> bool {
+pub(crate) fn media_exists(roots: &[PathBuf], storage_key: &str) -> bool {
     roots.iter().any(|root| {
         safe_existing_path(root, storage_key)
             .ok()
@@ -959,7 +962,7 @@ fn validate_relative_path(value: &str) -> Result<PathBuf> {
     Ok(output)
 }
 
-fn thumbnail_key(hash: &str) -> String {
+pub(crate) fn thumbnail_key(hash: &str) -> String {
     format!("thumb/{}/{}.jpg", &hash[..2], hash)
 }
 

@@ -181,6 +181,7 @@ pub fn get_path_settings() -> Result<PathSettingsResponse> {
             .unwrap_or(15)
             .clamp(1, 24 * 60),
         minimize_to_tray_on_close: local_settings.minimize_to_tray_on_close.unwrap_or(false),
+        debug_menu_enabled: local_settings.debug_menu_enabled.unwrap_or(false),
         settings_path: db::path_to_string(&db::local_path_settings_path()),
         warnings,
     })
@@ -204,6 +205,7 @@ pub fn set_path_settings(input: PathSettingsUpdateRequest) -> Result<PathSetting
         .auto_sync_interval_minutes
         .map(|minutes| minutes.clamp(1, 24 * 60));
     settings.minimize_to_tray_on_close = input.minimize_to_tray_on_close;
+    settings.debug_menu_enabled = input.debug_menu_enabled;
 
     if let Some(path) = settings.image_media_root.as_deref() {
         fs::create_dir_all(path).with_context(|| format!("failed to create image path {path}"))?;

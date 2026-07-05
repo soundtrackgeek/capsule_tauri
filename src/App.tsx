@@ -6,6 +6,7 @@ import {
   BarChart3,
   BookOpen,
   Bot,
+  Bug,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -51,6 +52,7 @@ import {
 } from "lucide-react";
 import {
   attachImage,
+  appendDebugLog,
   bulkDetachThreads,
   claimQuest,
   checkForAppUpdate,
@@ -58,6 +60,7 @@ import {
   createPrompt,
   createEntry,
   createBackup,
+  createDebugBundle,
   clearAiApiKey,
   createTemplate,
   deleteCapsuleConfigValue,
@@ -77,6 +80,7 @@ import {
   getAppVersion,
   getCapsuleConfig,
   getDatabaseStatus,
+  getDebugDiagnostics,
   getGamificationOverview,
   getEntry,
   getPathSettings,
@@ -176,6 +180,10 @@ import type {
   CoverWallRequest,
   CoverWallResponse,
   DatabaseStatus,
+  DebugBundleResponse,
+  DebugCheck,
+  DebugDiagnosticsResponse,
+  DebugLogEntry,
   DeleteEntryResponse,
   Entry,
   EntryCreate,
@@ -223,6 +231,7 @@ type ActiveView =
   | "writer"
   | "backups"
   | "settings"
+  | "debug"
   | "about";
 
 type TrayOpenView = Extract<ActiveView, "writer" | "settings">;
@@ -346,6 +355,7 @@ const navItems: Array<{ id: ActiveView; label: string; icon: ReactNode }> = [
   { id: "writer", label: "Writer", icon: <Sparkles size={18} /> },
   { id: "backups", label: "Backups", icon: <Archive size={18} /> },
   { id: "settings", label: "Settings", icon: <Settings size={18} /> },
+  { id: "debug", label: "Debug", icon: <Bug size={18} /> },
   { id: "about", label: "About", icon: <Info size={18} /> },
 ];
 
@@ -689,6 +699,11 @@ function App() {
 
     return status.warnings.length > 0 ? "neutral" : "good";
   }, [status]);
+  const debugMenuEnabled = pathSettings?.debugMenuEnabled ?? false;
+  const visibleNavItems = useMemo(
+    () => navItems.filter((item) => item.id !== "debug" || debugMenuEnabled),
+    [debugMenuEnabled],
+  );
 
   const updateProgressLabel = useMemo(() => {
     if (!updateInstalling) {
@@ -1342,6 +1357,12 @@ function App() {
       void loadDataTools();
     }
   }, [activeView, loadDataTools]);
+
+  useEffect(() => {
+    if (activeView === "debug" && !debugMenuEnabled) {
+      setActiveView("settings");
+    }
+  }, [activeView, debugMenuEnabled]);
 
   useEffect(() => {
     if (activeView === "composer") {
@@ -2455,6 +2476,7 @@ function App() {
     writer: "Writer Mode",
     backups: "Backups",
     settings: "Settings",
+    debug: "Debug",
     about: "About",
   }[activeView];
 
@@ -2495,7 +2517,7 @@ function App() {
         </div>
 
         <nav className="sidebar-nav" aria-label="Primary">
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <button
               className={activeView === item.id ? "nav-item nav-item--active" : "nav-item"}
               key={item.id}
@@ -2893,6 +2915,16 @@ function App() {
             updateProgressLabel={updateProgressLabel}
             uiSettings={uiSettings}
             setUiSettings={setUiSettings}
+          />
+        )}
+
+        {activeView === "debug" && (
+          <DebugView
+            aiProviderStatuses={aiProviderStatuses}
+            aiSettings={aiSettings}
+            defaultEntryIdentifier={selectedEntry?.uuid ?? recentEntries[0]?.uuid ?? ""}
+            onBrowseImagePath={handleBrowseImagePath}
+            status={status}
           />
         )}
 
@@ -5634,6 +5666,7 @@ function SettingsView({
     autoSyncEnabled: false,
     autoSyncIntervalMinutes: 15,
     minimizeToTrayOnClose: false,
+    debugMenuEnabled: false,
   });
   const [aiDraft, setAiDraft] = useState({
     cloudProvider: "gemini" as AICloudProvider,
@@ -5685,6 +5718,7 @@ function SettingsView({
       autoSyncEnabled: pathSettings?.autoSyncEnabled ?? false,
       autoSyncIntervalMinutes: pathSettings?.autoSyncIntervalMinutes ?? 15,
       minimizeToTrayOnClose: pathSettings?.minimizeToTrayOnClose ?? false,
+      debugMenuEnabled: pathSettings?.debugMenuEnabled ?? false,
     });
   }, [
     backupDirectory,
@@ -5694,6 +5728,7 @@ function SettingsView({
     pathSettings?.backupDirectory,
     pathSettings?.coverWallRoot,
     pathSettings?.databasePath,
+    pathSettings?.debugMenuEnabled,
     pathSettings?.githubGistId,
     pathSettings?.imageMediaRoot,
     pathSettings?.minimizeToTrayOnClose,
@@ -5751,6 +5786,7 @@ function SettingsView({
       autoSyncEnabled: pathDraft.autoSyncEnabled,
       autoSyncIntervalMinutes: pathDraft.autoSyncIntervalMinutes,
       minimizeToTrayOnClose: pathDraft.minimizeToTrayOnClose,
+      debugMenuEnabled: pathDraft.debugMenuEnabled,
     });
   const aiContextLimitInvalid = contextLimitDraftInvalid(aiDraft.defaultContextLimit);
   const parsedAiContextLimit = parseContextLimitDraft(aiDraft.defaultContextLimit);
@@ -6354,6 +6390,19 @@ function SettingsView({
             />
             <span>Minimize to tray on close</span>
           </label>
+          <label className="check-row">
+            <input
+              checked={pathDraft.debugMenuEnabled}
+              onChange={(event) =>
+                setPathDraft({
+                  ...pathDraft,
+                  debugMenuEnabled: event.target.checked,
+                })
+              }
+              type="checkbox"
+            />
+            <span>Debug menu</span>
+          </label>
         </div>
         <div className="path-action-row">
           <button
@@ -6857,6 +6906,470 @@ function SettingsView({
       </Panel>
     </section>
   );
+}
+
+type DebugViewProps = {
+  status: DatabaseStatus | null;
+  aiSettings: AISettings | null;
+  aiProviderStatuses: AIProviderStatus[];
+  defaultEntryIdentifier: string;
+  onBrowseImagePath: (currentPath: string) => Promise<string | null>;
+};
+
+function DebugView({
+  status,
+  aiSettings,
+  aiProviderStatuses,
+  defaultEntryIdentifier,
+  onBrowseImagePath,
+}: DebugViewProps) {
+  const [report, setReport] = useState<DebugDiagnosticsResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [mutating, setMutating] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [localNotice, setLocalNotice] = useState<string | null>(null);
+  const [bundle, setBundle] = useState<DebugBundleResponse | null>(null);
+  const [logDraft, setLogDraft] = useState({ level: "info", message: "" });
+  const [imageDraft, setImageDraft] = useState({
+    identifier: defaultEntryIdentifier,
+    filePath: "",
+    caption: "Debug image test",
+    altText: "Debug image test",
+  });
+  const [imageResult, setImageResult] = useState<ImageMutationResponse | null>(null);
+  const [aiProvider, setAiProvider] = useState<AICloudProvider>(
+    aiSettings?.cloudProvider ?? "gemini",
+  );
+  const [aiModel, setAiModel] = useState("");
+  const [aiResult, setAiResult] = useState<AiEntryMetadataSuggestionResponse | null>(null);
+
+  const loadReport = useCallback(async () => {
+    setLoading(true);
+    setLocalError(null);
+    try {
+      setReport(await getDebugDiagnostics());
+    } catch (debugError) {
+      setLocalError(debugError instanceof Error ? debugError.message : "Unable to load diagnostics");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadReport();
+  }, [loadReport]);
+
+  useEffect(() => {
+    if (!imageDraft.identifier && defaultEntryIdentifier) {
+      setImageDraft((draft) => ({ ...draft, identifier: defaultEntryIdentifier }));
+    }
+  }, [defaultEntryIdentifier, imageDraft.identifier]);
+
+  useEffect(() => {
+    if (aiSettings) {
+      setAiProvider(aiSettings.cloudProvider);
+    }
+  }, [aiSettings]);
+
+  const providerStatuses = report?.ai.providerStatuses.length
+    ? report.ai.providerStatuses
+    : aiProviderStatuses;
+  const selectedProviderStatus =
+    providerStatuses.find((item) => item.provider === aiProvider) ?? providerStatuses[0];
+  const modelOptions = selectedProviderStatus?.availableModels ?? [];
+  const effectiveAiModel =
+    aiModel || selectedProviderStatus?.selectedModel || (aiSettings ? selectedDraftModel(aiSettings) : "");
+
+  useEffect(() => {
+    if (selectedProviderStatus?.selectedModel) {
+      setAiModel(selectedProviderStatus.selectedModel);
+    }
+  }, [selectedProviderStatus?.provider, selectedProviderStatus?.selectedModel]);
+
+  const runMutation = async (mutation: () => Promise<string>) => {
+    setMutating(true);
+    setLocalError(null);
+    setLocalNotice(null);
+    try {
+      const message = await mutation();
+      setLocalNotice(message);
+    } catch (debugError) {
+      setLocalError(debugError instanceof Error ? debugError.message : "Debug action failed");
+    } finally {
+      setMutating(false);
+    }
+  };
+
+  const addLogEntry = () =>
+    runMutation(async () => {
+      const response = await appendDebugLog({
+        level: logDraft.level,
+        message: logDraft.message,
+      });
+      setReport((current) =>
+        current
+          ? { ...current, recentLogs: response.recentLogs, debugLogPath: response.logPath }
+          : current,
+      );
+      setLogDraft({ ...logDraft, message: "" });
+      return `Added debug log note: ${formatDateTime(response.entry.timestamp)}`;
+    });
+
+  const createBundle = () =>
+    runMutation(async () => {
+      const response = await createDebugBundle();
+      setBundle(response);
+      await loadReport();
+      return `Created diagnostic bundle: ${response.path}`;
+    });
+
+  const runImageAttachTest = () =>
+    runMutation(async () => {
+      if (!window.confirm("Attach this test image to the selected entry? A database backup will be created first.")) {
+        return "Image attach test cancelled.";
+      }
+      const response = await uploadAndAttachImages({
+        identifier: imageDraft.identifier,
+        images: [
+          {
+            filePath: imageDraft.filePath,
+            caption: nullableFromText(imageDraft.caption),
+            altText: nullableFromText(imageDraft.altText),
+          },
+        ],
+      });
+      setImageResult(response);
+      await appendDebugLog({
+        level: "info",
+        message: `Image attach debug test completed for ${response.entryUuid}.`,
+      });
+      await loadReport();
+      return `Attached test image with backup: ${response.audit.backupPath}`;
+    });
+
+  const runSyntheticAiTest = () =>
+    runMutation(async () => {
+      if (!window.confirm("Run a live AI metadata request with synthetic debug text only?")) {
+        return "AI debug test cancelled.";
+      }
+      const response = await suggestAiEntryMetadata({
+        text: "Synthetic Capsule debug note. This text is only for testing provider connectivity and JSON metadata parsing.",
+        contentFormat: "plain",
+        cloudProvider: aiProvider,
+        model: effectiveAiModel,
+      });
+      setAiResult(response);
+      await appendDebugLog({
+        level: "info",
+        message: `Synthetic AI debug test completed with ${response.cloudProvider}/${response.model}.`,
+      });
+      await loadReport();
+      return `AI metadata test completed with ${response.cloudProvider}/${response.model}.`;
+    });
+
+  const databaseTone = report?.database.status.readable ? "good" : "warn";
+  const imageTone =
+    report && report.images.rootExists && report.images.missingOriginals === 0 ? "good" : "warn";
+  const aiTone = selectedProviderStatus?.configured ? "good" : "warn";
+
+  return (
+    <section className="debug-workspace" aria-label="Debug">
+      <div className="metric-strip">
+        <Metric label="Database" value={report?.database.status.readable ? "Readable" : "Check"} />
+        <Metric label="Images" value={report ? report.images.totalAttachments : "Loading"} />
+        <Metric label="AI" value={selectedProviderStatus?.configured ? "Ready" : "Missing key"} />
+        <Metric label="Logs" value={report?.recentLogs.length ?? 0} />
+      </div>
+
+      {localError && (
+        <div className="banner banner--error">
+          <TriangleAlert size={16} />
+          {localError}
+        </div>
+      )}
+      {localNotice && (
+        <div className="banner banner--success">
+          <CheckCircle2 size={16} />
+          {localNotice}
+        </div>
+      )}
+
+      <div className="debug-grid">
+        <Panel
+          action={
+            <button className="secondary-button secondary-button--small" disabled={loading} onClick={loadReport} type="button">
+              <RefreshCw size={15} />
+              {loading ? "Refreshing" : "Refresh"}
+            </button>
+          }
+          icon={<Database size={20} />}
+          title="Database Debug"
+        >
+          <dl className="detail-list">
+            <Detail label="Readable" value={<StatusPill tone={databaseTone}>{report?.database.status.readable ? "yes" : "no"}</StatusPill>} />
+            <Detail label="Integrity" value={report?.database.integrityCheck ?? "Not checked"} />
+            <Detail label="Foreign keys" value={report?.database.foreignKeyIssueCount ?? "Not checked"} />
+            <Detail label="WAL" value={formatOptionalBytes(report?.database.walSizeBytes)} />
+            <Detail label="Path" value={report?.database.status.dbPath ?? status?.dbPath ?? "Loading"} />
+          </dl>
+          <DebugCheckList title="Required" checks={report?.database.requiredTables ?? []} />
+          <DebugCheckList title="Features" checks={report?.database.featureTables ?? []} />
+          <WarningList warnings={report?.database.warnings ?? []} />
+        </Panel>
+
+        <Panel
+          action={<StatusPill tone={imageTone}>{report?.images.rootExists ? "path found" : "missing path"}</StatusPill>}
+          icon={<FileImage size={20} />}
+          title="Image Debug"
+        >
+          <dl className="detail-list">
+            <Detail label="Root" value={<code>{report?.images.mediaRoot ?? "Loading"}</code>} />
+            <Detail label="Writable" value={report?.images.rootWritable ? "Yes" : "No"} />
+            <Detail label="Assets" value={report?.images.totalAssets ?? "Loading"} />
+            <Detail label="Attachments" value={report?.images.totalAttachments ?? "Loading"} />
+            <Detail label="Missing originals" value={report?.images.missingOriginals ?? "Loading"} />
+            <Detail label="Missing thumbs" value={report?.images.missingThumbnails ?? "Loading"} />
+          </dl>
+          <div className="debug-image-samples">
+            {(report?.images.sampleImages ?? []).map((image) => (
+              <article className="debug-image-sample" key={image.attachmentId}>
+                <DataUrlImage attachment={image} className="debug-thumb" variant="thumb" />
+                <div>
+                  <h4>#{image.attachmentId}</h4>
+                  <p>{image.width} x {image.height} / {formatBytes(image.bytes)}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+          <WarningList warnings={report?.images.warnings ?? []} />
+          <div className="debug-test-box">
+            <div className="settings-form-grid">
+              <label className="field">
+                <span>Entry ID or UUID</span>
+                <input
+                  onChange={(event) => setImageDraft({ ...imageDraft, identifier: event.target.value })}
+                  value={imageDraft.identifier}
+                />
+              </label>
+              <label className="field">
+                <span>Image file</span>
+                <div className="path-input-row">
+                  <input
+                    onChange={(event) => setImageDraft({ ...imageDraft, filePath: event.target.value })}
+                    value={imageDraft.filePath}
+                  />
+                  <button
+                    aria-label="Browse debug image"
+                    className="icon-button"
+                    disabled={mutating}
+                    onClick={async () => {
+                      const selected = await onBrowseImagePath(imageDraft.filePath);
+                      if (selected) {
+                        setImageDraft({ ...imageDraft, filePath: selected });
+                      }
+                    }}
+                    title="Browse debug image"
+                    type="button"
+                  >
+                    <FolderOpen size={17} />
+                  </button>
+                </div>
+              </label>
+              <button
+                className="primary-button"
+                disabled={mutating || !imageDraft.identifier.trim() || !imageDraft.filePath.trim()}
+                onClick={runImageAttachTest}
+                type="button"
+              >
+                <Upload size={17} />
+                Attach test image
+              </button>
+            </div>
+            {imageDraft.filePath && (
+              <LocalImagePreview filePath={imageDraft.filePath} altText="Debug image preview" />
+            )}
+            {imageResult && (
+              <div className="debug-image-samples">
+                {imageResult.images.slice(-3).map((image) => (
+                  <article className="debug-image-sample" key={image.attachmentId}>
+                    <DataUrlImage attachment={image} className="debug-thumb" variant="thumb" />
+                    <div>
+                      <h4>Attached #{image.attachmentId}</h4>
+                      <p>{image.thumbnailAvailable ? "Thumbnail ready" : "Thumbnail pending"}</p>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
+        </Panel>
+
+        <Panel
+          action={<StatusPill tone={aiTone}>{selectedProviderStatus?.configured ? "configured" : "missing key"}</StatusPill>}
+          icon={<Bot size={20} />}
+          title="AI Debug"
+        >
+          <dl className="detail-list">
+            <Detail label="Provider" value={providerEnvLabel(aiProvider)} />
+            <Detail label="Model" value={effectiveAiModel || "No model"} />
+            <Detail label="Context preview" value={report?.ai.contextPreviewOk ? `${report.ai.contextPreviewEntries} entries` : "Failed"} />
+            <Detail label="Key source" value={selectedProviderStatus?.keySource ?? selectedProviderStatus?.missingReason ?? "Unknown"} />
+          </dl>
+          <div className="settings-form-grid settings-form-grid--ai">
+            <label className="field">
+              <span>Provider</span>
+              <select
+                onChange={(event) => {
+                  const provider = event.target.value as AICloudProvider;
+                  setAiProvider(provider);
+                  const next = providerStatuses.find((item) => item.provider === provider);
+                  setAiModel(next?.selectedModel ?? "");
+                }}
+                value={aiProvider}
+              >
+                {providerStatuses.map((item) => (
+                  <option key={item.provider} value={item.provider}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Model</span>
+              <select onChange={(event) => setAiModel(event.target.value)} value={effectiveAiModel}>
+                {modelOptions.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="primary-button"
+              disabled={mutating || !selectedProviderStatus?.configured || !effectiveAiModel}
+              onClick={runSyntheticAiTest}
+              type="button"
+            >
+              <Sparkles size={17} />
+              Synthetic AI test
+            </button>
+          </div>
+          {aiResult && (
+            <dl className="detail-list detail-list--compact path-settings-meta">
+              <Detail label="Title" value={aiResult.title ?? "None"} />
+              <Detail label="Summary" value={aiResult.summary ?? "None"} />
+            </dl>
+          )}
+          <WarningList warnings={[...(report?.ai.warnings ?? []), ...(aiResult?.warnings ?? [])]} />
+        </Panel>
+
+        <Panel
+          action={
+            <button className="primary-button primary-button--small" disabled={mutating} onClick={createBundle} type="button">
+              <FileArchive size={15} />
+              Create ZIP
+            </button>
+          }
+          icon={<FileArchive size={20} />}
+          title="Logs And Bundle"
+        >
+          <dl className="detail-list">
+            <Detail label="Log" value={<code>{report?.debugLogPath ?? "Loading"}</code>} />
+            <Detail label="Bundle dir" value={<code>{report?.bundleDirectory ?? "Loading"}</code>} />
+            <Detail label="Generated" value={report ? formatDateTime(report.generatedAt) : "Loading"} />
+          </dl>
+          <div className="settings-form-grid">
+            <label className="field">
+              <span>Level</span>
+              <select
+                onChange={(event) => setLogDraft({ ...logDraft, level: event.target.value })}
+                value={logDraft.level}
+              >
+                <option value="info">Info</option>
+                <option value="warn">Warn</option>
+                <option value="error">Error</option>
+              </select>
+            </label>
+            <label className="field field--wide">
+              <span>Log note</span>
+              <textarea
+                className="compact-textarea"
+                onChange={(event) => setLogDraft({ ...logDraft, message: event.target.value })}
+                value={logDraft.message}
+              />
+            </label>
+            <button
+              className="secondary-button"
+              disabled={mutating || !logDraft.message.trim()}
+              onClick={addLogEntry}
+              type="button"
+            >
+              <Save size={17} />
+              Add log
+            </button>
+          </div>
+          <div className="debug-log-list">
+            {(report?.recentLogs ?? []).map((entry) => (
+              <DebugLogRow entry={entry} key={`${entry.timestamp}-${entry.message}`} />
+            ))}
+          </div>
+          {bundle && (
+            <dl className="detail-list detail-list--compact path-settings-meta">
+              <Detail label="ZIP" value={<code>{bundle.path}</code>} />
+              <Detail label="Size" value={formatBytes(bundle.sizeBytes)} />
+              <Detail label="Files" value={bundle.includedFiles.length} />
+            </dl>
+          )}
+          <WarningList warnings={[...(report?.warnings ?? []), ...(bundle?.warnings ?? [])]} />
+        </Panel>
+      </div>
+    </section>
+  );
+}
+
+function DebugCheckList({ title, checks }: { title: string; checks: DebugCheck[] }) {
+  if (checks.length === 0) {
+    return null;
+  }
+  return (
+    <div className="debug-check-list">
+      <h4>{title}</h4>
+      {checks.map((check) => (
+        <article className="data-row" key={`${title}-${check.label}`}>
+          <div>
+            <h4>{check.label}</h4>
+            <p>{check.detail}</p>
+          </div>
+          <StatusPill tone={debugCheckTone(check.status)}>{check.status}</StatusPill>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function DebugLogRow({ entry }: { entry: DebugLogEntry }) {
+  return (
+    <article className="data-row">
+      <div>
+        <h4>{entry.level.toUpperCase()} / {formatDateTime(entry.timestamp)}</h4>
+        <p>{entry.message}</p>
+      </div>
+    </article>
+  );
+}
+
+function debugCheckTone(status: string) {
+  if (status === "ok") {
+    return "good" as const;
+  }
+  if (status === "error") {
+    return "warn" as const;
+  }
+  return "neutral" as const;
+}
+
+function formatOptionalBytes(value: number | null | undefined) {
+  return typeof value === "number" ? formatBytes(value) : "None";
 }
 
 type AiViewProps = {

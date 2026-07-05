@@ -63,6 +63,7 @@ body {
 :root[data-theme="dark"] .data-row p,
 :root[data-theme="dark"] .capability-card p,
 :root[data-theme="dark"] .media-tile p,
+:root[data-theme="dark"] .debug-image-sample p,
 :root[data-theme="dark"] .quest-card p,
 :root[data-theme="dark"] .suggestion-card p,
 :root[data-theme="dark"] .cover-tile span,
@@ -93,6 +94,10 @@ body {
   color: #d8e6dd;
 }
 
+:root[data-theme="dark"] .detail-list code {
+  color: #d8e6dd;
+}
+
 :root[data-theme="dark"] .panel,
 :root[data-theme="dark"] .about-panel,
 :root[data-theme="dark"] .backup-view,
@@ -111,6 +116,7 @@ body {
 :root[data-theme="dark"] .thread-entry-row,
 :root[data-theme="dark"] .media-panel,
 :root[data-theme="dark"] .media-tile,
+:root[data-theme="dark"] .debug-image-sample,
 :root[data-theme="dark"] .quest-card,
 :root[data-theme="dark"] .suggestion-card,
 :root[data-theme="dark"] .changelog-release,
@@ -419,6 +425,7 @@ body {
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .composer-queued-image-preview,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .composer-attached-image,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .media-tile,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .debug-image-sample,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .capability-card,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .quest-card,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .suggestion-card,
@@ -533,6 +540,7 @@ body {
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .data-row p,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .capability-card p,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .media-tile p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .debug-image-sample p,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .quest-card p,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .suggestion-card p,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .cover-tile span,
@@ -1053,6 +1061,7 @@ button:active:not(:disabled) {
 .dashboard,
 .backup-view,
 .settings-grid,
+.debug-workspace,
 .about-stack,
 .about-panel,
 .threads-workspace,
@@ -1072,7 +1081,8 @@ button:active:not(:disabled) {
 }
 
 .dashboard-grid,
-.settings-grid {
+.settings-grid,
+.debug-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.16fr) minmax(320px, 0.84fr);
   gap: 16px;
@@ -1165,6 +1175,12 @@ button:active:not(:disabled) {
   font-size: 12px;
   line-height: 1.45;
   white-space: normal;
+}
+
+.detail-list code {
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .metric {
@@ -2329,6 +2345,58 @@ button:active:not(:disabled) {
   line-height: 1.35;
 }
 
+.debug-check-list,
+.debug-log-list,
+.debug-test-box {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.debug-check-list > h4 {
+  margin: 0;
+  color: #66756d;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.debug-image-samples {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(142px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.debug-image-sample {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #e1e7e2;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.debug-thumb {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+.debug-image-sample > div {
+  padding: 10px;
+}
+
+.debug-image-sample h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.debug-image-sample p {
+  margin: 5px 0 0;
+  color: #66756d;
+  font-size: 12px;
+}
+
 .catalog-cloud {
   display: flex;
   flex-wrap: wrap;
@@ -3267,6 +3335,7 @@ button:active:not(:disabled) {
   .metric-strip,
   .dashboard-grid,
     .settings-grid,
+    .debug-grid,
     .entries-workspace,
     .threads-workspace,
     .images-workspace,

@@ -31,6 +31,7 @@ pub struct LocalPathSettings {
     pub auto_sync_enabled: Option<bool>,
     pub auto_sync_interval_minutes: Option<i64>,
     pub minimize_to_tray_on_close: Option<bool>,
+    pub debug_menu_enabled: Option<bool>,
     pub show_window_after_update_restart: Option<bool>,
 }
 
