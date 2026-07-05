@@ -174,6 +174,159 @@ export type AIApiKeyMutationResponse = {
   completedAt: string;
 };
 
+export type AIChatScope = "search" | "entry" | "entries" | "thread";
+
+export type AIChatMessageStatus = "complete" | "streaming" | "interrupted" | "error";
+
+export type AIChatContextFilters = {
+  text?: string | null;
+  since?: string | null;
+  until?: string | null;
+  tags?: string[] | null;
+  excludeTags?: string[] | null;
+  moods?: string[] | null;
+  excludeMoods?: string[] | null;
+  starred?: boolean | null;
+  pinned?: boolean | null;
+  includeHidden?: boolean | null;
+  hasImages?: boolean | null;
+  sort?: "asc" | "desc" | null;
+  limit?: number | null;
+};
+
+export type AIChatContextPreviewRequest = {
+  message?: string | null;
+  scope: AIChatScope;
+  scopeIdentifiers: string[];
+  contextFilters?: AIChatContextFilters | null;
+  contextLimit?: number | null;
+  since?: string | null;
+  until?: string | null;
+  contextEntryUuids?: string[] | null;
+};
+
+export type AIChatContextPreviewEntry = {
+  id: number;
+  uuid: string;
+  createdAt: string;
+  title: string | null;
+  summary: string | null;
+  mood: string | null;
+  tags: string[];
+  hidden: boolean;
+  attachmentCount: number;
+  threadRootUuid: string | null;
+  threadTitle: string | null;
+  estimatedChars: number;
+  textPreview: string;
+};
+
+export type AIChatContextPreviewResponse = {
+  scope: AIChatScope;
+  entries: AIChatContextPreviewEntry[];
+  total: number;
+  contextLimit: number | null;
+  warnings: string[];
+};
+
+export type AIChatRequest = {
+  message: string;
+  conversationId?: number | null;
+  cloudProvider?: AICloudProvider | null;
+  model?: string | null;
+  scope: AIChatScope;
+  scopeIdentifiers: string[];
+  contextFilters?: AIChatContextFilters | null;
+  contextLimit?: number | null;
+  since?: string | null;
+  until?: string | null;
+  contextEntryUuids?: string[] | null;
+};
+
+export type AIChatRetryRequest = {
+  conversationId: number;
+  cloudProvider?: AICloudProvider | null;
+  model?: string | null;
+  contextEntryUuids?: string[] | null;
+};
+
+export type AIChatStreamStartResponse = {
+  streamId: string;
+  conversationId: number;
+  assistantMessageId: number;
+  provider: AICloudProvider;
+  model: string;
+};
+
+export type AIConversationMessage = {
+  id: number;
+  uuid: string;
+  role: "user" | "assistant" | string;
+  content: string;
+  status: AIChatMessageStatus | string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AIConversationListResponse = {
+  conversations: AiConversationSummary[];
+  warnings: string[];
+};
+
+export type AIConversationDetail = AiConversationSummary & {
+  scopeIdentifiers: string[];
+  contextLimit: number | null;
+  since: string | null;
+  until: string | null;
+  messages: AIConversationMessage[];
+};
+
+export type DeleteAIConversationResponse = {
+  conversationId: number;
+  conversationUuid: string;
+  audit: MutationAudit;
+};
+
+export type AIChatStartedEvent = AIChatStreamStartResponse;
+
+export type AIChatContextEvent = {
+  streamId: string;
+  conversationId: number;
+  context: AIChatContextPreviewResponse;
+};
+
+export type AIChatChunkEvent = {
+  streamId: string;
+  conversationId: number;
+  assistantMessageId: number;
+  chunk: string;
+  content: string;
+};
+
+export type AIChatCompleteEvent = {
+  streamId: string;
+  conversationId: number;
+  assistantMessageId: number;
+  content: string;
+};
+
+export type AIChatInterruptedEvent = {
+  streamId: string;
+  conversationId: number;
+  assistantMessageId: number;
+  content: string;
+  reason: string;
+};
+
+export type AIChatErrorEvent = {
+  streamId: string;
+  conversationId: number;
+  assistantMessageId: number;
+  content: string;
+  message: string;
+  detail: string | null;
+};
+
 export type TagUsage = {
   id: number;
   name: string;
@@ -314,12 +467,14 @@ export type Phase6Capability = {
 
 export type AiConversationSummary = {
   id: number;
-  uuid: string | null;
+  uuid: string;
   title: string;
   preview: string;
   cloudProvider: string;
+  model: string | null;
   scope: string;
   messageCount: number;
+  createdAt: string;
   lastMessageAt: string;
   updatedAt: string;
 };

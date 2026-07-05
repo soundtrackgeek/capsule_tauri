@@ -1,12 +1,20 @@
 import { afterEach, describe, expect, test } from "vitest";
 
 import {
+  cancelAiChatStream,
   clearAiApiKey,
+  deleteAiConversation,
+  getAiConversation,
   getAiProviderStatus,
   getAiSettings,
   getCapsuleConfig,
+  listAiConversations,
+  previewAiChatContext,
+  retryAiChatStream,
   setAiApiKey,
   setCapsuleConfigValue,
+  startAiChatStream,
+  subscribeAiChatEvents,
   updateAiSettings,
 } from "./backend";
 
@@ -23,6 +31,23 @@ async function resetAiSettings() {
   await clearAiApiKey("gemini");
   await clearAiApiKey("openai");
   await clearAiApiKey("openrouter");
+}
+
+async function resetAiChats() {
+  const response = await listAiConversations();
+  await Promise.all(
+    response.conversations.map((conversation) => deleteAiConversation(conversation.id)),
+  );
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 2_000) {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error("Timed out waiting for mock stream event.");
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 25));
+  }
 }
 
 describe("mock Cloud AI settings", () => {
@@ -97,5 +122,100 @@ describe("mock Cloud AI settings", () => {
     const cleared = await clearAiApiKey("gemini");
     expect(cleared.providerStatus.configured).toBe(false);
     expect(JSON.stringify(cleared)).not.toContain("mock-gemini-secret");
+  });
+});
+
+describe("mock AI chat", () => {
+  afterEach(async () => {
+    await resetAiChats();
+    await resetAiSettings();
+  });
+
+  test("previews context and streams a complete response", async () => {
+    const preview = await previewAiChatContext({
+      message: "Capsule Tauri",
+      scope: "search",
+      scopeIdentifiers: [],
+      contextFilters: null,
+      contextLimit: 2,
+      since: null,
+      until: null,
+      contextEntryUuids: null,
+    });
+    expect(preview.entries.length).toBeGreaterThan(0);
+
+    let completed = false;
+    let streamedContent = "";
+    const unsubscribe = await subscribeAiChatEvents({
+      chunk: (event) => {
+        streamedContent = event.content;
+      },
+      complete: () => {
+        completed = true;
+      },
+    });
+
+    const start = await startAiChatStream({
+      message: "What stands out about Capsule Tauri?",
+      cloudProvider: "gemini",
+      model: "gemini-3.5-flash",
+      scope: "search",
+      scopeIdentifiers: [],
+      contextFilters: null,
+      contextLimit: 2,
+      since: null,
+      until: null,
+      contextEntryUuids: preview.entries.map((entry) => entry.uuid),
+    });
+
+    await waitUntil(() => completed);
+    unsubscribe();
+    const detail = await getAiConversation(start.conversationId);
+    expect(streamedContent).toContain("mock streamer");
+    expect(detail.model).toBe("gemini-3.5-flash");
+    expect(detail.messages.at(-1)?.status).toBe("complete");
+    expect(JSON.stringify(detail)).not.toContain("mock-gemini-secret");
+  });
+
+  test("cancels and retries a mock stream", async () => {
+    let interrupted = false;
+    let completed = false;
+    const unsubscribe = await subscribeAiChatEvents({
+      interrupted: () => {
+        interrupted = true;
+      },
+      complete: () => {
+        completed = true;
+      },
+    });
+
+    const start = await startAiChatStream({
+      message: "Summarize the Codex workflow note",
+      cloudProvider: "openrouter",
+      model: "qwen/qwen3.7-plus",
+      scope: "search",
+      scopeIdentifiers: [],
+      contextFilters: null,
+      contextLimit: 1,
+      since: null,
+      until: null,
+      contextEntryUuids: null,
+    });
+    await cancelAiChatStream(start.streamId);
+    await waitUntil(() => interrupted);
+    const cancelled = await getAiConversation(start.conversationId);
+    expect(cancelled.messages.at(-1)?.status).toBe("interrupted");
+
+    await retryAiChatStream({
+      conversationId: start.conversationId,
+      cloudProvider: "openrouter",
+      model: "qwen/qwen3.7-plus",
+      contextEntryUuids: cancelled.scopeIdentifiers,
+    });
+    await waitUntil(() => completed);
+    unsubscribe();
+    const retried = await getAiConversation(start.conversationId);
+    expect(retried.messages.at(-1)?.status).toBe("complete");
+    expect(retried.model).toBe("qwen/qwen3.7-plus");
   });
 });

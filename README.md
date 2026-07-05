@@ -85,9 +85,9 @@ explicit capability-gated AI/sync surfaces:
 - Cover Wall view backed by ignored local cover files under `local-assets/covers`
   with generated thumbnails cached under the local app settings directory and
   an inline reader for the linked entry behind a selected cover.
-- AI overview for provider/model readiness, persisted conversations, AI Time
-  Capsules, embedding models, and local metadata suggestions that do not make
-  cloud requests.
+- AI chat workspace with saved conversations, context preview/removal,
+  provider/model selection, streamed cloud responses, stop/cancel, retry, and
+  delete actions, plus secondary local metadata suggestions.
 - Cloud AI Settings for Gemini, OpenAI, and OpenRouter provider/model defaults,
   chat context defaults, and redacted API key status without exposing stored
   secrets to the frontend.
@@ -164,7 +164,10 @@ that panel. Readiness checks report
 only redacted key status, resolving key presence from the OS credential store,
 process environment variables, `CAPSULE_ENV_PATH`, a `.env` beside the active
 Capsule config, then the current working directory `.env`; `.env` files are
-ignored by Git. This configuration slice does not make live cloud AI requests.
+ignored by Git. AI chat uses the selected provider/model and sends only the
+previewed text context after a first-use privacy confirmation; image files are
+not uploaded. Conversations and assistant drafts are persisted in the local
+database, and interrupted/error turns can be retried.
 
 Location auto-capture on entry creation uses the same Capsule configuration keys
 as the existing app: `location.auto_capture`, `location.auto_capture_method`,
@@ -228,6 +231,13 @@ Rust tests can be run from the Tauri crate:
 ```powershell
 cd src-tauri
 cargo test
+```
+
+The synthetic live provider smoke test is gated and sends no journal entries:
+
+```powershell
+$env:CAPSULE_AI_LIVE_SMOKE='1'
+cargo test --manifest-path src-tauri\Cargo.toml ai_providers::tests::live_provider_smoke_uses_synthetic_context_only -- --ignored --nocapture
 ```
 
 ## Continuous Integration

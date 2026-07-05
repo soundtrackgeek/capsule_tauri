@@ -1,4 +1,6 @@
+mod ai_chat;
 mod ai_config;
+mod ai_providers;
 mod backup;
 mod db;
 mod entries;
@@ -15,15 +17,17 @@ mod sync;
 mod threads;
 
 use models::{
-    AiApiKeyMutationResponse, AiApiKeyUpdateRequest, AiMetadataSuggestionRequest,
+    AiApiKeyMutationResponse, AiApiKeyUpdateRequest, AiChatContextPreviewRequest,
+    AiChatContextPreviewResponse, AiChatRequest, AiChatRetryRequest, AiChatStreamStartResponse,
+    AiConversationDetail, AiConversationListResponse, AiMetadataSuggestionRequest,
     AiMetadataSuggestionResponse, AiOverviewResponse, AiProviderStatus, AiSettings,
     AiSettingsUpdateRequest, AnalyticsPeriodRequest, AnalyticsResponse, BackupCreateRequest,
     BackupCreateResponse, BackupListResponse, BackupRestorePreview, BackupRestorePreviewRequest,
     BackupRestoreRequest, BackupRestoreResponse, BulkThreadDetachRequest, BulkThreadLinkRequest,
     CapsuleConfigResponse, ConfigMutationResponse, CoverWallRequest, CoverWallResponse,
-    DatabaseStatus, DeleteEntryResponse, Entry, EntryCreate, EntryFilters, EntryHistoryResponse,
-    EntryListResponse, EntryMutationResponse, EntryUpdate, ExportEntriesRequest,
-    ExportEntriesResponse, GamificationOverviewResponse, ImageAttachRequest,
+    DatabaseStatus, DeleteAiConversationResponse, DeleteEntryResponse, Entry, EntryCreate,
+    EntryFilters, EntryHistoryResponse, EntryListResponse, EntryMutationResponse, EntryUpdate,
+    ExportEntriesRequest, ExportEntriesResponse, GamificationOverviewResponse, ImageAttachRequest,
     ImageEntriesListResponse, ImageEntryListResponse, ImageMutationResponse,
     ImageUploadAttachRequest, ImageUploadResponse, ImageVariant, LibraryListResponse,
     LibraryPromptInput, LibraryPromptMutationResponse, LibraryPromptUpdate, LibraryTemplateInput,
@@ -657,6 +661,72 @@ async fn clear_ai_api_key(provider: String) -> Result<AiApiKeyMutationResponse, 
 }
 
 #[tauri::command]
+async fn preview_ai_chat_context(
+    input: AiChatContextPreviewRequest,
+) -> Result<AiChatContextPreviewResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || ai_chat::preview_ai_chat_context(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn list_ai_conversations() -> Result<AiConversationListResponse, String> {
+    tauri::async_runtime::spawn_blocking(ai_chat::list_ai_conversations)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_ai_conversation(conversation_id: i64) -> Result<AiConversationDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || ai_chat::get_ai_conversation(conversation_id))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn delete_ai_conversation(
+    conversation_id: i64,
+) -> Result<DeleteAiConversationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || ai_chat::delete_ai_conversation(conversation_id))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn start_ai_chat_stream(
+    app: tauri::AppHandle,
+    input: AiChatRequest,
+) -> Result<AiChatStreamStartResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || ai_chat::start_ai_chat_stream(app, input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn retry_ai_chat_stream(
+    app: tauri::AppHandle,
+    input: AiChatRetryRequest,
+) -> Result<AiChatStreamStartResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || ai_chat::retry_ai_chat_stream(app, input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn cancel_ai_chat_stream(stream_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || ai_chat::cancel_ai_chat_stream(stream_id))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn get_ai_overview() -> Result<AiOverviewResponse, String> {
     tauri::async_runtime::spawn_blocking(phase6::get_ai_overview)
         .await
@@ -880,6 +950,13 @@ pub fn run() {
             update_ai_settings,
             set_ai_api_key,
             clear_ai_api_key,
+            preview_ai_chat_context,
+            list_ai_conversations,
+            get_ai_conversation,
+            delete_ai_conversation,
+            start_ai_chat_stream,
+            retry_ai_chat_stream,
+            cancel_ai_chat_stream,
             get_ai_overview,
             suggest_ai_metadata,
             get_sync_overview,

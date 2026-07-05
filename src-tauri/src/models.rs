@@ -253,6 +253,206 @@ pub struct AiApiKeyMutationResponse {
     pub completed_at: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatContextFilters {
+    pub text: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub exclude_tags: Option<Vec<String>>,
+    pub moods: Option<Vec<String>>,
+    pub exclude_moods: Option<Vec<String>>,
+    pub starred: Option<bool>,
+    pub pinned: Option<bool>,
+    pub include_hidden: Option<bool>,
+    pub has_images: Option<bool>,
+    pub limit: Option<i64>,
+    pub sort: Option<EntrySort>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatContextPreviewRequest {
+    pub message: Option<String>,
+    pub scope: String,
+    pub scope_identifiers: Vec<String>,
+    pub context_filters: Option<AiChatContextFilters>,
+    pub context_limit: Option<i64>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub context_entry_uuids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatContextPreviewEntry {
+    pub id: i64,
+    pub uuid: String,
+    pub created_at: String,
+    pub title: Option<String>,
+    pub summary: Option<String>,
+    pub mood: Option<String>,
+    pub tags: Vec<String>,
+    pub hidden: bool,
+    pub attachment_count: i64,
+    pub thread_root_uuid: Option<String>,
+    pub thread_title: Option<String>,
+    pub text_preview: String,
+    pub estimated_chars: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatContextPreviewResponse {
+    pub scope: String,
+    pub entries: Vec<AiChatContextPreviewEntry>,
+    pub total: i64,
+    pub context_limit: Option<i64>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatRequest {
+    pub message: String,
+    pub conversation_id: Option<i64>,
+    pub cloud_provider: Option<String>,
+    pub model: Option<String>,
+    pub scope: String,
+    pub scope_identifiers: Vec<String>,
+    pub context_filters: Option<AiChatContextFilters>,
+    pub context_limit: Option<i64>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub context_entry_uuids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatRetryRequest {
+    pub conversation_id: i64,
+    pub cloud_provider: Option<String>,
+    pub model: Option<String>,
+    pub context_entry_uuids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatStreamStartResponse {
+    pub stream_id: String,
+    pub conversation_id: i64,
+    pub assistant_message_id: i64,
+    pub provider: String,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiConversationMessage {
+    pub id: i64,
+    pub uuid: String,
+    pub role: String,
+    pub content: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiConversationDetail {
+    pub id: i64,
+    pub uuid: String,
+    pub title: String,
+    pub preview: String,
+    pub cloud_provider: String,
+    pub model: Option<String>,
+    pub scope: String,
+    pub scope_identifiers: Vec<String>,
+    pub context_limit: Option<i64>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub message_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub last_message_at: String,
+    pub messages: Vec<AiConversationMessage>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiConversationListResponse {
+    pub conversations: Vec<AiConversationSummary>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteAiConversationResponse {
+    pub conversation_id: i64,
+    pub conversation_uuid: String,
+    pub audit: MutationAudit,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatStartedEvent {
+    pub stream_id: String,
+    pub conversation_id: i64,
+    pub assistant_message_id: i64,
+    pub provider: String,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatContextEvent {
+    pub stream_id: String,
+    pub conversation_id: i64,
+    pub context: AiChatContextPreviewResponse,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatChunkEvent {
+    pub stream_id: String,
+    pub conversation_id: i64,
+    pub assistant_message_id: i64,
+    pub chunk: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatCompleteEvent {
+    pub stream_id: String,
+    pub conversation_id: i64,
+    pub assistant_message_id: i64,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatInterruptedEvent {
+    pub stream_id: String,
+    pub conversation_id: i64,
+    pub assistant_message_id: i64,
+    pub content: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatErrorEvent {
+    pub stream_id: String,
+    pub conversation_id: i64,
+    pub assistant_message_id: i64,
+    pub content: String,
+    pub message: String,
+    pub detail: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TagUsage {
@@ -437,12 +637,14 @@ pub struct Phase6Capability {
 #[serde(rename_all = "camelCase")]
 pub struct AiConversationSummary {
     pub id: i64,
-    pub uuid: Option<String>,
+    pub uuid: String,
     pub title: String,
     pub preview: String,
     pub cloud_provider: String,
+    pub model: Option<String>,
     pub scope: String,
     pub message_count: i64,
+    pub created_at: String,
     pub last_message_at: String,
     pub updated_at: String,
 }

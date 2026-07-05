@@ -31,12 +31,15 @@ import {
   Paperclip,
   Plus,
   RefreshCw,
+  RotateCcw,
   Save,
   Search,
+  Send,
   Settings,
   ShieldCheck,
   Shuffle,
   Sparkles,
+  Square,
   Star,
   Tags,
   Trophy,
@@ -51,12 +54,14 @@ import {
   bulkDetachThreads,
   claimQuest,
   checkForAppUpdate,
+  cancelAiChatStream,
   createPrompt,
   createEntry,
   createBackup,
   clearAiApiKey,
   createTemplate,
   deleteCapsuleConfigValue,
+  deleteAiConversation,
   deleteEntry,
   deleteMood,
   deletePrompt,
@@ -65,6 +70,7 @@ import {
   disbandThread,
   exportEntries,
   getAnalytics,
+  getAiConversation,
   getAiOverview,
   getAiProviderStatus,
   getAiSettings,
@@ -79,6 +85,7 @@ import {
   getWritingCalendar,
   hideEntry,
   installAppUpdate,
+  listAiConversations,
   listCoverWall,
   listEntryHistory,
   listEntryImages,
@@ -91,6 +98,7 @@ import {
   listThreads,
   mergeTag,
   openBackupFolder,
+  previewAiChatContext,
   previewRestoreBackup,
   pinEntry,
   renameMood,
@@ -105,7 +113,10 @@ import {
   setPathSettings,
   updateAiSettings,
   starEntry,
+  startAiChatStream,
   suggestAiMetadata,
+  subscribeAiChatEvents,
+  retryAiChatStream,
   unhideEntry,
   unpinEntry,
   unstarEntry,
@@ -145,6 +156,11 @@ import { parseChangelog } from "./lib/changelog";
 import { formatBytes, formatDateTime } from "./lib/format";
 import type {
   AICloudProvider,
+  AIChatContextPreviewRequest,
+  AIChatContextPreviewResponse,
+  AIChatScope,
+  AIConversationDetail,
+  AiConversationSummary,
   AIProviderStatus,
   AISettings,
   AISettingsUpdateRequest,
@@ -816,7 +832,14 @@ function App() {
     setAiLoading(true);
     setError(null);
     try {
-      setAiOverview(await getAiOverview());
+      const [nextOverview, nextAiSettings, nextProviderStatuses] = await Promise.all([
+        getAiOverview(),
+        getAiSettings(),
+        getAiProviderStatus(),
+      ]);
+      setAiOverview(nextOverview);
+      setAiSettingsState(nextAiSettings);
+      setAiProviderStatuses(nextProviderStatuses);
     } catch (aiError) {
       setError(aiError instanceof Error ? aiError.message : "Unable to load AI overview");
     } finally {
@@ -2561,6 +2584,8 @@ function App() {
 
         {activeView === "ai" && (
           <AiView
+            aiProviderStatuses={aiProviderStatuses}
+            aiSettings={aiSettings}
             loading={aiLoading}
             onRefresh={loadAiOverview}
             onSuggest={handleSuggestAiMetadata}
@@ -6665,6 +6690,8 @@ function SettingsView({
 type AiViewProps = {
   status: DatabaseStatus | null;
   overview: AiOverviewResponse | null;
+  aiSettings: AISettings | null;
+  aiProviderStatuses: AIProviderStatus[];
   suggestion: AiMetadataSuggestionResponse | null;
   selectedIdentifier: string;
   setSelectedIdentifier: (value: string) => void;
@@ -6677,6 +6704,8 @@ type AiViewProps = {
 function AiView({
   status,
   overview,
+  aiSettings,
+  aiProviderStatuses,
   suggestion,
   selectedIdentifier,
   setSelectedIdentifier,
@@ -6685,122 +6714,689 @@ function AiView({
   onRefresh,
   onSuggest,
 }: AiViewProps) {
+  const [conversations, setConversations] = useState<AiConversationSummary[]>([]);
+  const [activeConversation, setActiveConversation] = useState<AIConversationDetail | null>(null);
+  const [selectedConversationId, setSelectedConversationId] = useState<number | null>(null);
+  const [chatProvider, setChatProvider] = useState<AICloudProvider>(
+    aiSettings?.cloudProvider ?? "gemini",
+  );
+  const [chatModel, setChatModel] = useState("");
+  const [chatScope, setChatScope] = useState<AIChatScope>("search");
+  const [scopeIdentifiers, setScopeIdentifiers] = useState("");
+  const [contextLimit, setContextLimit] = useState(
+    aiSettings?.defaultContextLimit === null || aiSettings?.defaultContextLimit === undefined
+      ? "all"
+      : String(aiSettings.defaultContextLimit),
+  );
+  const [contextSince, setContextSince] = useState(aiSettings?.defaultSince ?? "");
+  const [contextUntil, setContextUntil] = useState(aiSettings?.defaultUntil ?? "");
+  const [includeHidden, setIncludeHidden] = useState(false);
+  const [contextPreview, setContextPreview] = useState<AIChatContextPreviewResponse | null>(null);
+  const [removedContextUuids, setRemovedContextUuids] = useState<Set<string>>(() => new Set());
+  const [composer, setComposer] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [streamId, setStreamId] = useState<string | null>(null);
+  const [privacyConfirmedAt, setPrivacyConfirmedAt] = useState<string | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [chatNotice, setChatNotice] = useState<string | null>(null);
+
+  const activeProviderStatus = useMemo(
+    () => aiProviderStatuses.find((status) => status.provider === chatProvider) ?? null,
+    [aiProviderStatuses, chatProvider],
+  );
+  const availableModels = useMemo(
+    () => activeProviderStatus?.availableModels ?? [],
+    [activeProviderStatus],
+  );
+  const providerReady = Boolean(activeProviderStatus?.configured) || !isTauriRuntime();
+  const previewEntries = useMemo(
+    () =>
+      (contextPreview?.entries ?? []).filter((entry) => !removedContextUuids.has(entry.uuid)),
+    [contextPreview, removedContextUuids],
+  );
+
+  const patchActiveMessage = useCallback(
+    (
+      conversationId: number,
+      messageId: number,
+      patch: Partial<Pick<AIConversationDetail["messages"][number], "content" | "status">>,
+    ) => {
+      setActiveConversation((current) => {
+        if (!current || current.id !== conversationId) {
+          return current;
+        }
+        const messages = current.messages.map((message) =>
+          message.id === messageId
+            ? { ...message, ...patch, updatedAt: new Date().toISOString() }
+            : message,
+        );
+        return refreshAiConversationDetail({ ...current, messages });
+      });
+    },
+    [],
+  );
+
+  const loadChatConversations = useCallback(
+    async (preferredId?: number | null) => {
+      if (!status?.readable) {
+        setConversations([]);
+        setActiveConversation(null);
+        setSelectedConversationId(null);
+        return;
+      }
+      setChatLoading(true);
+      setChatError(null);
+      try {
+        const response = await listAiConversations();
+        setConversations(response.conversations);
+        const nextId =
+          preferredId ??
+          selectedConversationId ??
+          response.conversations[0]?.id ??
+          null;
+        setSelectedConversationId(nextId);
+        setActiveConversation(nextId ? await getAiConversation(nextId) : null);
+      } catch (conversationError) {
+        setChatError(
+          conversationError instanceof Error
+            ? conversationError.message
+            : "Unable to load AI conversations",
+        );
+      } finally {
+        setChatLoading(false);
+      }
+    },
+    [selectedConversationId, status?.readable],
+  );
+
+  const buildContextRequest = useCallback(
+    (message: string, contextEntryUuids?: string[] | null): AIChatContextPreviewRequest => {
+      const parsedLimit = parseAiContextLimit(contextLimit);
+      const identifiers = chatScope === "search" ? [] : splitFilter(scopeIdentifiers);
+      return {
+        message: nullableFromText(message),
+        scope: chatScope,
+        scopeIdentifiers: identifiers,
+        contextFilters: {
+          text: chatScope === "search" ? nullableFromText(message) : null,
+          includeHidden,
+          sort: "desc",
+        },
+        contextLimit: parsedLimit,
+        since: contextSince || null,
+        until: contextUntil || null,
+        contextEntryUuids: contextEntryUuids ?? null,
+      };
+    },
+    [chatScope, contextLimit, contextSince, contextUntil, includeHidden, scopeIdentifiers],
+  );
+
+  const handlePreviewContext = useCallback(async () => {
+    setPreviewLoading(true);
+    setChatError(null);
+    try {
+      const preview = await previewAiChatContext(buildContextRequest(composer));
+      setContextPreview(preview);
+      setRemovedContextUuids(new Set());
+      setChatNotice(`Previewed ${preview.entries.length} context entries.`);
+    } catch (previewError) {
+      setChatError(previewError instanceof Error ? previewError.message : "Unable to preview context");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [buildContextRequest, composer]);
+
+  const ensurePrivacyConfirmed = useCallback(async () => {
+    if (privacyConfirmedAt) {
+      return true;
+    }
+    const confirmed = window.confirm(
+      "AI chat sends the selected text context to the chosen cloud provider. Image files and API keys are not sent.",
+    );
+    if (!confirmed) {
+      return false;
+    }
+    const timestamp = new Date().toISOString();
+    await setCapsuleConfigValue("ai_chat_privacy_confirmed_at", timestamp);
+    setPrivacyConfirmedAt(timestamp);
+    return true;
+  }, [privacyConfirmedAt]);
+
+  const handleSend = useCallback(async () => {
+    const message = composer.trim();
+    if (!message) {
+      return;
+    }
+    if (!providerReady) {
+      setChatError(`Configure ${providerEnvLabel(chatProvider)} before starting a live chat.`);
+      return;
+    }
+    setChatError(null);
+    setChatNotice(null);
+    try {
+      if (!(await ensurePrivacyConfirmed())) {
+        return;
+      }
+      const preview =
+        contextPreview ?? (await previewAiChatContext(buildContextRequest(message)));
+      const contextEntryUuids = preview.entries
+        .filter((entry) => !removedContextUuids.has(entry.uuid))
+        .map((entry) => entry.uuid);
+      const response = await startAiChatStream({
+        ...buildContextRequest(message, contextEntryUuids),
+        message,
+        conversationId: activeConversation?.id ?? null,
+        cloudProvider: chatProvider,
+        model: chatModel || activeProviderStatus?.selectedModel || null,
+      });
+      setComposer("");
+      setStreamId(response.streamId);
+      setSelectedConversationId(response.conversationId);
+      setActiveConversation(await getAiConversation(response.conversationId));
+      void loadChatConversations(response.conversationId);
+    } catch (sendError) {
+      setChatError(sendError instanceof Error ? sendError.message : "Unable to start AI chat");
+    }
+  }, [
+    activeConversation?.id,
+    activeProviderStatus?.selectedModel,
+    buildContextRequest,
+    chatModel,
+    chatProvider,
+    composer,
+    contextPreview,
+    ensurePrivacyConfirmed,
+    loadChatConversations,
+    providerReady,
+    removedContextUuids,
+  ]);
+
+  const handleRetry = useCallback(
+    async (messageId: number) => {
+      if (!activeConversation) {
+        return;
+      }
+      setChatError(null);
+      try {
+        if (!(await ensurePrivacyConfirmed())) {
+          return;
+        }
+        const response = await retryAiChatStream({
+          conversationId: activeConversation.id,
+          cloudProvider: chatProvider,
+          model: chatModel || activeProviderStatus?.selectedModel || null,
+          contextEntryUuids: previewEntries.length
+            ? previewEntries.map((entry) => entry.uuid)
+            : activeConversation.scopeIdentifiers,
+        });
+        setStreamId(response.streamId);
+        setSelectedConversationId(response.conversationId);
+        setActiveConversation(await getAiConversation(response.conversationId));
+        setChatNotice(`Retrying response ${messageId}.`);
+      } catch (retryError) {
+        setChatError(retryError instanceof Error ? retryError.message : "Unable to retry AI chat");
+      }
+    },
+    [
+      activeConversation,
+      activeProviderStatus?.selectedModel,
+      chatModel,
+      chatProvider,
+      ensurePrivacyConfirmed,
+      previewEntries,
+    ],
+  );
+
+  const handleCancel = useCallback(async () => {
+    if (!streamId) {
+      return;
+    }
+    await cancelAiChatStream(streamId);
+  }, [streamId]);
+
+  const handleSelectConversation = useCallback(async (conversationId: number) => {
+    setSelectedConversationId(conversationId);
+    setChatError(null);
+    setActiveConversation(await getAiConversation(conversationId));
+  }, []);
+
+  const handleDeleteConversation = useCallback(
+    async (conversationId: number) => {
+      if (!window.confirm("Delete this AI conversation?")) {
+        return;
+      }
+      await deleteAiConversation(conversationId);
+      if (selectedConversationId === conversationId) {
+        setSelectedConversationId(null);
+        setActiveConversation(null);
+      }
+      await loadChatConversations(null);
+    },
+    [loadChatConversations, selectedConversationId],
+  );
+
+  useEffect(() => {
+    if (!status?.readable) {
+      return;
+    }
+    void loadChatConversations();
+    void getCapsuleConfig()
+      .then((config) => {
+        setPrivacyConfirmedAt(
+          config.values.find((item) => item.key === "ai_chat_privacy_confirmed_at")?.value ?? null,
+        );
+      })
+      .catch(() => undefined);
+  }, [loadChatConversations, status?.readable]);
+
+  useEffect(() => {
+    setChatProvider(aiSettings?.cloudProvider ?? "gemini");
+    setContextLimit(
+      aiSettings?.defaultContextLimit === null || aiSettings?.defaultContextLimit === undefined
+        ? "all"
+        : String(aiSettings.defaultContextLimit),
+    );
+    setContextSince(aiSettings?.defaultSince ?? "");
+    setContextUntil(aiSettings?.defaultUntil ?? "");
+  }, [
+    aiSettings?.cloudProvider,
+    aiSettings?.defaultContextLimit,
+    aiSettings?.defaultSince,
+    aiSettings?.defaultUntil,
+  ]);
+
+  useEffect(() => {
+    setChatModel((current) => {
+      if (availableModels.includes(current)) {
+        return current;
+      }
+      return activeProviderStatus?.selectedModel ?? availableModels[0] ?? "";
+    });
+  }, [activeProviderStatus?.selectedModel, availableModels]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unsubscribe: (() => void) | null = null;
+    void subscribeAiChatEvents({
+      chunk: (event) => {
+        patchActiveMessage(event.conversationId, event.assistantMessageId, {
+          content: event.content,
+          status: "streaming",
+        });
+      },
+      complete: (event) => {
+        patchActiveMessage(event.conversationId, event.assistantMessageId, {
+          content: event.content,
+          status: "complete",
+        });
+        setStreamId(null);
+        void loadChatConversations(event.conversationId);
+      },
+      interrupted: (event) => {
+        patchActiveMessage(event.conversationId, event.assistantMessageId, {
+          content: event.content,
+          status: "interrupted",
+        });
+        setStreamId(null);
+        void loadChatConversations(event.conversationId);
+      },
+      error: (event) => {
+        patchActiveMessage(event.conversationId, event.assistantMessageId, {
+          content: event.content,
+          status: "error",
+        });
+        setStreamId(null);
+        setChatError(event.message);
+        void loadChatConversations(event.conversationId);
+      },
+    }).then((nextUnsubscribe) => {
+      if (cancelled) {
+        nextUnsubscribe();
+        return;
+      }
+      unsubscribe = nextUnsubscribe;
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [loadChatConversations, patchActiveMessage]);
+
   if (!status?.readable) {
     return <UnavailableState icon={<Bot size={24} />} label="AI needs a readable database." status={status} />;
   }
 
   return (
-    <section className="phase6-workspace">
-      <div className="metric-strip">
-        <Metric label="Conversations" value={overview?.conversationCount ?? 0} />
-        <Metric label="Messages" value={overview?.messageCount ?? 0} />
-        <Metric label="Embedded Entries" value={overview?.embeddedEntryCount ?? 0} />
-        <Metric label="Time Capsules" value={overview?.timeCapsuleCount ?? 0} />
-      </div>
-
-      <div className="phase6-grid">
-        <Panel
-          icon={<Bot size={20} />}
-          title="AI Capability Layer"
-          action={
-            <button className="secondary-button secondary-button--small" onClick={onRefresh} type="button">
-              <RefreshCw size={15} />
-              {loading ? "Loading" : "Refresh"}
-            </button>
-          }
-        >
-          <dl className="detail-list">
-            <Detail label="Provider" value={overview?.provider ?? "Not configured"} />
-            <Detail label="Model" value={overview?.model ?? "Not configured"} />
-          </dl>
-          <CapabilityGrid capabilities={overview?.capabilities ?? []} />
-          <WarningList warnings={overview?.warnings ?? []} />
-        </Panel>
-
-        <Panel icon={<Sparkles size={20} />} title="Metadata Suggestions">
-          <div className="inline-form">
-            <label className="field">
-              <span>Entry UUID or ID</span>
-              <input
-                onChange={(event) => setSelectedIdentifier(event.target.value)}
-                placeholder="entry_..."
-                value={selectedIdentifier}
-              />
-            </label>
-            <button
-              className="primary-button"
-              disabled={suggesting || !selectedIdentifier.trim()}
-              onClick={onSuggest}
-              type="button"
-            >
-              <Sparkles size={17} />
-              {suggesting ? "Suggesting" : "Suggest"}
-            </button>
+    <section className="ai-chat-workspace">
+      <aside className="ai-chat-sidebar">
+        <div className="ai-chat-sidebar__header">
+          <div>
+            <span className="section-kicker">AI</span>
+            <h2>Chats</h2>
           </div>
-          {suggestion ? (
-            <div className="suggestion-card">
-              <div className="metadata-heading-row">
-                <h4>{suggestion.suggestedTitle ?? "Untitled suggestion"}</h4>
-                <span className="status-pill status-pill--neutral">
-                  {Math.round(suggestion.confidence * 100)}%
-                </span>
-              </div>
-              <p>{suggestion.suggestedSummary ?? "No summary suggestion."}</p>
-              <div className="tag-row">
-                {suggestion.suggestedMood && <span className="mood-chip">{suggestion.suggestedMood}</span>}
-                {suggestion.suggestedTags.map((tag) => (
-                  <span className="tag-chip" key={tag}>
-                    {tag}
-                  </span>
-                ))}
-              </div>
-              <WarningList warnings={suggestion.warnings} />
-            </div>
+          <button
+            className="icon-button"
+            onClick={() => {
+              setSelectedConversationId(null);
+              setActiveConversation(null);
+              setComposer("");
+              setContextPreview(null);
+              setRemovedContextUuids(new Set());
+            }}
+            title="New chat"
+            type="button"
+          >
+            <Plus size={18} />
+          </button>
+        </div>
+        <div className="ai-conversation-list">
+          {chatLoading && conversations.length === 0 ? (
+            <SkeletonList compact />
+          ) : conversations.length === 0 ? (
+            <div className="empty-list">No saved AI chats.</div>
           ) : (
-            <p className="muted">Suggestions run locally unless an explicit provider bridge is later configured.</p>
+            conversations.map((conversation) => (
+              <article
+                className={
+                  selectedConversationId === conversation.id
+                    ? "ai-conversation-card ai-conversation-card--active"
+                    : "ai-conversation-card"
+                }
+                key={conversation.id}
+              >
+                <button onClick={() => void handleSelectConversation(conversation.id)} type="button">
+                  <strong>{conversation.title || "New chat"}</strong>
+                  <span>{conversation.preview || formatDateTime(conversation.lastMessageAt)}</span>
+                  <small>
+                    {providerEnvLabel(conversation.cloudProvider as AICloudProvider)} /{" "}
+                    {conversation.model ?? "model"} / {conversation.messageCount}
+                  </small>
+                </button>
+                <button
+                  className="icon-button icon-button--small"
+                  onClick={() => void handleDeleteConversation(conversation.id)}
+                  title="Delete chat"
+                  type="button"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </article>
+            ))
           )}
-        </Panel>
-      </div>
+        </div>
+      </aside>
 
-      <div className="phase6-grid phase6-grid--three">
-        <Panel icon={<FileText size={20} />} title="Recent AI Chats">
-          <DataList
-            emptyText="No persisted AI conversations found."
-            items={(overview?.conversations ?? []).map((conversation) => ({
-              key: String(conversation.id),
-              title: conversation.title,
-              meta: `${conversation.cloudProvider} / ${conversation.scope} / ${conversation.messageCount} messages`,
-              body: conversation.preview || formatDateTime(conversation.lastMessageAt),
-            }))}
-          />
-        </Panel>
+      <main className="ai-chat-main">
+        <div className="ai-chat-toolbar">
+          <div className="ai-chat-toolbar__selectors">
+            <label className="field">
+              <span>Provider</span>
+              <select
+                onChange={(event) => setChatProvider(event.target.value as AICloudProvider)}
+                value={chatProvider}
+              >
+                <option value="gemini">Gemini</option>
+                <option value="openai">OpenAI</option>
+                <option value="openrouter">OpenRouter</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Model</span>
+              <select onChange={(event) => setChatModel(event.target.value)} value={chatModel}>
+                {availableModels.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className={providerReady ? "status-pill status-pill--good" : "status-pill status-pill--warn"}>
+              {providerReady ? "Ready" : "Missing key"}
+            </span>
+          </div>
+          <button className="secondary-button secondary-button--small" onClick={onRefresh} type="button">
+            <RefreshCw size={15} />
+            {loading ? "Loading" : "Refresh"}
+          </button>
+        </div>
 
-        <Panel icon={<Clock3 size={20} />} title="Time Capsules">
-          <DataList
-            emptyText="No AI Time Capsules found."
-            items={(overview?.timeCapsules ?? []).map((capsule) => ({
-              key: String(capsule.id),
-              title: capsule.triggerLabel,
-              meta: `${capsule.status} / ${capsule.sourceEntryCount} entries`,
-              body: `${formatDateTime(capsule.dueDate)} / ${capsule.cloudProvider || "provider unknown"}`,
-            }))}
-          />
-        </Panel>
+        <div className="ai-chat-body">
+          <section className="ai-transcript">
+            {activeConversation?.messages.length ? (
+              activeConversation.messages.map((message) => (
+                <article className={`ai-message ai-message--${message.role}`} key={message.id}>
+                  <div className="ai-message__meta">
+                    <strong>{message.role === "user" ? "You" : "Assistant"}</strong>
+                    <span>{message.status}</span>
+                  </div>
+                  <p>{message.content || (message.status === "streaming" ? "..." : "")}</p>
+                  {message.role === "assistant" &&
+                    (message.status === "interrupted" || message.status === "error") && (
+                      <button
+                        className="secondary-button secondary-button--small"
+                        onClick={() => void handleRetry(message.id)}
+                        type="button"
+                      >
+                        <RotateCcw size={15} />
+                        Retry
+                      </button>
+                    )}
+                </article>
+              ))
+            ) : (
+              <div className="ai-empty-transcript">
+                <Bot size={26} />
+                <h3>New AI chat</h3>
+              </div>
+            )}
+          </section>
 
-        <Panel icon={<Database size={20} />} title="Embeddings">
-          <DataList
-            emptyText="No embedding models found."
-            items={(overview?.embeddingModels ?? []).map((model) => ({
-              key: String(model.id),
-              title: model.name,
-              meta: `${model.provider} / ${model.dimensions} dimensions`,
-              body: `${model.entryCount} embedded entries${model.isActive ? " / active" : ""}`,
-            }))}
+          <aside className="ai-context-panel">
+            <div className="ai-context-controls">
+              <label className="field">
+                <span>Scope</span>
+                <select onChange={(event) => setChatScope(event.target.value as AIChatScope)} value={chatScope}>
+                  <option value="search">Search</option>
+                  <option value="entry">Entry</option>
+                  <option value="entries">Entries</option>
+                  <option value="thread">Thread</option>
+                </select>
+              </label>
+              {chatScope !== "search" && (
+                <label className="field field--wide">
+                  <span>Entry IDs</span>
+                  <input
+                    onChange={(event) => setScopeIdentifiers(event.target.value)}
+                    placeholder="entry_..."
+                    value={scopeIdentifiers}
+                  />
+                </label>
+              )}
+              <div className="field-grid">
+                <label className="field">
+                  <span>Limit</span>
+                  <input onChange={(event) => setContextLimit(event.target.value)} value={contextLimit} />
+                </label>
+                <label className="check-row ai-hidden-check">
+                  <input
+                    checked={includeHidden}
+                    onChange={(event) => setIncludeHidden(event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>Hidden</span>
+                </label>
+              </div>
+              <div className="field-grid">
+                <label className="field">
+                  <span>Since</span>
+                  <input onChange={(event) => setContextSince(event.target.value)} type="date" value={contextSince} />
+                </label>
+                <label className="field">
+                  <span>Until</span>
+                  <input onChange={(event) => setContextUntil(event.target.value)} type="date" value={contextUntil} />
+                </label>
+              </div>
+              <button
+                className="secondary-button"
+                disabled={previewLoading}
+                onClick={() => void handlePreviewContext()}
+                type="button"
+              >
+                <Search size={16} />
+                {previewLoading ? "Previewing" : "Preview"}
+              </button>
+            </div>
+
+            <div className="ai-context-preview">
+              <div className="metadata-heading-row">
+                <h4>Context</h4>
+                <span className="status-pill status-pill--neutral">{previewEntries.length}</span>
+              </div>
+              <WarningList warnings={contextPreview?.warnings ?? []} />
+              {previewEntries.length === 0 ? (
+                <p className="muted">No context selected.</p>
+              ) : (
+                previewEntries.map((entry) => (
+                  <article className="ai-context-entry" key={entry.uuid}>
+                    <div>
+                      <strong>{entry.title ?? entry.uuid}</strong>
+                      <span>{formatDateTime(entry.createdAt)}</span>
+                    </div>
+                    <p>{entry.textPreview}</p>
+                    <button
+                      className="icon-button icon-button--small"
+                      onClick={() =>
+                        setRemovedContextUuids((current) => new Set([...current, entry.uuid]))
+                      }
+                      title="Remove from context"
+                      type="button"
+                    >
+                      <X size={14} />
+                    </button>
+                  </article>
+                ))
+              )}
+            </div>
+          </aside>
+        </div>
+
+        <div className="ai-composer">
+          <textarea
+            onChange={(event) => setComposer(event.target.value)}
+            placeholder="Ask about the selected entries"
+            value={composer}
           />
-        </Panel>
-      </div>
+          <div className="ai-composer__actions">
+            {streamId ? (
+              <button className="secondary-button" onClick={() => void handleCancel()} type="button">
+                <Square size={16} />
+                Stop
+              </button>
+            ) : (
+              <button
+                className="primary-button"
+                disabled={!composer.trim() || !providerReady}
+                onClick={() => void handleSend()}
+                type="button"
+              >
+                <Send size={16} />
+                Send
+              </button>
+            )}
+          </div>
+        </div>
+
+        {chatError && <div className="inline-error">{chatError}</div>}
+        {chatNotice && <div className="inline-success">{chatNotice}</div>}
+
+        <div className="ai-secondary-grid">
+          <Panel icon={<Sparkles size={20} />} title="Metadata Suggestions">
+            <div className="inline-form">
+              <label className="field">
+                <span>Entry UUID or ID</span>
+                <input
+                  onChange={(event) => setSelectedIdentifier(event.target.value)}
+                  placeholder="entry_..."
+                  value={selectedIdentifier}
+                />
+              </label>
+              <button
+                className="primary-button"
+                disabled={suggesting || !selectedIdentifier.trim()}
+                onClick={onSuggest}
+                type="button"
+              >
+                <Sparkles size={17} />
+                {suggesting ? "Suggesting" : "Suggest"}
+              </button>
+            </div>
+            {suggestion ? (
+              <div className="suggestion-card">
+                <div className="metadata-heading-row">
+                  <h4>{suggestion.suggestedTitle ?? "Untitled suggestion"}</h4>
+                  <span className="status-pill status-pill--neutral">
+                    {Math.round(suggestion.confidence * 100)}%
+                  </span>
+                </div>
+                <p>{suggestion.suggestedSummary ?? "No summary suggestion."}</p>
+                <div className="tag-row">
+                  {suggestion.suggestedMood && <span className="mood-chip">{suggestion.suggestedMood}</span>}
+                  {suggestion.suggestedTags.map((tag) => (
+                    <span className="tag-chip" key={tag}>
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+                <WarningList warnings={suggestion.warnings} />
+              </div>
+            ) : (
+              <p className="muted">No suggestion selected.</p>
+            )}
+          </Panel>
+
+          <Panel icon={<Database size={20} />} title="AI Status">
+            <dl className="detail-list">
+              <Detail label="Provider" value={overview?.provider ?? providerEnvLabel(chatProvider)} />
+              <Detail label="Model" value={(overview?.model ?? chatModel) || "Not configured"} />
+              <Detail label="Messages" value={String(overview?.messageCount ?? 0)} />
+              <Detail label="Embedded" value={String(overview?.embeddedEntryCount ?? 0)} />
+            </dl>
+            <CapabilityGrid capabilities={overview?.capabilities ?? []} />
+            <WarningList warnings={overview?.warnings ?? []} />
+          </Panel>
+        </div>
+      </main>
     </section>
   );
+}
+
+function parseAiContextLimit(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || ["all", "none", "unlimited", "max"].includes(normalized)) {
+    return null;
+  }
+  const parsed = Number(normalized);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error("Context limit must be a positive integer or all.");
+  }
+  return parsed;
+}
+
+function refreshAiConversationDetail(conversation: AIConversationDetail): AIConversationDetail {
+  const latest = [...conversation.messages].reverse().find((message) => message.content.trim());
+  const latestTime =
+    [...conversation.messages]
+      .map((message) => (message.updatedAt > message.createdAt ? message.updatedAt : message.createdAt))
+      .sort()
+      .at(-1) ?? conversation.updatedAt;
+  return {
+    ...conversation,
+    preview: latest?.content.slice(0, 160) ?? conversation.preview,
+    messageCount: conversation.messages.length,
+    lastMessageAt: latestTime,
+    updatedAt: latestTime,
+  };
 }
 
 type SyncViewProps = {

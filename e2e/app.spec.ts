@@ -146,3 +146,31 @@ test("configures Cloud AI settings without exposing API keys", async ({ page }) 
 
   expect(browserErrors).toEqual([]);
 });
+
+test("uses the AI chat workspace with mock streaming and retry", async ({ page }) => {
+  const browserErrors = trackBrowserErrors(page);
+
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.goto("/");
+  await page
+    .getByRole("navigation", { name: "Primary" })
+    .getByRole("button", { name: "AI" })
+    .click();
+
+  await expect(page.getByRole("heading", { name: "Chats" })).toBeVisible();
+  await page.getByPlaceholder("Ask about the selected entries").fill("What stands out about Capsule Tauri?");
+  await page.getByRole("button", { name: "Preview" }).click();
+  await expect(page.getByText(/Previewed \d+ context entries/)).toBeVisible();
+
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator(".ai-transcript")).toContainText("mock streamer");
+
+  await page.getByPlaceholder("Ask about the selected entries").fill("Summarize the Codex workflow note");
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Stop" }).click();
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.locator(".ai-transcript")).toContainText("mock streamer");
+
+  expect(browserErrors).toEqual([]);
+});

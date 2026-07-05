@@ -71,6 +71,11 @@ struct ApiKeyPresence {
     source: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct AiProviderApiKey {
+    pub value: String,
+}
+
 pub fn get_ai_settings() -> Result<AiSettings> {
     get_ai_settings_for_database(&db::resolve_database_path())
 }
@@ -410,7 +415,7 @@ fn normalize_date(value: Option<&str>, label: &str) -> Result<Option<String>> {
     Ok(Some(value))
 }
 
-fn selected_model_for_provider(settings: &AiSettings, provider: &str) -> String {
+pub(crate) fn selected_model_for_provider(settings: &AiSettings, provider: &str) -> String {
     match provider {
         "openai" => settings.openai_model.clone(),
         "openrouter" => settings.openrouter_model.clone(),
@@ -418,22 +423,59 @@ fn selected_model_for_provider(settings: &AiSettings, provider: &str) -> String 
     }
 }
 
+pub(crate) fn model_for_provider(
+    settings: &AiSettings,
+    provider: &str,
+    requested_model: Option<&str>,
+) -> Result<String> {
+    let Some(requested_model) = requested_model.and_then(|model| normalize_string(Some(model)))
+    else {
+        return Ok(selected_model_for_provider(settings, provider));
+    };
+    let provider_definition = validate_provider(provider)?;
+    validate_model(
+        &format!("{} model", provider_definition.label),
+        &requested_model,
+        provider_definition.models,
+    )
+}
+
+pub(crate) fn api_key_for_provider(db_path: &Path, provider: &str) -> Result<AiProviderApiKey> {
+    let provider = validate_provider(provider)?;
+    if let Some(value) = credential_store_key(provider.env_key)? {
+        return Ok(AiProviderApiKey { value });
+    }
+    if let Some(value) = process_env_key(provider.env_key) {
+        return Ok(AiProviderApiKey { value });
+    }
+    if let Some(value) = dotenv_key(db_path, provider.env_key) {
+        return Ok(AiProviderApiKey { value });
+    }
+    Err(anyhow!(
+        "{} is not configured in the OS credential store, environment, or local .env.",
+        provider.env_key
+    ))
+}
+
 fn lookup_api_key_presence(db_path: &Path, provider: ProviderDefinition) -> ApiKeyPresence {
-    if credential_store_has_key(provider.env_key).unwrap_or(false) {
+    if credential_store_key(provider.env_key)
+        .map(|value| value.is_some())
+        .unwrap_or(false)
+    {
         return ApiKeyPresence {
             configured: true,
             source: Some("OS credential store".to_string()),
         };
     }
 
-    if process_env_has_key(provider.env_key) {
+    if process_env_key(provider.env_key).is_some() {
         return ApiKeyPresence {
             configured: true,
             source: Some("Environment".to_string()),
         };
     }
 
-    if dotenv_has_key(db_path, provider.env_key) {
+    if dotenv_key(db_path, provider.env_key).is_some() {
         return ApiKeyPresence {
             configured: true,
             source: Some("Local .env".to_string()),
@@ -446,11 +488,11 @@ fn lookup_api_key_presence(db_path: &Path, provider: ProviderDefinition) -> ApiK
     }
 }
 
-fn credential_store_has_key(env_key: &str) -> Result<bool> {
+fn credential_store_key(env_key: &str) -> Result<Option<String>> {
     let entry = keyring_entry(env_key)?;
     match entry.get_password() {
-        Ok(value) => Ok(!value.trim().is_empty()),
-        Err(KeyringError::NoEntry) => Ok(false),
+        Ok(value) => Ok(normalize_string(Some(&value))),
+        Err(KeyringError::NoEntry) => Ok(None),
         Err(error) => Err(error.into()),
     }
 }
@@ -480,17 +522,16 @@ fn ensure_credential_store() -> Result<()> {
     }
 }
 
-fn process_env_has_key(env_key: &str) -> bool {
+fn process_env_key(env_key: &str) -> Option<String> {
     env::var(env_key)
         .ok()
         .and_then(|value| normalize_string(Some(&value)))
-        .is_some()
 }
 
-fn dotenv_has_key(db_path: &Path, env_key: &str) -> bool {
+fn dotenv_key(db_path: &Path, env_key: &str) -> Option<String> {
     dotenv_candidates(db_path)
         .into_iter()
-        .any(|path| dotenv_file_has_key(&path, env_key))
+        .find_map(|path| dotenv_file_key(&path, env_key))
 }
 
 fn dotenv_candidates(db_path: &Path) -> Vec<PathBuf> {
@@ -517,19 +558,20 @@ fn dotenv_candidates(db_path: &Path) -> Vec<PathBuf> {
     unique
 }
 
-fn dotenv_file_has_key(path: &Path, env_key: &str) -> bool {
+fn dotenv_file_key(path: &Path, env_key: &str) -> Option<String> {
     if !path.exists()
         || !fs::metadata(path)
             .map(|item| item.is_file())
             .unwrap_or(false)
     {
-        return false;
+        return None;
     }
     let Ok(iter) = dotenvy::from_path_iter(path) else {
-        return false;
+        return None;
     };
     iter.filter_map(|item| item.ok())
-        .any(|(key, value)| key == env_key && !value.trim().is_empty())
+        .find_map(|(key, value)| (key == env_key).then_some(value))
+        .and_then(|value| normalize_string(Some(&value)))
 }
 
 fn set_optional_config_string(
@@ -708,7 +750,10 @@ mod tests {
         let env_path = temp_dir.path().join(".env");
         fs::write(&env_path, "OPENROUTER_API_KEY=secret-value\n").expect("env");
 
-        assert!(dotenv_file_has_key(&env_path, "OPENROUTER_API_KEY"));
-        assert!(!dotenv_file_has_key(&env_path, "OPENAI_API_KEY"));
+        assert_eq!(
+            dotenv_file_key(&env_path, "OPENROUTER_API_KEY").as_deref(),
+            Some("secret-value")
+        );
+        assert!(dotenv_file_key(&env_path, "OPENAI_API_KEY").is_none());
     }
 }

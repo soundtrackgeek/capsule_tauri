@@ -1,11 +1,27 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 import packageJson from "../package.json";
 import type {
   AIApiKeyMutationResponse,
   AIApiKeyUpdateRequest,
+  AIChatChunkEvent,
+  AIChatCompleteEvent,
+  AIChatContextEvent,
+  AIChatContextPreviewEntry,
+  AIChatContextPreviewRequest,
+  AIChatContextPreviewResponse,
+  AIChatErrorEvent,
+  AIChatInterruptedEvent,
+  AIChatRequest,
+  AIChatRetryRequest,
+  AIChatStartedEvent,
+  AIChatStreamStartResponse,
   AICloudProvider,
+  AIConversationDetail,
+  AIConversationListResponse,
+  AIConversationMessage,
   AIProviderStatus,
   AISettings,
   AISettingsUpdateRequest,
@@ -26,6 +42,7 @@ import type {
   CoverWallRequest,
   CoverWallResponse,
   DatabaseStatus,
+  DeleteAIConversationResponse,
   DeleteEntryResponse,
   Entry,
   EntryCreate,
@@ -142,6 +159,29 @@ const mockAiKeysConfigured: Record<AICloudProvider, boolean> = {
   openai: false,
   openrouter: false,
 };
+export type AIChatEventHandlers = {
+  started?: (event: AIChatStartedEvent) => void;
+  context?: (event: AIChatContextEvent) => void;
+  chunk?: (event: AIChatChunkEvent) => void;
+  complete?: (event: AIChatCompleteEvent) => void;
+  interrupted?: (event: AIChatInterruptedEvent) => void;
+  error?: (event: AIChatErrorEvent) => void;
+};
+
+type MockAIStream = {
+  streamId: string;
+  conversationId: number;
+  assistantMessageId: number;
+  cancelled: boolean;
+  timers: Array<ReturnType<typeof setTimeout>>;
+};
+
+const mockAiChatSubscribers = new Set<AIChatEventHandlers>();
+const mockAiActiveStreams = new Map<string, MockAIStream>();
+let mockAiConversationSequence = 1;
+let mockAiMessageSequence = 1;
+let mockAiStreamSequence = 1;
+let mockAiConversations: AIConversationDetail[] = [];
 
 let mockStatus: DatabaseStatus = {
   dbPath: defaultMockDatabasePath,
@@ -594,6 +634,10 @@ const normalizeError = (error: unknown): Error => {
 
   return new Error("Unexpected Capsule backend error");
 };
+
+function mockClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
 
 function mapAppUpdate(update: Update): AppUpdateInfo {
   return {
@@ -1159,6 +1203,159 @@ export async function clearAiApiKey(
   }
 }
 
+export async function subscribeAiChatEvents(
+  handlers: AIChatEventHandlers,
+): Promise<() => void> {
+  if (runningInTauri()) {
+    const unlisteners: UnlistenFn[] = await Promise.all([
+      listen<AIChatStartedEvent>("ai-chat-started", (event) => handlers.started?.(event.payload)),
+      listen<AIChatContextEvent>("ai-chat-context", (event) => handlers.context?.(event.payload)),
+      listen<AIChatChunkEvent>("ai-chat-chunk", (event) => handlers.chunk?.(event.payload)),
+      listen<AIChatCompleteEvent>("ai-chat-complete", (event) =>
+        handlers.complete?.(event.payload),
+      ),
+      listen<AIChatInterruptedEvent>("ai-chat-interrupted", (event) =>
+        handlers.interrupted?.(event.payload),
+      ),
+      listen<AIChatErrorEvent>("ai-chat-error", (event) => handlers.error?.(event.payload)),
+    ]);
+    return () => {
+      unlisteners.forEach((unlisten) => unlisten());
+    };
+  }
+
+  mockAiChatSubscribers.add(handlers);
+  return () => {
+    mockAiChatSubscribers.delete(handlers);
+  };
+}
+
+export async function previewAiChatContext(
+  input: AIChatContextPreviewRequest,
+): Promise<AIChatContextPreviewResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<AIChatContextPreviewResponse>("preview_ai_chat_context", { input });
+    }
+
+    await pause(120);
+    return mockPreviewAiChatContext(input);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function listAiConversations(): Promise<AIConversationListResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<AIConversationListResponse>("list_ai_conversations");
+    }
+
+    await pause(120);
+    return {
+      conversations: mockAiConversationSummaries(),
+      warnings: [],
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function getAiConversation(conversationId: number): Promise<AIConversationDetail> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<AIConversationDetail>("get_ai_conversation", { conversationId });
+    }
+
+    await pause(90);
+    const conversation = mockAiConversations.find((item) => item.id === conversationId);
+    if (!conversation) {
+      throw new Error("AI conversation not found.");
+    }
+    return mockClone(conversation);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function deleteAiConversation(
+  conversationId: number,
+): Promise<DeleteAIConversationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<DeleteAIConversationResponse>("delete_ai_conversation", {
+        conversationId,
+      });
+    }
+
+    await pause(120);
+    const conversation = mockAiConversations.find((item) => item.id === conversationId);
+    if (!conversation) {
+      throw new Error("AI conversation not found.");
+    }
+    mockAiConversations = mockAiConversations.filter((item) => item.id !== conversationId);
+    return {
+      conversationId,
+      conversationUuid: conversation.uuid,
+      audit: {
+        operation: "ai.chat.delete",
+        backupPath: "",
+        completedAt: new Date().toISOString(),
+      },
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function startAiChatStream(
+  input: AIChatRequest,
+): Promise<AIChatStreamStartResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<AIChatStreamStartResponse>("start_ai_chat_stream", { input });
+    }
+
+    await pause(120);
+    return mockStartAiChatStream(input);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function retryAiChatStream(
+  input: AIChatRetryRequest,
+): Promise<AIChatStreamStartResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<AIChatStreamStartResponse>("retry_ai_chat_stream", { input });
+    }
+
+    await pause(120);
+    return mockRetryAiChatStream(input);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function cancelAiChatStream(streamId: string): Promise<void> {
+  try {
+    if (runningInTauri()) {
+      await invoke<void>("cancel_ai_chat_stream", { streamId });
+      return;
+    }
+
+    const stream = mockAiActiveStreams.get(streamId);
+    if (stream) {
+      stream.cancelled = true;
+      stream.timers.forEach((timer) => clearTimeout(timer));
+      mockInterruptAiStream(stream, "cancelled");
+    }
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
 export async function listTags(): Promise<TagCatalogResponse> {
   try {
     if (runningInTauri()) {
@@ -1529,6 +1726,24 @@ export async function getAiOverview(): Promise<AiOverviewResponse> {
     const activeStatus = mockAiProviderStatuses().find(
       (status) => status.provider === settings.cloudProvider,
     );
+    const conversations =
+      mockAiConversations.length > 0
+        ? mockAiConversationSummaries()
+        : [
+            {
+              id: 1,
+              uuid: "chat_mock",
+              title: "Search reflection",
+              preview: "A saved AI conversation over recent Capsule entries.",
+              cloudProvider: "gemini",
+              model: settings.geminiModel,
+              scope: "search",
+              messageCount: 4,
+              createdAt: "2026-06-29 09:00",
+              lastMessageAt: "2026-06-29 09:05",
+              updatedAt: "2026-06-29 09:05",
+            },
+          ];
     return {
       provider: settings.cloudProvider,
       model: activeStatus?.selectedModel ?? settings.geminiModel,
@@ -1546,19 +1761,7 @@ export async function getAiOverview(): Promise<AiOverviewResponse> {
         },
         ...phase6Capabilities.ai,
       ],
-      conversations: [
-        {
-          id: 1,
-          uuid: "chat_mock",
-          title: "Search reflection",
-          preview: "A saved AI conversation over recent Capsule entries.",
-          cloudProvider: "gemini",
-          scope: "search",
-          messageCount: 4,
-          lastMessageAt: "2026-06-29 09:05",
-          updatedAt: "2026-06-29 09:05",
-        },
-      ],
+      conversations,
       timeCapsules: [
         {
           id: 1,
@@ -1583,8 +1786,8 @@ export async function getAiOverview(): Promise<AiOverviewResponse> {
           entryCount: 3,
         },
       ],
-      conversationCount: 1,
-      messageCount: 4,
+      conversationCount: conversations.length,
+      messageCount: conversations.reduce((sum, conversation) => sum + conversation.messageCount, 0),
       timeCapsuleCount: 1,
       embeddedEntryCount: 3,
       warnings: [
@@ -2807,6 +3010,419 @@ function providerEnvKey(provider: AICloudProvider) {
     openai: "OPENAI_API_KEY",
     openrouter: "OPENROUTER_API_KEY",
   }[provider];
+}
+
+function providerMockLabel(provider: AICloudProvider) {
+  return {
+    gemini: "Google Gemini",
+    openai: "OpenAI",
+    openrouter: "OpenRouter",
+  }[provider];
+}
+
+function mockPreviewAiChatContext(
+  input: AIChatContextPreviewRequest,
+): AIChatContextPreviewResponse {
+  const includeHidden = input.contextFilters?.includeHidden ?? false;
+  const warnings: string[] = [];
+  const limit = input.contextLimit ?? input.contextFilters?.limit ?? null;
+  if (limit !== null && limit < 1) {
+    throw new Error("Context limit must be a positive integer or all.");
+  }
+
+  let entries: Entry[];
+  if (input.contextEntryUuids?.length) {
+    entries = input.contextEntryUuids
+      .map((uuid) => mockEntries.find((entry) => entry.uuid === uuid))
+      .filter(Boolean) as Entry[];
+  } else if (input.scope === "entry") {
+    entries = input.scopeIdentifiers
+      .slice(0, 1)
+      .map((identifier) => mockFindEntry(identifier))
+      .filter(Boolean) as Entry[];
+  } else if (input.scope === "entries") {
+    entries = input.scopeIdentifiers
+      .map((identifier) => mockFindEntry(identifier))
+      .filter(Boolean) as Entry[];
+  } else if (input.scope === "thread") {
+    const anchor = mockFindEntry(input.scopeIdentifiers[0] ?? "");
+    const rootUuid = anchor?.thread?.rootUuid ?? anchor?.uuid;
+    entries = rootUuid
+      ? mockEntries.filter((entry) => (entry.thread?.rootUuid ?? entry.uuid) === rootUuid)
+      : [];
+  } else {
+    entries = mockSearchContextEntries(input);
+  }
+
+  const visible = entries.filter((entry) => {
+    if (!entry.hidden || includeHidden) {
+      return true;
+    }
+    warnings.push(`Hidden entry ${entry.uuid} was excluded from AI context.`);
+    return false;
+  });
+  const limited = limit === null ? visible : visible.slice(0, limit);
+  if (limit === null && limited.length >= 4) {
+    warnings.push(`Context limit is all; ${limited.length} entries will be sent if you continue.`);
+  }
+
+  return {
+    scope: input.scope,
+    entries: limited.map(mockPreviewEntry),
+    total: limited.length,
+    contextLimit: limit,
+    warnings,
+  };
+}
+
+function mockSearchContextEntries(input: AIChatContextPreviewRequest) {
+  const filters = input.contextFilters;
+  const text = (filters?.text ?? input.message ?? "").trim().toLowerCase();
+  const since = filters?.since ?? input.since ?? null;
+  const until = filters?.until ?? input.until ?? null;
+  const tags = new Set((filters?.tags ?? []).map((tag) => tag.toLowerCase()));
+  const excludeTags = new Set((filters?.excludeTags ?? []).map((tag) => tag.toLowerCase()));
+  const moods = new Set((filters?.moods ?? []).map((mood) => mood.toLowerCase()));
+  const excludeMoods = new Set((filters?.excludeMoods ?? []).map((mood) => mood.toLowerCase()));
+
+  return mockEntries
+    .filter((entry) => {
+      const date = entry.createdAt.slice(0, 10);
+      if (since && date < since) return false;
+      if (until && date > until) return false;
+      if (filters?.starred !== undefined && filters.starred !== null && entry.starred !== filters.starred) return false;
+      if (filters?.pinned !== undefined && filters.pinned !== null && entry.pinned !== filters.pinned) return false;
+      if (filters?.hasImages !== undefined && filters.hasImages !== null) {
+        if ((entry.attachmentCount > 0) !== filters.hasImages) return false;
+      }
+      const entryTags = entry.tags.map((tag) => tag.name.toLowerCase());
+      if (tags.size && !entryTags.some((tag) => tags.has(tag))) return false;
+      if (excludeTags.size && entryTags.some((tag) => excludeTags.has(tag))) return false;
+      const mood = entry.mood?.toLowerCase() ?? "";
+      if (moods.size && !moods.has(mood)) return false;
+      if (excludeMoods.size && excludeMoods.has(mood)) return false;
+      if (!text) return true;
+      const searchable = [
+        entry.textPlain,
+        entry.title ?? "",
+        entry.summary ?? "",
+        entry.mood ?? "",
+        ...entry.tags.map((tag) => tag.name),
+      ]
+        .join(" ")
+        .toLowerCase();
+      return text
+        .split(/\s+/)
+        .filter((term) => term.length > 2)
+        .some((term) => searchable.includes(term));
+    })
+    .sort((left, right) => {
+      const direction = filters?.sort === "asc" ? 1 : -1;
+      return direction * left.createdAt.localeCompare(right.createdAt);
+    });
+}
+
+function mockPreviewEntry(entry: Entry): AIChatContextPreviewEntry {
+  return {
+    id: entry.id,
+    uuid: entry.uuid,
+    createdAt: entry.createdAt,
+    title: entry.title,
+    summary: entry.summary,
+    mood: entry.mood,
+    tags: entry.tags.map((tag) => tag.name),
+    hidden: entry.hidden,
+    attachmentCount: entry.attachmentCount,
+    threadRootUuid: entry.thread?.rootUuid ?? null,
+    threadTitle: entry.thread?.title ?? null,
+    estimatedChars: entry.textPlain.length,
+    textPreview: entry.textPlain.split(/\s+/).slice(0, 38).join(" "),
+  };
+}
+
+function mockFindEntry(identifier: string) {
+  return mockEntries.find(
+    (entry) => entry.uuid === identifier || String(entry.id) === identifier,
+  );
+}
+
+function mockAiConversationSummaries(): AIConversationListResponse["conversations"] {
+  return mockAiConversations
+    .map((conversation) => ({
+      id: conversation.id,
+      uuid: conversation.uuid,
+      title: conversation.title,
+      preview: conversation.preview,
+      cloudProvider: conversation.cloudProvider,
+      model: conversation.model,
+      scope: conversation.scope,
+      messageCount: conversation.messageCount,
+      createdAt: conversation.createdAt,
+      lastMessageAt: conversation.lastMessageAt,
+      updatedAt: conversation.updatedAt,
+    }))
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function mockStartAiChatStream(input: AIChatRequest): AIChatStreamStartResponse {
+  const message = input.message.trim();
+  if (!message) {
+    throw new Error("Message is required.");
+  }
+  const settings = mockAiSettings();
+  const provider = input.cloudProvider ?? settings.cloudProvider;
+  const model = mockNormalizeSelectedModel(provider, input.model) ?? mockSelectedModel(settings, provider);
+  const context = mockPreviewAiChatContext({
+    message,
+    scope: input.scope,
+    scopeIdentifiers: input.scopeIdentifiers,
+    contextFilters: input.contextFilters ?? null,
+    contextLimit: input.contextLimit ?? null,
+    since: input.since ?? null,
+    until: input.until ?? null,
+    contextEntryUuids: input.contextEntryUuids ?? null,
+  });
+  const contextUuids = context.entries.map((entry) => entry.uuid);
+  const now = new Date().toISOString();
+  let conversation = input.conversationId
+    ? mockAiConversations.find((item) => item.id === input.conversationId)
+    : undefined;
+
+  if (!conversation) {
+    conversation = {
+      id: mockAiConversationSequence++,
+      uuid: `chat_mock_${mockAiConversationSequence}`,
+      title: message.slice(0, 80),
+      preview: "",
+      cloudProvider: provider,
+      model,
+      scope: input.scope,
+      scopeIdentifiers: contextUuids,
+      contextLimit: input.contextLimit ?? null,
+      since: input.since ?? null,
+      until: input.until ?? null,
+      messageCount: 0,
+      createdAt: now,
+      updatedAt: now,
+      lastMessageAt: now,
+      messages: [],
+    };
+    mockAiConversations.unshift(conversation);
+  } else {
+    conversation.cloudProvider = provider;
+    conversation.model = model;
+    conversation.scope = input.scope;
+    conversation.scopeIdentifiers = contextUuids;
+    conversation.contextLimit = input.contextLimit ?? null;
+    conversation.since = input.since ?? null;
+    conversation.until = input.until ?? null;
+  }
+
+  conversation.messages.push(mockConversationMessage("user", message, "complete"));
+  const assistant = mockConversationMessage("assistant", "", "streaming");
+  conversation.messages.push(assistant);
+  mockRefreshAiConversation(conversation);
+  return mockRunAiStream(conversation, assistant, provider, model, context, message);
+}
+
+function mockRetryAiChatStream(input: AIChatRetryRequest): AIChatStreamStartResponse {
+  const conversation = mockAiConversations.find((item) => item.id === input.conversationId);
+  if (!conversation) {
+    throw new Error("AI conversation not found.");
+  }
+  const lastUser = [...conversation.messages].reverse().find((message) => message.role === "user");
+  if (!lastUser) {
+    throw new Error("No user message is available to retry.");
+  }
+  const settings = mockAiSettings();
+  const provider = input.cloudProvider ?? normalizeMockProvider(conversation.cloudProvider);
+  const model = mockNormalizeSelectedModel(provider, input.model) ?? mockSelectedModel(settings, provider);
+  conversation.cloudProvider = provider;
+  conversation.model = model;
+  const context = mockPreviewAiChatContext({
+    message: lastUser.content,
+    scope: conversation.scope as AIChatContextPreviewRequest["scope"],
+    scopeIdentifiers: conversation.scopeIdentifiers,
+    contextFilters: null,
+    contextLimit: conversation.contextLimit,
+    since: conversation.since,
+    until: conversation.until,
+    contextEntryUuids: input.contextEntryUuids ?? conversation.scopeIdentifiers,
+  });
+  const assistant = mockConversationMessage("assistant", "", "streaming");
+  conversation.messages.push(assistant);
+  mockRefreshAiConversation(conversation);
+  return mockRunAiStream(conversation, assistant, provider, model, context, lastUser.content);
+}
+
+function mockRunAiStream(
+  conversation: AIConversationDetail,
+  assistant: AIConversationMessage,
+  provider: AICloudProvider,
+  model: string,
+  context: AIChatContextPreviewResponse,
+  message: string,
+): AIChatStreamStartResponse {
+  const streamId = `stream_mock_${mockAiStreamSequence++}`;
+  const response = {
+    streamId,
+    conversationId: conversation.id,
+    assistantMessageId: assistant.id,
+    provider,
+    model,
+  };
+  const stream: MockAIStream = {
+    streamId,
+    conversationId: conversation.id,
+    assistantMessageId: assistant.id,
+    cancelled: false,
+    timers: [],
+  };
+  mockAiActiveStreams.set(streamId, stream);
+  mockEmitAiChatEvent("started", response);
+  mockEmitAiChatEvent("context", {
+    streamId,
+    conversationId: conversation.id,
+    context,
+  });
+
+  const contextLabel = context.entries.length === 1 ? "1 entry" : `${context.entries.length} entries`;
+  const chunks = [
+    `I found ${contextLabel} in the selected Capsule context. `,
+    `For "${message.slice(0, 60)}", the strongest signal is in the recent notes and metadata. `,
+    "This is the mock streamer, so no provider key or journal data leaves the browser test harness.",
+  ];
+  chunks.forEach((chunk, index) => {
+    const timer = window.setTimeout(() => {
+      const active = mockAiActiveStreams.get(streamId);
+      if (!active || active.cancelled) {
+        return;
+      }
+      assistant.content += chunk;
+      assistant.status = "streaming";
+      assistant.updatedAt = new Date().toISOString();
+      mockRefreshAiConversation(conversation);
+      mockEmitAiChatEvent("chunk", {
+        streamId,
+        conversationId: conversation.id,
+        assistantMessageId: assistant.id,
+        chunk,
+        content: assistant.content,
+      });
+      if (index === chunks.length - 1) {
+        mockCompleteAiStream(active);
+      }
+    }, 170 * (index + 1));
+    stream.timers.push(timer);
+  });
+
+  return response;
+}
+
+function mockCompleteAiStream(stream: MockAIStream) {
+  const conversation = mockAiConversations.find((item) => item.id === stream.conversationId);
+  const assistant = conversation?.messages.find((message) => message.id === stream.assistantMessageId);
+  if (!conversation || !assistant) {
+    mockAiActiveStreams.delete(stream.streamId);
+    return;
+  }
+  assistant.status = "complete";
+  assistant.updatedAt = new Date().toISOString();
+  mockRefreshAiConversation(conversation);
+  mockAiActiveStreams.delete(stream.streamId);
+  mockEmitAiChatEvent("complete", {
+    streamId: stream.streamId,
+    conversationId: stream.conversationId,
+    assistantMessageId: stream.assistantMessageId,
+    content: assistant.content,
+  });
+}
+
+function mockInterruptAiStream(stream: MockAIStream, reason: string) {
+  const conversation = mockAiConversations.find((item) => item.id === stream.conversationId);
+  const assistant = conversation?.messages.find((message) => message.id === stream.assistantMessageId);
+  if (!conversation || !assistant) {
+    mockAiActiveStreams.delete(stream.streamId);
+    return;
+  }
+  assistant.status = "interrupted";
+  assistant.updatedAt = new Date().toISOString();
+  mockRefreshAiConversation(conversation);
+  mockAiActiveStreams.delete(stream.streamId);
+  mockEmitAiChatEvent("interrupted", {
+    streamId: stream.streamId,
+    conversationId: stream.conversationId,
+    assistantMessageId: stream.assistantMessageId,
+    content: assistant.content,
+    reason,
+  });
+}
+
+function mockConversationMessage(
+  role: "user" | "assistant",
+  content: string,
+  status: AIConversationMessage["status"],
+): AIConversationMessage {
+  const now = new Date().toISOString();
+  return {
+    id: mockAiMessageSequence++,
+    uuid: `msg_mock_${mockAiMessageSequence}`,
+    role,
+    content,
+    status,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function mockRefreshAiConversation(conversation: AIConversationDetail) {
+  const firstUser = conversation.messages.find(
+    (message) => message.role === "user" && message.content.trim(),
+  );
+  const latest = [...conversation.messages].reverse().find((message) => message.content.trim());
+  const latestTime =
+    [...conversation.messages]
+      .map((message) => (message.updatedAt > message.createdAt ? message.updatedAt : message.createdAt))
+      .sort()
+      .at(-1) ?? new Date().toISOString();
+  conversation.title = firstUser?.content.slice(0, 80) || "New chat";
+  conversation.preview = latest?.content.slice(0, 160) ?? "";
+  conversation.messageCount = conversation.messages.length;
+  conversation.lastMessageAt = latestTime;
+  conversation.updatedAt = latestTime;
+}
+
+function mockSelectedModel(settings: AISettings, provider: AICloudProvider) {
+  return {
+    gemini: settings.geminiModel,
+    openai: settings.openaiModel,
+    openrouter: settings.openrouterModel,
+  }[provider];
+}
+
+function mockNormalizeSelectedModel(provider: AICloudProvider, model: string | null | undefined) {
+  const normalized = normalizeLegacyModel(model ?? "");
+  if (!normalized) {
+    return null;
+  }
+  const availableModels = {
+    gemini: geminiModels,
+    openai: openAIModels,
+    openrouter: openRouterModels,
+  }[provider];
+  if (!availableModels.includes(normalized)) {
+    throw new Error(`${providerMockLabel(provider)} model must be one of: ${availableModels.join(", ")}.`);
+  }
+  return normalized;
+}
+
+function mockEmitAiChatEvent<K extends keyof AIChatEventHandlers>(
+  type: K,
+  payload: Parameters<NonNullable<AIChatEventHandlers[K]>>[0],
+) {
+  mockAiChatSubscribers.forEach((subscriber) => {
+    subscriber[type]?.(payload as never);
+  });
 }
 
 function upsertConfigValue(

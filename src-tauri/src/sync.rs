@@ -367,6 +367,8 @@ struct AiConversationPayload {
     #[serde(default)]
     cloud_provider: String,
     #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
     scope: String,
     #[serde(default)]
     scope_identifiers: JsonValue,
@@ -2791,6 +2793,7 @@ fn apply_ai_chats_payload(
         )",
         [],
     )?;
+    ensure_table_column(connection, "ai_conversations", "model", "TEXT")?;
 
     for item in payload.deleted_conversations.iter() {
         let Some(conversation_uuid) = normalize_string(Some(item.conversation_uuid.clone())) else {
@@ -2843,6 +2846,7 @@ fn apply_ai_chats_payload(
         let cloud_provider = normalize_string(Some(item.cloud_provider.clone()))
             .unwrap_or_else(|| "gemini".to_string())
             .to_lowercase();
+        let model = normalize_optional_text(item.model.as_deref());
         let scope =
             normalize_string(Some(item.scope.clone())).unwrap_or_else(|| "search".to_string());
         let scope_identifiers = scope_identifiers_to_string(&item.scope_identifiers);
@@ -2851,20 +2855,22 @@ fn apply_ai_chats_payload(
                 connection.execute(
                     "UPDATE ai_conversations
                      SET title = ?1,
-                         preview = ?2,
-                         cloud_provider = ?3,
-                         scope = ?4,
-                         scope_identifiers = ?5,
-                         context_limit = ?6,
-                         since = ?7,
-                         until = ?8,
-                         created_at = ?9,
-                         updated_at = ?10
-                     WHERE id = ?11",
+                        preview = ?2,
+                        cloud_provider = ?3,
+                         model = ?4,
+                         scope = ?5,
+                         scope_identifiers = ?6,
+                         context_limit = ?7,
+                         since = ?8,
+                         until = ?9,
+                         created_at = ?10,
+                         updated_at = ?11
+                     WHERE id = ?12",
                     params![
                         title,
                         preview,
                         cloud_provider,
+                        model,
                         scope,
                         scope_identifiers,
                         item.context_limit,
@@ -2880,14 +2886,15 @@ fn apply_ai_chats_payload(
         } else {
             connection.execute(
                 "INSERT INTO ai_conversations (
-                    uuid, title, preview, cloud_provider, scope, scope_identifiers,
+                    uuid, title, preview, cloud_provider, model, scope, scope_identifiers,
                     context_limit, since, until, created_at, updated_at, last_message_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 params![
                     conversation_uuid,
                     title,
                     preview,
                     cloud_provider,
+                    model,
                     scope,
                     scope_identifiers,
                     item.context_limit,
@@ -3002,29 +3009,35 @@ fn build_ai_chats_payload(connection: &Connection) -> Result<AiChatSyncPayload> 
             ..AiChatSyncPayload::default()
         });
     }
-    let mut conversation_statement = connection.prepare(
-        "SELECT uuid, title, preview, cloud_provider, scope, scope_identifiers,
+    let model_sql = if table_has_column(connection, "ai_conversations", "model")? {
+        "model"
+    } else {
+        "NULL"
+    };
+    let mut conversation_statement = connection.prepare(&format!(
+        "SELECT uuid, title, preview, cloud_provider, {model_sql} AS model, scope, scope_identifiers,
                 context_limit, since, until, created_at, updated_at
          FROM ai_conversations
          WHERE COALESCE(uuid, '') != ''
-         ORDER BY updated_at ASC, uuid ASC",
-    )?;
+         ORDER BY updated_at ASC, uuid ASC"
+    ))?;
     let conversations = conversation_statement
         .query_map([], |row| {
-            let scope_identifiers: String = row.get(5)?;
+            let scope_identifiers: String = row.get(6)?;
             Ok(AiConversationPayload {
                 uuid: row.get(0)?,
                 title: row.get(1)?,
                 preview: row.get(2)?,
                 cloud_provider: row.get(3)?,
-                scope: row.get(4)?,
+                model: row.get(4)?,
+                scope: row.get(5)?,
                 scope_identifiers: serde_json::from_str(&scope_identifiers)
                     .unwrap_or_else(|_| json!([])),
-                context_limit: row.get(6)?,
-                since: row.get(7)?,
-                until: row.get(8)?,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
+                context_limit: row.get(7)?,
+                since: row.get(8)?,
+                until: row.get(9)?,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -3539,6 +3552,29 @@ fn table_exists(connection: &Connection, table_name: &str) -> Result<bool> {
         )
         .optional()?
         .is_some())
+}
+
+fn ensure_table_column(
+    connection: &Connection,
+    table_name: &str,
+    column_name: &str,
+    definition: &str,
+) -> Result<()> {
+    if table_has_column(connection, table_name, column_name)? {
+        return Ok(());
+    }
+    connection.execute(
+        &format!("ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}"),
+        [],
+    )?;
+    Ok(())
+}
+
+fn table_has_column(connection: &Connection, table_name: &str, column_name: &str) -> Result<bool> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    let columns = rows.collect::<rusqlite::Result<HashSet<_>>>()?;
+    Ok(columns.contains(column_name))
 }
 
 fn delete_if_table_exists(

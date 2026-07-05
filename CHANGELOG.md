@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.23.0 - 2026-07-05
+
+### Added
+
+- Added the AI Chat workspace with saved conversations, context preview/removal,
+  provider/model selection, streaming cloud responses, stop/cancel, retry, and
+  delete actions.
+- Added backend AI chat schema creation/migration, conversation tombstones,
+  stale-stream recovery, provider streaming adapters for OpenAI, Gemini, and
+  OpenRouter, and safe provider error mapping.
+- Added frontend mock streaming, browser smoke coverage, Rust chat/provider
+  tests, and a gated synthetic live provider smoke test that sends no journal
+  entries.
+
+### Changed
+
+- Updated AI chat sync payloads to round-trip the conversation `model` field
+  while remaining compatible with older sync files.
+- Bumped the app version to 0.23.0.
+
 ## 0.22.3 - 2026-07-05
 
 ### Fixed

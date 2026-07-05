@@ -503,9 +503,14 @@ fn list_ai_conversations(
     } else {
         "0"
     };
+    let model_sql = if table_has_column(connection, "ai_conversations", "model")? {
+        "c.model"
+    } else {
+        "NULL"
+    };
     let sql = format!(
-        "SELECT c.id, c.uuid, c.title, c.preview, c.cloud_provider, c.scope,
-                {message_count_sql} AS message_count, c.last_message_at, c.updated_at
+        "SELECT c.id, c.uuid, c.title, c.preview, c.cloud_provider, {model_sql} AS model, c.scope,
+                {message_count_sql} AS message_count, c.created_at, c.last_message_at, c.updated_at
          FROM ai_conversations c
          ORDER BY datetime(c.updated_at) DESC, c.id DESC
          LIMIT ?1"
@@ -519,14 +524,23 @@ fn list_ai_conversations(
                 title: row.get(2)?,
                 preview: row.get(3)?,
                 cloud_provider: row.get(4)?,
-                scope: row.get(5)?,
-                message_count: row.get(6)?,
-                last_message_at: row.get(7)?,
-                updated_at: row.get(8)?,
+                model: row.get(5)?,
+                scope: row.get(6)?,
+                message_count: row.get(7)?,
+                created_at: row.get(8)?,
+                last_message_at: row.get(9)?,
+                updated_at: row.get(10)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(conversations)
+}
+
+fn table_has_column(connection: &Connection, table_name: &str, column_name: &str) -> Result<bool> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    let columns = rows.collect::<rusqlite::Result<HashSet<_>>>()?;
+    Ok(columns.contains(column_name))
 }
 
 fn list_time_capsules(
