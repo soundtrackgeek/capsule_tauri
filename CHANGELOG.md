@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.24.3 - 2026-07-06
+
+### Fixed
+
+- Fixed Entries and Search result cards so entries with image attachments render
+  inline thumbnails and open the full image lightbox when a thumbnail is clicked.
+
+### Changed
+
+- Bumped the app version to 0.24.3.
+
 ## 0.24.2 - 2026-07-05
 
 ### Fixed

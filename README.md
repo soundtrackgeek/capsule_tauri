@@ -23,8 +23,9 @@ explicit capability-gated AI/sync surfaces:
 - Dashboard counts for total entries, total tags, current year, and current month.
 - Recent entries, pinned entries, and random entry panels with old-Capsule-style
   entry numbers.
-- Entries list with old-Capsule-style entry numbers, text, tag, mood, location,
-  date, image, hidden, and sort filters.
+- Entries list with old-Capsule-style entry numbers, inline image thumbnails
+  that open full-size previews, and text, tag, mood, location, date, image,
+  hidden, and sort filters.
 - Entry detail view with entry number, full text, tags, mood, location,
   attachment count, and thread metadata when those tables are available,
   including stored weather condition, Celsius-first temperature, humidity, wind,
@@ -47,8 +48,9 @@ explicit capability-gated AI/sync surfaces:
 - Structured search tokens for `tag:`, `mood:`, `before:`, `after:`, and
   `NOT tag:` queries, plus include/exclude tag and mood filters and a location
   text filter.
-- Search results with old-Capsule-style entry numbers and the same star, pin,
-  edit, continue, delete, and hide/unhide actions used by the Entries view.
+- Search results with old-Capsule-style entry numbers, inline image thumbnails
+  that open full-size previews, and the same star, pin, edit, continue, delete,
+  and hide/unhide actions used by the Entries view.
 - Thread groups built from Capsule continuation links with ordered entries,
   latest activity, titles, and summaries.
 - Backup-guarded thread title/summary updates, bulk link commands, leaf detach,

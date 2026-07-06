@@ -2,8 +2,39 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 
-import { DeleteEntryDialog, EntryCardContent, EntryDetail, EntryMini, EntryStack } from "./entries";
+import {
+  DeleteEntryDialog,
+  EntryAttachmentStrip,
+  EntryCardContent,
+  EntryDetail,
+  EntryMini,
+  EntryStack,
+} from "./entries";
 import { makeEntry } from "../test/fixtures";
+import type { ImageAttachment } from "../types";
+
+function makeAttachment(overrides: Partial<ImageAttachment> = {}): ImageAttachment {
+  return {
+    attachmentId: 7,
+    entryUuid: "entry_test42",
+    mediaId: 12,
+    position: 0,
+    caption: "Window light",
+    altText: "A test attachment thumbnail",
+    createdAt: "2026-07-04 12:06",
+    hash: "test-hash",
+    mimeType: "image/jpeg",
+    bytes: 12345,
+    width: 800,
+    height: 600,
+    storageBackend: "local_fs",
+    storageKey: "te/test-hash.jpg",
+    deletedAt: null,
+    thumbnailAvailable: true,
+    originalAvailable: true,
+    ...overrides,
+  };
+}
 
 describe("entry components", () => {
   test("renders entry cards with number, metadata, summary, and image count", () => {
@@ -15,6 +46,19 @@ describe("entry components", () => {
     expect(screen.getByText("Focused")).toBeInTheDocument();
     expect(screen.getByText("work")).toBeInTheDocument();
     expect(screen.getByTitle("Image attachments")).toHaveTextContent("2");
+  });
+
+  test("opens an entry thumbnail attachment", async () => {
+    const user = userEvent.setup();
+    const attachment = makeAttachment();
+    const onOpen = vi.fn();
+
+    render(<EntryAttachmentStrip attachments={[attachment]} onOpen={onOpen} />);
+
+    expect(await screen.findByAltText("A test attachment thumbnail")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "View image 1" }));
+
+    expect(onOpen).toHaveBeenCalledWith(attachment);
   });
 
   test("renders mini entries and empty/loading stack states", () => {

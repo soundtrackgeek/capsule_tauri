@@ -17,7 +17,8 @@ import {
   X,
 } from "lucide-react";
 import { formatDateTime, formatEntryNumber } from "../lib/format";
-import type { Entry, EntryHistoryResponse, ExportFormat } from "../types";
+import type { Entry, EntryHistoryResponse, ExportFormat, ImageAttachment } from "../types";
+import { DataUrlImage } from "./media";
 import { Detail, SkeletonList } from "./ui";
 
 type EntryDetailProps = {
@@ -314,6 +315,42 @@ export function EntryCardContent({ entry }: { entry: Entry }) {
       <p>{entry.summary || entry.textPlain.slice(0, 180)}</p>
       <EntryMeta entry={entry} />
     </>
+  );
+}
+
+export function EntryAttachmentStrip({
+  attachments,
+  onOpen,
+}: {
+  attachments: ImageAttachment[];
+  onOpen: (attachment: ImageAttachment) => void;
+}) {
+  if (attachments.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="entry-attachment-strip" aria-label="Entry image attachments">
+      {attachments.map((attachment, index) => (
+        <button
+          aria-label={`View image ${index + 1}`}
+          className="entry-attachment-thumb-button"
+          key={attachment.attachmentId}
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpen(attachment);
+          }}
+          title="View full image"
+          type="button"
+        >
+          <DataUrlImage
+            attachment={attachment}
+            className="entry-attachment-thumb"
+            variant="thumb"
+          />
+        </button>
+      ))}
+    </div>
   );
 }
 

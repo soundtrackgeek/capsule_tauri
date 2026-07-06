@@ -28,6 +28,14 @@ test("loads the mock dashboard and navigates entries and search", async ({ page 
     .click();
   await expect(page.getByRole("region", { name: "Entries" })).toBeVisible();
 
+  const firstEntryThumbnail = page.locator(".entry-list .entry-attachment-thumb-button").first();
+  await expect(firstEntryThumbnail).toBeVisible();
+  await firstEntryThumbnail.click();
+  await expect(page.locator(".lightbox")).toBeVisible();
+  await expect(page.locator(".lightbox-image")).toBeVisible();
+  await page.getByTitle("Close").click();
+  await expect(page.locator(".lightbox")).not.toBeVisible();
+
   const phaseOneCard = page.getByRole("button", { name: /Phase 1 shape/ }).first();
   await expect(phaseOneCard).toBeVisible();
   await phaseOneCard.click();
@@ -43,6 +51,12 @@ test("loads the mock dashboard and navigates entries and search", async ({ page 
   await page.getByLabel("Query").fill("tag:codex");
   await expect(page.getByText("tag: codex")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Art note" })).toBeVisible();
+
+  const firstSearchThumbnail = page.locator(".entry-list .entry-attachment-thumb-button").first();
+  await expect(firstSearchThumbnail).toBeVisible();
+  await firstSearchThumbnail.click();
+  await expect(page.locator(".lightbox")).toBeVisible();
+  await expect(page.locator(".lightbox-image")).toBeVisible();
 
   expect(browserErrors).toEqual([]);
 });

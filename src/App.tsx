@@ -141,6 +141,7 @@ import {
 import { TrendBars, MoodTrendBars, BreakdownList } from "./components/analytics";
 import {
   DeleteEntryDialog,
+  EntryAttachmentStrip,
   EntryCardContent,
   EntryDetail,
   EntryMeta,
@@ -262,6 +263,8 @@ type SearchForm = {
   hasImages: boolean;
   sort: "asc" | "desc";
 };
+
+type EntryImageMap = Record<string, ImageAttachment[]>;
 
 type ThreadMetadataDraft = {
   title: string;
@@ -602,6 +605,8 @@ function App() {
   const [searchForm, setSearchForm] = useState<SearchForm>(defaultSearchForm);
   const [searchLimit, setSearchLimit] = useState(40);
   const [searchResponse, setSearchResponse] = useState<SearchResponse | null>(null);
+  const [entryListImages, setEntryListImages] = useState<EntryImageMap>({});
+  const [searchResultImages, setSearchResultImages] = useState<EntryImageMap>({});
   const [aiOverview, setAiOverview] = useState<AiOverviewResponse | null>(null);
   const [aiSuggestion, setAiSuggestion] = useState<AiMetadataSuggestionResponse | null>(null);
   const [aiSuggestionIdentifier, setAiSuggestionIdentifier] = useState("");
@@ -797,6 +802,7 @@ function App() {
     if (!status?.readable) {
       setEntryResponse(null);
       setSelectedEntry(null);
+      setEntryListImages({});
       return;
     }
 
@@ -804,7 +810,18 @@ function App() {
     setError(null);
     try {
       const response = await listEntries(builtEntryFilters);
+      let imageMap: EntryImageMap = {};
+      try {
+        imageMap = await loadEntryImageMap(response.entries);
+      } catch (imageError) {
+        setError(
+          imageError instanceof Error
+            ? imageError.message
+            : "Unable to load entry image thumbnails",
+        );
+      }
       setEntryResponse(response);
+      setEntryListImages(imageMap);
       setSelectedEntry((current) => {
         if (!current) {
           return response.entries[0] ?? null;
@@ -812,6 +829,7 @@ function App() {
         return response.entries.find((entry) => entry.uuid === current.uuid) ?? response.entries[0] ?? null;
       });
     } catch (listError) {
+      setEntryListImages({});
       setError(listError instanceof Error ? listError.message : "Unable to load entries");
     } finally {
       setEntriesLoading(false);
@@ -821,6 +839,7 @@ function App() {
   const loadSearchResults = useCallback(async () => {
     if (!status?.readable) {
       setSearchResponse(null);
+      setSearchResultImages({});
       return;
     }
 
@@ -828,7 +847,18 @@ function App() {
     setError(null);
     try {
       const response = await searchEntries(builtSearchRequest);
+      let imageMap: EntryImageMap = {};
+      try {
+        imageMap = await loadEntryImageMap(response.entries);
+      } catch (imageError) {
+        setError(
+          imageError instanceof Error
+            ? imageError.message
+            : "Unable to load search image thumbnails",
+        );
+      }
       setSearchResponse(response);
+      setSearchResultImages(imageMap);
       setSelectedEntry((current) => {
         if (!current) {
           return response.entries[0] ?? null;
@@ -836,6 +866,7 @@ function App() {
         return response.entries.find((entry) => entry.uuid === current.uuid) ?? response.entries[0] ?? null;
       });
     } catch (searchError) {
+      setSearchResultImages({});
       setError(searchError instanceof Error ? searchError.message : "Unable to search entries");
     } finally {
       setSearchLoading(false);
@@ -2642,6 +2673,7 @@ function App() {
         {activeView === "entries" && (
           <EntriesView
             entryHistory={entryHistory}
+            entryImagesByUuid={entryListImages}
             detailLoading={detailLoading}
             entryFilters={entryFilters}
             entryResponse={entryResponse}
@@ -2672,6 +2704,7 @@ function App() {
         {activeView === "search" && (
           <SearchView
             detailLoading={detailLoading}
+            entryImagesByUuid={searchResultImages}
             entryHistory={entryHistory}
             historyLoading={historyLoading}
             loading={searchLoading}
@@ -3062,6 +3095,7 @@ type EntriesViewProps = {
   entryFilters: EntryFilterForm;
   setEntryFilters: (next: EntryFilterForm) => void;
   entryResponse: EntryListResponse | null;
+  entryImagesByUuid: EntryImageMap;
   selectedEntry: Entry | null;
   entryHistory: EntryHistoryResponse | null;
   loading: boolean;
@@ -3084,6 +3118,7 @@ function EntriesView({
   entryFilters,
   setEntryFilters,
   entryResponse,
+  entryImagesByUuid,
   selectedEntry,
   entryHistory,
   loading,
@@ -3100,6 +3135,8 @@ function EntriesView({
   onLoadMore,
   onResetFilters,
 }: EntriesViewProps) {
+  const [expandedImage, setExpandedImage] = useState<ImageAttachment | null>(null);
+
   if (status && (!status.dbExists || !status.readable)) {
     return (
       <section className="state-panel">
@@ -3227,18 +3264,26 @@ function EntriesView({
           )}
           {!loading &&
             entries.map((entry) => (
-              <button
+              <article
                 className={
                   selectedEntry?.uuid === entry.uuid
                     ? "entry-card entry-card--active"
                     : "entry-card"
                 }
                 key={entry.uuid}
-                onClick={() => onSelectEntry(entry)}
-                type="button"
               >
-                <EntryCardContent entry={entry} />
-              </button>
+                <button
+                  className="entry-card-main"
+                  onClick={() => onSelectEntry(entry)}
+                  type="button"
+                >
+                  <EntryCardContent entry={entry} />
+                </button>
+                <EntryAttachmentStrip
+                  attachments={entryImagesByUuid[entry.uuid] ?? []}
+                  onOpen={setExpandedImage}
+                />
+              </article>
             ))}
         </div>
 
@@ -3262,6 +3307,13 @@ function EntriesView({
         onExport={onExportEntry}
         onLoadHistory={onLoadHistory}
       />
+
+      {expandedImage && (
+        <ImageLightbox
+          attachment={expandedImage}
+          onClose={() => setExpandedImage(null)}
+        />
+      )}
     </section>
   );
 }
@@ -3271,6 +3323,7 @@ type SearchViewProps = {
   searchForm: SearchForm;
   setSearchForm: (next: SearchForm) => void;
   searchResponse: SearchResponse | null;
+  entryImagesByUuid: EntryImageMap;
   selectedEntry: Entry | null;
   entryHistory: EntryHistoryResponse | null;
   loading: boolean;
@@ -3294,6 +3347,7 @@ function SearchView({
   searchForm,
   setSearchForm,
   searchResponse,
+  entryImagesByUuid,
   selectedEntry,
   entryHistory,
   loading,
@@ -3311,6 +3365,8 @@ function SearchView({
   onLoadMore,
   onResetSearch,
 }: SearchViewProps) {
+  const [expandedImage, setExpandedImage] = useState<ImageAttachment | null>(null);
+
   if (status && (!status.dbExists || !status.readable)) {
     return (
       <section className="state-panel">
@@ -3513,16 +3569,24 @@ function SearchView({
           )}
           {!loading &&
             entries.map((entry) => (
-              <button
+              <article
                 className={
                   selectedEntry?.uuid === entry.uuid ? "entry-card entry-card--active" : "entry-card"
                 }
                 key={entry.uuid}
-                onClick={() => onSelectEntry(entry)}
-                type="button"
               >
-                <EntryCardContent entry={entry} />
-              </button>
+                <button
+                  className="entry-card-main"
+                  onClick={() => onSelectEntry(entry)}
+                  type="button"
+                >
+                  <EntryCardContent entry={entry} />
+                </button>
+                <EntryAttachmentStrip
+                  attachments={entryImagesByUuid[entry.uuid] ?? []}
+                  onOpen={setExpandedImage}
+                />
+              </article>
             ))}
         </div>
 
@@ -3546,6 +3610,13 @@ function SearchView({
         onExport={onExportEntry}
         onLoadHistory={onLoadHistory}
       />
+
+      {expandedImage && (
+        <ImageLightbox
+          attachment={expandedImage}
+          onClose={() => setExpandedImage(null)}
+        />
+      )}
     </section>
   );
 }
@@ -8598,6 +8669,21 @@ function splitFilter(value: string) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+async function loadEntryImageMap(entries: Entry[]): Promise<EntryImageMap> {
+  const uuids = entries
+    .filter((entry) => entry.attachmentCount > 0)
+    .map((entry) => entry.uuid);
+
+  if (uuids.length === 0) {
+    return {};
+  }
+
+  const response = await listImagesForEntries(uuids);
+  return Object.fromEntries(
+    response.entries.map((entry) => [entry.entryUuid, entry.images]),
+  );
 }
 
 function providerEnvLabel(provider: AICloudProvider) {

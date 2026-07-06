@@ -131,6 +131,7 @@ body {
 
 :root[data-theme="dark"] .secondary-button,
 :root[data-theme="dark"] .icon-button,
+:root[data-theme="dark"] .entry-attachment-thumb-button,
 :root[data-theme="dark"] .field input,
 :root[data-theme="dark"] .field select,
 :root[data-theme="dark"] .field textarea,
@@ -439,6 +440,7 @@ body {
 
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .secondary-button,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .icon-button,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .entry-attachment-thumb-button,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field input,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field select,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .field textarea,
@@ -1666,10 +1668,34 @@ button:active:not(:disabled) {
 }
 
 .entry-card {
+  display: grid;
+  gap: 10px;
   width: 100%;
-  cursor: pointer;
   color: inherit;
   text-align: left;
+}
+
+button.entry-card {
+  cursor: pointer;
+}
+
+.entry-card-main {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.entry-card-main:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid rgba(37, 83, 63, 0.5);
+  outline-offset: 4px;
 }
 
 .entry-card:hover,
@@ -1683,6 +1709,48 @@ button:active:not(:disabled) {
 .entry-card--active,
 .thread-card--active {
   box-shadow: inset 3px 0 0 #25533f;
+}
+
+.entry-attachment-strip {
+  display: flex;
+  gap: 8px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 1px 1px 2px;
+}
+
+.entry-attachment-thumb-button {
+  display: block;
+  width: 56px;
+  height: 56px;
+  flex: 0 0 56px;
+  overflow: hidden;
+  border: 1px solid #d7ded8;
+  border-radius: 7px;
+  background: #edf1ee;
+  cursor: zoom-in;
+  padding: 0;
+}
+
+.entry-attachment-thumb-button:hover,
+.entry-attachment-thumb-button:focus-visible {
+  border-color: #7d9b88;
+}
+
+.entry-attachment-thumb-button:focus-visible {
+  outline: 2px solid rgba(37, 83, 63, 0.42);
+  outline-offset: 2px;
+}
+
+.entry-attachment-thumb,
+.entry-attachment-thumb.media-placeholder {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 0;
+  object-fit: cover;
 }
 
 .detail-panel,
