@@ -2854,9 +2854,22 @@ function buildMockAnalytics(input: AnalyticsPeriodRequest): AnalyticsResponse {
       moodSentimentCount: number;
     }
   >();
+  const daily = new Map<string, { entryCount: number; wordCount: number }>();
+  const hourly = Array.from({ length: 24 }, (_, hour) => ({
+    hour,
+    label: `${String(hour).padStart(2, "0")}:00`,
+    entryCount: 0,
+    wordCount: 0,
+  }));
+  const weekday = buildMockWeekdayTrend();
+  const writingDays = new Map<
+    string,
+    { date: string; firstMinutes: number; lastMinutes: number; entryCount: number }
+  >();
   const moods = new Map<string, number>();
   const tags = new Map<string, number>();
   const locations = new Map<string, number>();
+  const locationActivity = new Map<string, { count: number; labels: Map<string, number> }>();
   const weather = new Map<string, number>();
   const words = new Map<string, number>();
   let moodSentimentSum = 0;
@@ -2864,6 +2877,8 @@ function buildMockAnalytics(input: AnalyticsPeriodRequest): AnalyticsResponse {
 
   for (const entry of entries) {
     const month = entry.createdAt.slice(0, 7);
+    const date = entry.createdAt.slice(0, 10);
+    const entryWordCount = writingWordCount(entry.textPlain);
     const monthValue = monthly.get(month) ?? {
       entryCount: 0,
       wordCount: 0,
@@ -2873,10 +2888,37 @@ function buildMockAnalytics(input: AnalyticsPeriodRequest): AnalyticsResponse {
     const moodSentiment = moodSentimentScore(entry.mood);
     monthly.set(month, {
       entryCount: monthValue.entryCount + 1,
-      wordCount: monthValue.wordCount + writingWordCount(entry.textPlain),
+      wordCount: monthValue.wordCount + entryWordCount,
       moodSentimentSum: monthValue.moodSentimentSum + (moodSentiment ?? 0),
       moodSentimentCount: monthValue.moodSentimentCount + (moodSentiment === null ? 0 : 1),
     });
+    const dailyValue = daily.get(date) ?? { entryCount: 0, wordCount: 0 };
+    daily.set(date, {
+      entryCount: dailyValue.entryCount + 1,
+      wordCount: dailyValue.wordCount + entryWordCount,
+    });
+    const minutes = mockMinutesSinceMidnight(entry.createdAt);
+    if (minutes !== null) {
+      const hour = Math.floor(minutes / 60);
+      hourly[hour].entryCount += 1;
+      hourly[hour].wordCount += entryWordCount;
+      const writingDay = writingDays.get(date) ?? {
+        date,
+        firstMinutes: minutes,
+        lastMinutes: minutes,
+        entryCount: 0,
+      };
+      writingDay.firstMinutes = Math.min(writingDay.firstMinutes, minutes);
+      writingDay.lastMinutes = Math.max(writingDay.lastMinutes, minutes);
+      writingDay.entryCount += 1;
+      writingDays.set(date, writingDay);
+    }
+    const dayNum = mockWeekdayDayNum(date);
+    const weekdayPoint = weekday.find((point) => point.dayNum === dayNum);
+    if (weekdayPoint) {
+      weekdayPoint.entryCount += 1;
+      weekdayPoint.wordCount += entryWordCount;
+    }
     if (entry.mood) moods.set(entry.mood, (moods.get(entry.mood) ?? 0) + 1);
     if (moodSentiment !== null) {
       moodSentimentSum += moodSentiment;
@@ -2885,6 +2927,7 @@ function buildMockAnalytics(input: AnalyticsPeriodRequest): AnalyticsResponse {
     for (const tag of entry.tags) tags.set(tag.name, (tags.get(tag.name) ?? 0) + 1);
     if (entry.location?.placeName) {
       locations.set(entry.location.placeName, (locations.get(entry.location.placeName) ?? 0) + 1);
+      addMockLocationActivity(locationActivity, entry.location.placeName);
     }
     if (entry.location?.weatherCondition) {
       weather.set(entry.location.weatherCondition, (weather.get(entry.location.weatherCondition) ?? 0) + 1);
@@ -2918,6 +2961,15 @@ function buildMockAnalytics(input: AnalyticsPeriodRequest): AnalyticsResponse {
         : null,
       moodSentimentCount: value.moodSentimentCount,
     })),
+    dailyTrend: [...daily.entries()].sort().map(([date, value]) => ({
+      date,
+      entryCount: value.entryCount,
+      wordCount: value.wordCount,
+    })),
+    hourlyTrend: hourly,
+    weekdayTrend: weekday,
+    writingWindow: buildMockWritingWindow([...writingDays.values()].sort((left, right) => left.date.localeCompare(right.date))),
+    locationActivity: mapMockLocationActivity(locationActivity),
     moodBreakdown: mapToBreakdown(moods),
     tagBreakdown: mapToBreakdown(tags),
     locationBreakdown: mapToBreakdown(locations),
@@ -3750,6 +3802,109 @@ function mapToBreakdown(values: Map<string, number>) {
     .map(([label, count]) => ({ label, count }))
     .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label))
     .slice(0, 12);
+}
+
+function buildMockWeekdayTrend(): AnalyticsResponse["weekdayTrend"] {
+  return [
+    { dayNum: 1, label: "Monday", shortLabel: "Mon", entryCount: 0, wordCount: 0 },
+    { dayNum: 2, label: "Tuesday", shortLabel: "Tue", entryCount: 0, wordCount: 0 },
+    { dayNum: 3, label: "Wednesday", shortLabel: "Wed", entryCount: 0, wordCount: 0 },
+    { dayNum: 4, label: "Thursday", shortLabel: "Thu", entryCount: 0, wordCount: 0 },
+    { dayNum: 5, label: "Friday", shortLabel: "Fri", entryCount: 0, wordCount: 0 },
+    { dayNum: 6, label: "Saturday", shortLabel: "Sat", entryCount: 0, wordCount: 0 },
+    { dayNum: 0, label: "Sunday", shortLabel: "Sun", entryCount: 0, wordCount: 0 },
+  ];
+}
+
+function mockWeekdayDayNum(date: string) {
+  const day = new Date(`${date}T00:00:00`).getDay();
+  return day === 0 ? 0 : day;
+}
+
+function mockMinutesSinceMidnight(value: string) {
+  const time = value.slice(11, 16);
+  const [hour, minute] = time.split(":").map((item) => Number(item));
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+function mockMinutesToTime(value: number | null | undefined) {
+  if (value === null || value === undefined) return null;
+  const minutes = Math.max(0, Math.min(1439, Math.round(value)));
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+function mockRoundedAverage(values: number[]) {
+  if (values.length === 0) return null;
+  return Math.floor((values.reduce((sum, value) => sum + value, 0) + Math.floor(values.length / 2)) / values.length);
+}
+
+function buildMockWritingWindow(
+  values: Array<{ date: string; firstMinutes: number; lastMinutes: number; entryCount: number }>,
+): AnalyticsResponse["writingWindow"] {
+  const days = values.map((value) => ({
+    date: value.date,
+    firstTime: mockMinutesToTime(value.firstMinutes) ?? "00:00",
+    lastTime: mockMinutesToTime(value.lastMinutes) ?? "00:00",
+    firstMinutes: value.firstMinutes,
+    lastMinutes: value.lastMinutes,
+    spanMinutes: Math.max(0, value.lastMinutes - value.firstMinutes),
+    entryCount: value.entryCount,
+  }));
+  const firstValues = days.map((day) => day.firstMinutes);
+  const lastValues = days.map((day) => day.lastMinutes);
+  const spanValues = days.map((day) => day.spanMinutes);
+  const longestSpanDay = days.reduce<(typeof days)[number] | null>(
+    (best, day) => (!best || day.spanMinutes > best.spanMinutes ? day : best),
+    null,
+  );
+
+  return {
+    days,
+    summary: {
+      activeDays: days.length,
+      totalEntries: days.reduce((sum, day) => sum + day.entryCount, 0),
+      avgFirstTime: mockMinutesToTime(mockRoundedAverage(firstValues)),
+      avgLastTime: mockMinutesToTime(mockRoundedAverage(lastValues)),
+      avgSpanMinutes: mockRoundedAverage(spanValues) ?? 0,
+      earliestFirstTime: mockMinutesToTime(firstValues.length ? Math.min(...firstValues) : null),
+      latestLastTime: mockMinutesToTime(lastValues.length ? Math.max(...lastValues) : null),
+      longestSpanDay: longestSpanDay
+        ? { date: longestSpanDay.date, spanMinutes: longestSpanDay.spanMinutes }
+        : null,
+    },
+  };
+}
+
+function addMockLocationActivity(
+  values: Map<string, { count: number; labels: Map<string, number> }>,
+  label: string,
+) {
+  const normalized = label.trim().toLowerCase();
+  const bucket = values.get(normalized) ?? { count: 0, labels: new Map<string, number>() };
+  bucket.count += 1;
+  bucket.labels.set(label, (bucket.labels.get(label) ?? 0) + 1);
+  values.set(normalized, bucket);
+}
+
+function mapMockLocationActivity(values: Map<string, { count: number; labels: Map<string, number> }>) {
+  return [...values.values()]
+    .map((bucket) => {
+      const labels = [...bucket.labels.entries()].sort(
+        (left, right) =>
+          right[1] - left[1] ||
+          left[0].toLowerCase().localeCompare(right[0].toLowerCase()) ||
+          left[0].localeCompare(right[0]),
+      );
+      return { label: labels[0]?.[0] ?? "Unknown location", count: bucket.count };
+    })
+    .sort(
+      (left, right) =>
+        right.count - left.count ||
+        left.label.toLowerCase().localeCompare(right.label.toLowerCase()) ||
+        left.label.localeCompare(right.label),
+    );
 }
 
 function writingWordCount(value: string) {

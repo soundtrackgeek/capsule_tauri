@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.25.0 - 2026-07-07
+
+### Added
+
+- Added Activity Trends to Analytics with entry frequency, words over time,
+  first/last Capsule timing, hourly and weekday words/notes, and entries per
+  location charts.
+
+### Changed
+
+- Bumped the app version to 0.25.0.
+
 ## 0.24.8 - 2026-07-07
 
 ### Fixed

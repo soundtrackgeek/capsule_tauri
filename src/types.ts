@@ -1139,6 +1139,58 @@ export type AnalyticsBreakdownItem = {
   count: number;
 };
 
+export type AnalyticsDailyTrendPoint = {
+  date: string;
+  entryCount: number;
+  wordCount: number;
+};
+
+export type AnalyticsHourPoint = {
+  hour: number;
+  label: string;
+  entryCount: number;
+  wordCount: number;
+};
+
+export type AnalyticsWeekdayPoint = {
+  dayNum: number;
+  label: string;
+  shortLabel: string;
+  entryCount: number;
+  wordCount: number;
+};
+
+export type AnalyticsWritingWindowDay = {
+  date: string;
+  firstTime: string;
+  lastTime: string;
+  firstMinutes: number;
+  lastMinutes: number;
+  spanMinutes: number;
+  entryCount: number;
+};
+
+export type AnalyticsWritingWindowLongestDay = {
+  date: string;
+  spanMinutes: number;
+};
+
+export type AnalyticsWritingWindowSummary = {
+  activeDays: number;
+  totalEntries: number;
+  avgFirstTime: string | null;
+  avgLastTime: string | null;
+  avgSpanMinutes: number;
+  earliestFirstTime: string | null;
+  latestLastTime: string | null;
+  longestSpanDay: AnalyticsWritingWindowLongestDay | null;
+};
+
+export type AnalyticsWritingWindow = {
+  days: AnalyticsWritingWindowDay[];
+  summary: AnalyticsWritingWindowSummary;
+};
+
 export type WordCount = {
   word: string;
   count: number;
@@ -1147,6 +1199,11 @@ export type WordCount = {
 export type AnalyticsResponse = {
   overview: AnalyticsOverview;
   monthlyTrend: AnalyticsTrendPoint[];
+  dailyTrend: AnalyticsDailyTrendPoint[];
+  hourlyTrend: AnalyticsHourPoint[];
+  weekdayTrend: AnalyticsWeekdayPoint[];
+  writingWindow: AnalyticsWritingWindow;
+  locationActivity: AnalyticsBreakdownItem[];
   moodBreakdown: AnalyticsBreakdownItem[];
   tagBreakdown: AnalyticsBreakdownItem[];
   locationBreakdown: AnalyticsBreakdownItem[];

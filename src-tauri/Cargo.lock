@@ -438,7 +438,7 @@ dependencies = [
 
 [[package]]
 name = "capsule-tauri"
-version = "0.24.8"
+version = "0.25.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

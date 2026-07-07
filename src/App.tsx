@@ -138,7 +138,7 @@ import {
   type AppUpdateInfo,
   type AppUpdateProgress,
 } from "./backend";
-import { TrendBars, MoodTrendBars, BreakdownList } from "./components/analytics";
+import { ActivityTrends, TrendBars, MoodTrendBars, BreakdownList } from "./components/analytics";
 import {
   DeleteEntryDialog,
   EntryAttachmentStrip,
@@ -3919,6 +3919,10 @@ function AnalyticsView({
               {warning}
             </div>
           ))}
+
+          <Panel icon={<CalendarDays size={20} />} title="Activity Trends">
+            <ActivityTrends analytics={analytics} />
+          </Panel>
 
           <div className="analytics-grid">
             <Panel icon={<BarChart3 size={20} />} title="Monthly Trend">

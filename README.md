@@ -86,7 +86,9 @@ explicit capability-gated AI/sync surfaces:
   file picking in the Images page, multi-select composer image picking, entry
   attachment previews, batched composer image save, removal, and sync tombstone
   recording.
-- Analytics dashboard with overview counts, monthly trend, mood sentiment trend,
+- Analytics dashboard with overview counts, Activity Trends charts for entry
+  frequency, words, first/last Capsule timing, hourly/weekday activity, and
+  location activity, plus monthly trend, mood sentiment trend,
   tag/mood/location breakdowns, weather breakdowns, top words, and streaks.
 - Writing Calendar heatmap for active days, words, images, mood metadata, and
   mood sentiment markers.

@@ -1579,6 +1579,72 @@ pub struct AnalyticsBreakdownItem {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AnalyticsDailyTrendPoint {
+    pub date: String,
+    pub entry_count: i64,
+    pub word_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsHourPoint {
+    pub hour: i64,
+    pub label: String,
+    pub entry_count: i64,
+    pub word_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsWeekdayPoint {
+    pub day_num: i64,
+    pub label: String,
+    pub short_label: String,
+    pub entry_count: i64,
+    pub word_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsWritingWindowDay {
+    pub date: String,
+    pub first_time: String,
+    pub last_time: String,
+    pub first_minutes: i64,
+    pub last_minutes: i64,
+    pub span_minutes: i64,
+    pub entry_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsWritingWindowLongestDay {
+    pub date: String,
+    pub span_minutes: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsWritingWindowSummary {
+    pub active_days: i64,
+    pub total_entries: i64,
+    pub avg_first_time: Option<String>,
+    pub avg_last_time: Option<String>,
+    pub avg_span_minutes: i64,
+    pub earliest_first_time: Option<String>,
+    pub latest_last_time: Option<String>,
+    pub longest_span_day: Option<AnalyticsWritingWindowLongestDay>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsWritingWindow {
+    pub days: Vec<AnalyticsWritingWindowDay>,
+    pub summary: AnalyticsWritingWindowSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WordCount {
     pub word: String,
     pub count: i64,
@@ -1589,6 +1655,11 @@ pub struct WordCount {
 pub struct AnalyticsResponse {
     pub overview: AnalyticsOverview,
     pub monthly_trend: Vec<AnalyticsTrendPoint>,
+    pub daily_trend: Vec<AnalyticsDailyTrendPoint>,
+    pub hourly_trend: Vec<AnalyticsHourPoint>,
+    pub weekday_trend: Vec<AnalyticsWeekdayPoint>,
+    pub writing_window: AnalyticsWritingWindow,
+    pub location_activity: Vec<AnalyticsBreakdownItem>,
     pub mood_breakdown: Vec<AnalyticsBreakdownItem>,
     pub tag_breakdown: Vec<AnalyticsBreakdownItem>,
     pub location_breakdown: Vec<AnalyticsBreakdownItem>,

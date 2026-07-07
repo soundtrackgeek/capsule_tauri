@@ -2574,6 +2574,235 @@ button.entry-card {
   gap: 16px;
 }
 
+.activity-trends {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.activity-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.activity-tab {
+  min-height: 34px;
+  border: 1px solid #d7ded8;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #24312a;
+  cursor: pointer;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.activity-tab:hover {
+  border-color: #aab8ae;
+}
+
+.activity-tab--active {
+  border-color: #17201b;
+  background: #17201b;
+  color: #ffffff;
+}
+
+.activity-empty {
+  display: grid;
+  min-height: 220px;
+  place-items: center;
+  text-align: center;
+}
+
+.activity-chart-wrap {
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.activity-chart {
+  display: block;
+  width: 100%;
+  min-width: 680px;
+  height: 300px;
+}
+
+.activity-grid-line {
+  stroke: #ccd6ce;
+  stroke-dasharray: 4 4;
+  stroke-width: 1;
+}
+
+.activity-axis-line {
+  stroke: #7b8981;
+  stroke-width: 1.2;
+}
+
+.activity-axis-label {
+  fill: #66756d;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.activity-bar {
+  opacity: 0.96;
+}
+
+.activity-line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+}
+
+.activity-dot {
+  stroke: #ffffff;
+  stroke-width: 2;
+}
+
+.activity-reference-line {
+  stroke: #7b8da0;
+  stroke-dasharray: 6 6;
+  stroke-width: 1.2;
+}
+
+.activity-window {
+  display: grid;
+  gap: 16px;
+}
+
+.activity-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.activity-summary {
+  min-width: 0;
+  border: 1px solid #d7ded8;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 13px;
+}
+
+.activity-summary span {
+  display: block;
+  color: #66756d;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.activity-summary strong {
+  display: block;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+  font-size: 22px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-summary em {
+  display: block;
+  margin-top: 6px;
+  color: #66756d;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.activity-legend {
+  display: flex;
+  gap: 18px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.activity-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.activity-legend i {
+  width: 16px;
+  height: 3px;
+  border-radius: 999px;
+}
+
+:root[data-theme="dark"] .activity-tab,
+:root[data-theme="dark"] .activity-summary {
+  border-color: #34433a;
+  background: #141a17;
+  color: #e9eee8;
+}
+
+:root[data-theme="dark"] .activity-tab:hover {
+  border-color: #506357;
+}
+
+:root[data-theme="dark"] .activity-tab--active {
+  border-color: #dcebe1;
+  background: #dcebe1;
+  color: #152019;
+}
+
+:root[data-theme="dark"] .activity-summary span,
+:root[data-theme="dark"] .activity-summary em,
+:root[data-theme="dark"] .activity-axis-label {
+  color: #aab8ae;
+  fill: #aab8ae;
+}
+
+:root[data-theme="dark"] .activity-grid-line {
+  stroke: #34433a;
+}
+
+:root[data-theme="dark"] .activity-axis-line {
+  stroke: #7d8d83;
+}
+
+:root[data-theme="dark"] .activity-dot {
+  stroke: #1d2520;
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .activity-tab,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .activity-summary {
+  border-color: var(--retro-card-border);
+  background: var(--retro-control);
+  color: var(--retro-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .activity-tab--active {
+  border-color: var(--retro-active-bg);
+  background: var(--retro-active-bg);
+  color: var(--retro-active-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .activity-summary span,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .activity-summary em,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .activity-axis-label {
+  color: var(--retro-muted);
+  fill: var(--retro-muted);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .activity-grid-line {
+  stroke: var(--retro-card-border);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .activity-axis-line,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .activity-reference-line {
+  stroke: var(--retro-muted-strong);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .activity-dot {
+  stroke: var(--retro-panel);
+}
+
 .bar-list {
   display: grid;
   gap: 10px;
@@ -3409,6 +3638,7 @@ button.entry-card {
     .images-workspace,
     .covers-workspace,
     .analytics-grid,
+    .activity-summary-grid,
     .ai-chat-workspace,
     .ai-chat-body,
     .ai-chat-toolbar__selectors,
@@ -3440,6 +3670,16 @@ button.entry-card {
 
   .toolbar-panel {
     flex-direction: column;
+  }
+
+  .activity-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .activity-tab {
+    padding: 0 8px;
+    white-space: normal;
   }
 
   .filters-panel,
