@@ -26,8 +26,9 @@ explicit capability-gated AI/sync surfaces:
 - Entries list with old-Capsule-style entry numbers, inline image thumbnails
   that open full-size previews, and text, tag, mood, location, date, image,
   hidden, and sort filters.
-- Entry detail view with entry number, full text, tags, mood, location,
-  attachment count, and thread metadata when those tables are available,
+- Entry detail view with entry number, full text that preserves authored line
+  breaks, tags, mood, location, attachment count, and thread metadata when those
+  tables are available,
   including stored weather condition, Celsius-first temperature, humidity, wind,
   icon, source, and fetched timestamp.
 - Backup-guarded entry creation and editing, with Capsule-compatible location
@@ -49,8 +50,9 @@ explicit capability-gated AI/sync surfaces:
   `NOT tag:` queries, plus include/exclude tag and mood filters and a location
   text filter.
 - Search results with old-Capsule-style entry numbers, inline image thumbnails
-  that open full-size previews, and the same star, pin, edit, continue, delete,
-  and hide/unhide actions used by the Entries view.
+  that open full-size previews, preserved line breaks in the selected entry, and
+  the same star, pin, edit, continue, delete, and hide/unhide actions used by the
+  Entries view.
 - Thread groups built from Capsule continuation links with ordered entries,
   latest activity, titles, and summaries.
 - Backup-guarded thread title/summary updates, bulk link commands, leaf detach,

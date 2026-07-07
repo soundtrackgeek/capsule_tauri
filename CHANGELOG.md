@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.24.8 - 2026-07-07
+
+### Fixed
+
+- Fixed Entries and Search detail readers so they preserve authored line breaks
+  from the original entry text instead of rendering the collapsed search
+  projection.
+
+### Changed
+
+- Bumped the app version to 0.24.8.
+
 ## 0.24.7 - 2026-07-07
 
 ### Fixed

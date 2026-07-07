@@ -86,6 +86,7 @@ export function EntryDetail({
     );
   }
 
+  const displayText = entry.text || entry.textPlain;
   const weatherTemperature = entry.location ? formatWeatherTemperature(entry.location) : null;
 
   return (
@@ -158,7 +159,7 @@ export function EntryDetail({
         ))}
       </div>
 
-      <article className="entry-body">{entry.textPlain || entry.text}</article>
+      <article className="entry-body">{displayText}</article>
 
       <dl className="detail-list detail-list--compact">
         <Detail label="Number" value={formatEntryNumber(entry.id)} />

@@ -119,6 +119,32 @@ describe("entry components", () => {
     expect(onDelete).toHaveBeenCalledWith(entry);
   });
 
+  test("renders entry detail with authored line breaks", () => {
+    const text = "First paragraph.\n\nSecond paragraph.\nThird line.";
+    const entry = makeEntry({
+      text,
+      textPlain: "First paragraph. Second paragraph. Third line.",
+    });
+
+    const { container } = render(
+      <EntryDetail
+        entry={entry}
+        entryHistory={null}
+        historyLoading={false}
+        loading={false}
+        mutating={false}
+        onContinue={vi.fn()}
+        onDelete={vi.fn()}
+        onEdit={vi.fn()}
+        onEntryAction={vi.fn()}
+        onExport={vi.fn()}
+        onLoadHistory={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector(".entry-body")?.textContent).toBe(text);
+  });
+
   test("renders entry detail as an embedded reader", () => {
     const entry = makeEntry();
     const { container } = render(
