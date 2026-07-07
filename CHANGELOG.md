@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.24.7 - 2026-07-07
+
+### Fixed
+
+- Fixed no-op sync runs so unchanged payloads skip retained database backup
+  creation while still refreshing sync status and exported sync files.
+
+### Changed
+
+- Bumped the app version to 0.24.7.
+
 ## 0.24.6 - 2026-07-07
 
 ### Added

@@ -303,11 +303,13 @@ creates a verified backup first, records a sync tombstone, removes local
 entry-owned relation rows, resequences later numeric IDs, and rebuilds
 `entries_fts` so legacy Capsule ID ordering stays compatible.
 
-Shared-folder sync execution is local and backup-guarded. Manual sync runs only
-from an explicit Settings or Sync-page action, and automatic sync runs only when
-enabled with a saved interval. Sync applies remote delete tombstones before
-upserts, keeps newer local rows when they win by timestamp, rewrites the latest
-sync files after merging, and retries if the shared file changes during a run.
+Shared-folder sync execution is local and backup-guarded when the merge changes
+database content. Unchanged sync payloads still refresh status and exported sync
+files, but skip retained database backup creation. Manual sync runs only from an
+explicit Settings or Sync-page action, and automatic sync runs only when enabled
+with a saved interval. Sync applies remote delete tombstones before upserts,
+keeps newer local rows when they win by timestamp, rewrites the latest sync files
+after merging, and retries if the shared file changes during a run.
 
 AI chat live requests and semantic vector ranking remain capability-gated.
 Tauri reads their existing state, but it does not send journal data to cloud

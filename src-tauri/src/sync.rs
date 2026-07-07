@@ -445,19 +445,15 @@ pub fn run_sync(input: Option<SyncRunRequest>) -> Result<SyncRunResponse> {
         false
     };
 
-    let guarded = backup::with_database_backup_for_database(&db_path, "sync.run", move |path| {
-        match run_sync_with_retries(path, &sync_dir) {
-            Ok(response) => Ok(response),
-            Err(error) => {
-                if let Err(status_error) = record_sync_error(path, &sync_file, &error.to_string()) {
-                    eprintln!("[Sync] Failed to record sync error: {status_error}");
-                }
-                Err(error)
+    let mut response = match run_sync_with_backup_if_needed(&db_path, &sync_dir) {
+        Ok(response) => response,
+        Err(error) => {
+            if let Err(status_error) = record_sync_error(&db_path, &sync_file, &error.to_string()) {
+                eprintln!("[Sync] Failed to record sync error: {status_error}");
             }
+            return Err(error);
         }
-    })?;
-
-    let mut response = guarded.value;
+    };
     response.github_gist_pulled = github_gist_pulled;
     response.github_gist_pushed = if let Some(config) = gist_config.as_ref() {
         if config.token.is_some() {
@@ -698,6 +694,119 @@ fn append_summary_note(summary: &str, note: &str) -> String {
     } else {
         format!("{summary}, {note}")
     }
+}
+
+fn run_sync_with_backup_if_needed(db_path: &Path, sync_dir: &Path) -> Result<SyncRunResponse> {
+    if let Some(response) = run_sync_without_backup_if_unchanged(db_path, sync_dir)? {
+        return Ok(response);
+    }
+
+    let sync_dir = sync_dir.to_path_buf();
+    let guarded = backup::with_database_backup_for_database(db_path, "sync.run", move |path| {
+        run_sync_with_retries(path, &sync_dir)
+    })?;
+    Ok(guarded.value)
+}
+
+fn run_sync_without_backup_if_unchanged(
+    db_path: &Path,
+    sync_dir: &Path,
+) -> Result<Option<SyncRunResponse>> {
+    entries::ensure_entry_ids_for_database(db_path)?;
+    let sync_file = sync_dir.join(MAIN_SYNC_FILE);
+    let threads_sync_file = sync_dir.join(THREADS_SYNC_FILE);
+    let ai_chat_sync_file = sync_dir.join(AI_CHATS_SYNC_FILE);
+    let starting_signature = file_signature(&sync_file)?;
+
+    let remote_main = read_main_payload(&sync_file)?;
+    let remote_threads = read_json_file::<ThreadSyncPayload>(&threads_sync_file)?;
+    let remote_ai_chats = read_json_file::<AiChatSyncPayload>(&ai_chat_sync_file)?;
+    let (main_payload, thread_payload, ai_payload) = build_local_sync_payloads(
+        db_path,
+        remote_main.extra.clone(),
+        remote_main.deleted_uuids.clone(),
+    )?;
+
+    if !sync_payloads_match(
+        &remote_main,
+        &remote_threads,
+        &remote_ai_chats,
+        &main_payload,
+        &thread_payload,
+        &ai_payload,
+    )? {
+        return Ok(None);
+    }
+
+    if file_signature(&sync_file)? != starting_signature {
+        return Ok(None);
+    }
+
+    write_json_replace(&sync_file, &main_payload)?;
+    write_json_replace(&threads_sync_file, &thread_payload)?;
+    write_json_replace(&ai_chat_sync_file, &ai_payload)?;
+
+    let counts = SyncCounts {
+        exported: main_payload.entries.len() as i64,
+        ..SyncCounts::default()
+    };
+    let completed_at = current_timestamp_seconds();
+    let summary = sync_summary(&counts);
+    record_sync_success(db_path, &sync_file, &counts, &summary, &completed_at, None)?;
+
+    Ok(Some(SyncRunResponse {
+        sync_path: db::path_to_string(sync_dir),
+        sync_file_path: db::path_to_string(&sync_file),
+        github_gist_pulled: false,
+        github_gist_pushed: false,
+        imported_count: counts.imported,
+        updated_count: counts.updated,
+        deleted_count: counts.deleted,
+        exported_count: counts.exported,
+        conflict_count: counts.conflicts.len() as i64,
+        summary,
+        completed_at,
+    }))
+}
+
+fn build_local_sync_payloads(
+    db_path: &Path,
+    mut extra: Map<String, JsonValue>,
+    remote_deleted_uuids: Vec<String>,
+) -> Result<(MainSyncPayload, ThreadSyncPayload, AiChatSyncPayload)> {
+    let connection = db::open_read_only_connection(db_path)?;
+    extra.insert(
+        "images".to_string(),
+        serde_json::to_value(build_images_payload(&connection)?)?,
+    );
+    extra.insert(
+        "locations".to_string(),
+        serde_json::to_value(build_locations_payload(&connection)?)?,
+    );
+    extra.insert(
+        "library".to_string(),
+        serde_json::to_value(build_library_payload(&connection)?)?,
+    );
+    Ok((
+        build_main_payload(&connection, extra, remote_deleted_uuids)?,
+        build_threads_payload(&connection)?,
+        build_ai_chats_payload(&connection)?,
+    ))
+}
+
+fn sync_payloads_match(
+    remote_main: &MainSyncPayload,
+    remote_threads: &ThreadSyncPayload,
+    remote_ai_chats: &AiChatSyncPayload,
+    local_main: &MainSyncPayload,
+    local_threads: &ThreadSyncPayload,
+    local_ai_chats: &AiChatSyncPayload,
+) -> Result<bool> {
+    Ok(
+        serde_json::to_value(remote_main)? == serde_json::to_value(local_main)?
+            && serde_json::to_value(remote_threads)? == serde_json::to_value(local_threads)?
+            && serde_json::to_value(remote_ai_chats)? == serde_json::to_value(local_ai_chats)?,
+    )
 }
 
 fn run_sync_with_retries(db_path: &Path, sync_dir: &Path) -> Result<SyncRunResponse> {
@@ -1765,7 +1874,6 @@ fn build_images_payload(connection: &Connection) -> Result<ImageSyncPayload> {
     {
         return Ok(ImageSyncPayload::default());
     }
-    ensure_image_sync_schema(connection)?;
 
     let mut asset_statement = connection.prepare(
         "SELECT DISTINCT ma.hash, ma.mime_type, ma.bytes, ma.width, ma.height,
@@ -1809,23 +1917,28 @@ fn build_images_payload(connection: &Connection) -> Result<ImageSyncPayload> {
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    let mut deleted_statement = connection.prepare(
-        "SELECT entry_uuid, asset_hash, position, COALESCE(caption, ''), COALESCE(alt_text, ''), deleted_at
-         FROM sync_image_tombstones
-         ORDER BY deleted_at ASC, entry_uuid ASC, asset_hash ASC, position ASC",
-    )?;
-    let deleted_attachments = deleted_statement
-        .query_map([], |row| {
-            Ok(DeletedImageAttachment {
-                entry_uuid: row.get(0)?,
-                asset_hash: row.get(1)?,
-                position: row.get(2)?,
-                caption: Some(row.get(3)?),
-                alt_text: Some(row.get(4)?),
-                deleted_at: row.get(5)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let deleted_attachments = if table_exists(connection, "sync_image_tombstones")? {
+        let mut deleted_statement = connection.prepare(
+            "SELECT entry_uuid, asset_hash, position, COALESCE(caption, ''), COALESCE(alt_text, ''), deleted_at
+             FROM sync_image_tombstones
+             ORDER BY deleted_at ASC, entry_uuid ASC, asset_hash ASC, position ASC",
+        )?;
+        let rows = deleted_statement
+            .query_map([], |row| {
+                Ok(DeletedImageAttachment {
+                    entry_uuid: row.get(0)?,
+                    asset_hash: row.get(1)?,
+                    position: row.get(2)?,
+                    caption: Some(row.get(3)?),
+                    alt_text: Some(row.get(4)?),
+                    deleted_at: row.get(5)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    } else {
+        Vec::new()
+    };
 
     Ok(ImageSyncPayload {
         assets,
@@ -2022,7 +2135,6 @@ fn build_locations_payload(connection: &Connection) -> Result<LocationSyncPayloa
             ..LocationSyncPayload::default()
         });
     }
-    ensure_location_sync_schema(connection)?;
 
     let mut statement = connection.prepare(
         "SELECT entry_uuid, latitude, longitude, place_name, place_details, source,
@@ -2052,22 +2164,27 @@ fn build_locations_payload(connection: &Connection) -> Result<LocationSyncPayloa
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    let mut deleted_statement = connection.prepare(
-        "SELECT st.entry_uuid, st.deleted_at
-         FROM sync_location_tombstones st
-         WHERE NOT EXISTS (
-            SELECT 1 FROM plugin_entry_locations pel WHERE pel.entry_uuid = st.entry_uuid
-         )
-         ORDER BY st.deleted_at ASC, st.entry_uuid ASC",
-    )?;
-    let deleted_locations = deleted_statement
-        .query_map([], |row| {
-            Ok(DeletedLocation {
-                entry_uuid: row.get(0)?,
-                deleted_at: row.get(1)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let deleted_locations = if table_exists(connection, "sync_location_tombstones")? {
+        let mut deleted_statement = connection.prepare(
+            "SELECT st.entry_uuid, st.deleted_at
+             FROM sync_location_tombstones st
+             WHERE NOT EXISTS (
+                SELECT 1 FROM plugin_entry_locations pel WHERE pel.entry_uuid = st.entry_uuid
+             )
+             ORDER BY st.deleted_at ASC, st.entry_uuid ASC",
+        )?;
+        let rows = deleted_statement
+            .query_map([], |row| {
+                Ok(DeletedLocation {
+                    entry_uuid: row.get(0)?,
+                    deleted_at: row.get(1)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    } else {
+        Vec::new()
+    };
 
     Ok(LocationSyncPayload {
         supported: true,
@@ -2336,56 +2453,67 @@ fn build_library_payload(connection: &Connection) -> Result<LibrarySyncPayload> 
     {
         return Ok(LibrarySyncPayload::default());
     }
-    ensure_library_sync_schema(connection)?;
 
-    let mut template_statement = connection.prepare(
-        "SELECT slug, name, COALESCE(description, ''), COALESCE(intro_text, ''),
-                sections_json, is_active, created_at, updated_at
-         FROM library_templates
-         WHERE is_builtin = 0
-         ORDER BY lower(slug) ASC",
-    )?;
-    let templates = template_statement
-        .query_map([], |row| {
-            Ok(LibraryTemplatePayload {
-                slug: row.get(0)?,
-                name: row.get(1)?,
-                description: row.get(2)?,
-                intro_text: row.get(3)?,
-                sections: json_string_list(row.get::<_, String>(4)?),
-                is_active: row.get::<_, i64>(5)? != 0,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let templates = if table_exists(connection, "library_templates")? {
+        let mut template_statement = connection.prepare(
+            "SELECT slug, name, COALESCE(description, ''), COALESCE(intro_text, ''),
+                    sections_json, is_active, created_at, updated_at
+             FROM library_templates
+             WHERE is_builtin = 0
+             ORDER BY lower(slug) ASC",
+        )?;
+        let rows = template_statement
+            .query_map([], |row| {
+                Ok(LibraryTemplatePayload {
+                    slug: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    intro_text: row.get(3)?,
+                    sections: json_string_list(row.get::<_, String>(4)?),
+                    is_active: row.get::<_, i64>(5)? != 0,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    } else {
+        Vec::new()
+    };
 
-    let mut prompt_statement = connection.prepare(
-        "SELECT slug, prompt_text, category, tags_json, is_active, created_at, updated_at
-         FROM library_prompts
-         WHERE is_builtin = 0
-         ORDER BY lower(slug) ASC",
-    )?;
-    let prompts = prompt_statement
-        .query_map([], |row| {
-            Ok(LibraryPromptPayload {
-                slug: row.get(0)?,
-                prompt_text: row.get(1)?,
-                category: row.get(2)?,
-                tags: json_string_list(row.get::<_, String>(3)?),
-                is_active: row.get::<_, i64>(4)? != 0,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let prompts = if table_exists(connection, "library_prompts")? {
+        let mut prompt_statement = connection.prepare(
+            "SELECT slug, prompt_text, category, tags_json, is_active, created_at, updated_at
+             FROM library_prompts
+             WHERE is_builtin = 0
+             ORDER BY lower(slug) ASC",
+        )?;
+        let rows = prompt_statement
+            .query_map([], |row| {
+                Ok(LibraryPromptPayload {
+                    slug: row.get(0)?,
+                    prompt_text: row.get(1)?,
+                    category: row.get(2)?,
+                    tags: json_string_list(row.get::<_, String>(3)?),
+                    is_active: row.get::<_, i64>(4)? != 0,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    } else {
+        Vec::new()
+    };
 
     let deleted_templates = query_deleted_library_items(
         connection,
+        "sync_template_tombstones",
         "SELECT slug, deleted_at FROM sync_template_tombstones ORDER BY deleted_at ASC, slug ASC",
     )?;
     let deleted_prompts = query_deleted_library_items(
         connection,
+        "sync_prompt_tombstones",
         "SELECT slug, deleted_at FROM sync_prompt_tombstones ORDER BY deleted_at ASC, slug ASC",
     )?;
 
@@ -3496,8 +3624,12 @@ fn library_prompt_row(
 
 fn query_deleted_library_items(
     connection: &Connection,
+    table: &str,
     sql: &str,
 ) -> Result<Vec<DeletedLibraryItem>> {
+    if !table_exists(connection, table)? {
+        return Ok(Vec::new());
+    }
     let mut statement = connection.prepare(sql)?;
     let rows = statement
         .query_map([], |row| {
@@ -3839,6 +3971,24 @@ mod tests {
         Ok(())
     }
 
+    fn backup_file_count(path: &Path) -> usize {
+        fs::read_dir(path)
+            .expect("read backup dir")
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("capsule_backup_")
+                    && entry
+                        .path()
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("db"))
+            })
+            .count()
+    }
+
     #[test]
     fn sync_tombstones_delete_rows_and_prevent_remote_resurrection() {
         let db_dir = tempdir().expect("db tempdir");
@@ -3977,5 +4127,33 @@ mod tests {
             run_sync_with_retries(&db_path, sync_dir.path()).expect("sync should complete");
         assert_eq!(response.updated_count, 0);
         assert_eq!(response.summary, "nothing new");
+    }
+
+    #[test]
+    fn sync_unchanged_payload_does_not_create_backup() {
+        let db_dir = tempdir().expect("db tempdir");
+        let sync_dir = tempdir().expect("sync tempdir");
+        let db_path = db_dir.path().join("capsule.db");
+        create_sync_test_database(&db_path).expect("database");
+
+        let (main_payload, thread_payload, ai_payload) =
+            build_local_sync_payloads(&db_path, Map::new(), Vec::new())
+                .expect("local sync payloads");
+        write_json_replace(&sync_dir.path().join(MAIN_SYNC_FILE), &main_payload)
+            .expect("main sync file");
+        write_json_replace(&sync_dir.path().join(THREADS_SYNC_FILE), &thread_payload)
+            .expect("threads sync file");
+        write_json_replace(&sync_dir.path().join(AI_CHATS_SYNC_FILE), &ai_payload)
+            .expect("ai sync file");
+
+        let before = backup_file_count(db_dir.path());
+        let response = run_sync_with_backup_if_needed(&db_path, sync_dir.path())
+            .expect("sync should complete");
+
+        assert_eq!(response.summary, "nothing new");
+        assert_eq!(response.imported_count, 0);
+        assert_eq!(response.updated_count, 0);
+        assert_eq!(response.deleted_count, 0);
+        assert_eq!(backup_file_count(db_dir.path()), before);
     }
 }
