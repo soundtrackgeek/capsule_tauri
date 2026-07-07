@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import changelogMarkdown from "../CHANGELOG.md?raw";
+import { RetroWriterShell } from "./components/retro/RetroWriterShell";
 import {
   Archive,
   BarChart3,
@@ -50,6 +51,12 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import {
+  DEFAULT_RETRO_FOCUS_THEME_ID,
+  RETRO_FOCUS_THEMES,
+  RETRO_FOCUS_THEMES_BY_ID,
+  type RetroFocusThemeId,
+} from "./lib/retro-focus/themes";
 import {
   attachImage,
   appendDebugLog,
@@ -289,12 +296,16 @@ type ComposerDraft = {
   continueFromUuid: string;
 };
 
+type WriterPresentation = "standard" | "retro";
+
 type WriterSettings = {
   background: string;
   color: string;
   fontFamily: string;
   fontSize: number;
   lineSpacing: number;
+  presentation: WriterPresentation;
+  retroThemeId: RetroFocusThemeId;
 };
 
 type UiTheme = "system" | "light" | "dark" | "msdos" | "commodore64" | "spectrum";
@@ -444,6 +455,8 @@ const defaultWriterSettings: WriterSettings = {
   ...writerThemeDefaults.system,
   fontSize: 21,
   lineSpacing: 1.75,
+  presentation: "standard",
+  retroThemeId: DEFAULT_RETRO_FOCUS_THEME_ID,
 };
 
 const draftStorageKey = "capsule-tauri-composer-draft-v1";
@@ -5432,39 +5445,114 @@ function WriterModeView({
   notice,
 }: WriterModeViewProps) {
   const stats = writingStats(draft.text);
+  const retroMode = settings.presentation === "retro";
+  const retroTheme = RETRO_FOCUS_THEMES_BY_ID[settings.retroThemeId];
+  const retroFontFamilyUsesThemeDefault = writerDefaultFontFamilies.has(settings.fontFamily);
+  const retroFontColorUsesThemeDefault = writerDefaultColors.has(settings.color);
+  const retroCustomization = {
+    fontFamily: retroFontFamilyUsesThemeDefault ? undefined : settings.fontFamily,
+    fontSizePx: settings.fontSize === defaultWriterSettings.fontSize ? undefined : settings.fontSize,
+    fontColor: retroFontColorUsesThemeDefault ? undefined : settings.color,
+  };
+  const fontFamilySelectValue =
+    retroMode && retroFontFamilyUsesThemeDefault ? "theme-default" : settings.fontFamily;
+  const colorInputValue =
+    retroMode && retroFontColorUsesThemeDefault ? retroTheme.chrome.accentColor : settings.color;
+
   return (
     <main
-      className="writer-mode"
-      style={{
-        background: settings.background,
-        color: settings.color,
-        fontFamily: settings.fontFamily,
-      }}
+      className={retroMode ? "writer-mode writer-mode--retro" : "writer-mode"}
+      style={
+        retroMode
+          ? {
+              background: retroTheme.screenFx.appBackground,
+              color: retroTheme.chrome.textColor,
+            }
+          : {
+              background: settings.background,
+              color: settings.color,
+              fontFamily: settings.fontFamily,
+            }
+      }
     >
       <div className="writer-toolbar">
         <div>
           <p className="eyebrow">{mode === "edit" ? "Edit" : "New"}</p>
-          <h1>{draft.title || "Untitled"}</h1>
+          {retroMode ? (
+            <input
+              className="writer-retro-title-input"
+              onChange={(event) => onChange({ ...draft, title: event.target.value })}
+              placeholder="Untitled"
+              value={draft.title}
+            />
+          ) : (
+            <h1>{draft.title || "Untitled"}</h1>
+          )}
         </div>
         <div className="writer-controls">
-          <label title="Background color">
-            <input
-              onChange={(event) => setSettings({ ...settings, background: event.target.value })}
-              type="color"
-              value={settings.background}
-            />
-          </label>
+          <select
+            aria-label="Writer presentation"
+            onChange={(event) =>
+              setSettings({
+                ...settings,
+                presentation: event.target.value as WriterPresentation,
+              })
+            }
+            title="Writer presentation"
+            value={settings.presentation}
+          >
+            <option value="standard">Standard</option>
+            <option value="retro">Retro CRT</option>
+          </select>
+          {retroMode ? (
+            <select
+              aria-label="Retro theme"
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  retroThemeId: event.target.value as RetroFocusThemeId,
+                })
+              }
+              title="Retro theme"
+              value={settings.retroThemeId}
+            >
+              {RETRO_FOCUS_THEMES.map((theme) => (
+                <option key={theme.id} value={theme.id}>
+                  {theme.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <label title="Background color">
+              <input
+                aria-label="Background color"
+                onChange={(event) => setSettings({ ...settings, background: event.target.value })}
+                type="color"
+                value={settings.background}
+              />
+            </label>
+          )}
           <label title="Text color">
             <input
+              aria-label="Text color"
               onChange={(event) => setSettings({ ...settings, color: event.target.value })}
               type="color"
-              value={settings.color}
+              value={colorInputValue}
             />
           </label>
           <select
-            onChange={(event) => setSettings({ ...settings, fontFamily: event.target.value })}
-            value={settings.fontFamily}
+            onChange={(event) =>
+              setSettings({
+                ...settings,
+                fontFamily:
+                  event.target.value === "theme-default"
+                    ? defaultWriterSettings.fontFamily
+                    : event.target.value,
+              })
+            }
+            value={fontFamilySelectValue}
           >
+            {retroMode && <option value="theme-default">Theme default</option>}
             <option value={serifWriterFont}>Serif</option>
             <option value="Inter, Segoe UI, ui-sans-serif, sans-serif">Sans</option>
             <option value={monoWriterFont}>Mono</option>
@@ -5477,17 +5565,19 @@ function WriterModeView({
             type="range"
             value={settings.fontSize}
           />
-          <input
-            max={2.2}
-            min={1.3}
-            onChange={(event) =>
-              setSettings({ ...settings, lineSpacing: Number(event.target.value) })
-            }
-            step={0.05}
-            title="Line spacing"
-            type="range"
-            value={settings.lineSpacing}
-          />
+          {!retroMode && (
+            <input
+              max={2.2}
+              min={1.3}
+              onChange={(event) =>
+                setSettings({ ...settings, lineSpacing: Number(event.target.value) })
+              }
+              step={0.05}
+              title="Line spacing"
+              type="range"
+              value={settings.lineSpacing}
+            />
+          )}
           <button className="secondary-button" onClick={onExit} type="button">
             <X size={17} />
             Exit
@@ -5512,30 +5602,43 @@ function WriterModeView({
         </div>
       )}
 
-      <div className="writer-canvas">
-        <input
-          className="writer-title-input"
-          onChange={(event) => onChange({ ...draft, title: event.target.value })}
-          placeholder="Title"
-          style={{ color: settings.color }}
-          value={draft.title}
-        />
-        <textarea
-          autoFocus
-          className="writer-textarea"
-          onChange={(event) => onChange({ ...draft, text: event.target.value })}
-          placeholder="Write"
-          style={{
-            color: settings.color,
-            fontFamily: settings.fontFamily,
-            fontSize: settings.fontSize,
-            lineHeight: settings.lineSpacing,
-          }}
-          value={draft.text}
-        />
-      </div>
+      {retroMode ? (
+        <div className="writer-retro-canvas">
+          <RetroWriterShell
+            text={draft.text}
+            themeId={settings.retroThemeId}
+            customization={retroCustomization}
+            onChange={(text) => onChange({ ...draft, text })}
+            autoFocus
+            ariaLabel={`Capsule Writer retro CRT layout in ${retroTheme.label}`}
+          />
+        </div>
+      ) : (
+        <div className="writer-canvas">
+          <input
+            className="writer-title-input"
+            onChange={(event) => onChange({ ...draft, title: event.target.value })}
+            placeholder="Title"
+            style={{ color: settings.color }}
+            value={draft.title}
+          />
+          <textarea
+            autoFocus
+            className="writer-textarea"
+            onChange={(event) => onChange({ ...draft, text: event.target.value })}
+            placeholder="Write"
+            style={{
+              color: settings.color,
+              fontFamily: settings.fontFamily,
+              fontSize: settings.fontSize,
+              lineHeight: settings.lineSpacing,
+            }}
+            value={draft.text}
+          />
+        </div>
+      )}
 
-      <div className="writer-footer">
+      <div className={retroMode ? "writer-footer writer-footer--retro" : "writer-footer"}>
         <span>{stats.words} words</span>
         <span>{stats.characters} characters</span>
         <span>{stats.readingMinutes} min</span>

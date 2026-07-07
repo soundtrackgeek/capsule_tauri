@@ -2162,6 +2162,21 @@ button.entry-card {
   padding: 22px clamp(18px, 5vw, 72px);
 }
 
+.writer-mode--retro {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+  padding: 10px;
+  background: #010402;
+  font-family:
+    Geist, Satoshi, "Segoe UI", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    sans-serif;
+}
+
 .writer-toolbar {
   display: flex;
   align-items: center;
@@ -2170,10 +2185,40 @@ button.entry-card {
   min-height: 54px;
 }
 
+.writer-mode--retro .writer-toolbar {
+  position: relative;
+  z-index: 12;
+  min-height: 0;
+  border: 1px solid rgba(177, 246, 191, 0.24);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(1, 6, 4, 0.78);
+  box-shadow: 0 12px 38px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(10px);
+}
+
 .writer-toolbar h1 {
   margin: 2px 0 0;
   font-size: 20px;
   line-height: 1.2;
+}
+
+.writer-retro-title-input {
+  width: min(32vw, 360px);
+  min-width: 160px;
+  border: 0;
+  border-bottom: 1px solid rgba(177, 246, 191, 0.28);
+  background: transparent;
+  color: #f0fff2;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 800;
+  outline: 0;
+  padding: 2px 0 4px;
+}
+
+.writer-retro-title-input::placeholder {
+  color: rgba(240, 255, 242, 0.52);
 }
 
 .writer-controls {
@@ -2196,6 +2241,23 @@ button.entry-card {
 .writer-controls select,
 .writer-controls input[type="range"] {
   min-height: 34px;
+}
+
+.writer-mode--retro .writer-controls select,
+.writer-mode--retro .writer-controls input[type="range"] {
+  max-width: min(32vw, 220px);
+}
+
+.writer-mode--retro .writer-controls select {
+  border: 1px solid rgba(177, 246, 191, 0.24);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.36);
+  color: #f0fff2;
+  padding: 0 28px 0 10px;
+}
+
+.writer-mode--retro .writer-controls input[type="color"] {
+  border-color: rgba(177, 246, 191, 0.24);
 }
 
 .writer-banner {
@@ -2221,11 +2283,27 @@ button.entry-card {
   color: #1f4a2d;
 }
 
+.writer-mode--retro .writer-banner {
+  position: absolute;
+  z-index: 13;
+  top: 78px;
+  left: 50%;
+  width: min(760px, calc(100vw - 32px));
+  margin: 0;
+  transform: translateX(-50%);
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.34);
+}
+
 .writer-canvas {
   display: grid;
   gap: 18px;
   max-width: 920px;
   margin: 42px auto 0;
+}
+
+.writer-retro-canvas {
+  height: auto;
+  min-height: 0;
 }
 
 .writer-title-input,
@@ -2264,6 +2342,21 @@ button.entry-card {
   font-size: 12px;
   font-weight: 800;
   opacity: 0.72;
+}
+
+.writer-footer--retro {
+  position: relative;
+  z-index: 12;
+  justify-self: center;
+  margin: 0;
+  border: 1px solid rgba(177, 246, 191, 0.2);
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: rgba(1, 6, 4, 0.72);
+  color: #f0fff2;
+  box-shadow: 0 12px 38px rgba(0, 0, 0, 0.28);
+  opacity: 1;
+  backdrop-filter: blur(10px);
 }
 
 .backup-view {
@@ -3793,8 +3886,35 @@ button.entry-card {
     flex-direction: column;
   }
 
+  .writer-mode--retro .writer-toolbar {
+    flex-direction: row;
+    align-items: center;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
   .writer-controls {
     justify-content: flex-start;
+  }
+
+  .writer-mode--retro .writer-controls {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+  }
+
+  .writer-retro-title-input {
+    width: 140px;
+    min-width: 120px;
+  }
+
+  .writer-mode--retro .writer-controls select {
+    max-width: 148px;
+  }
+
+  .writer-mode--retro .writer-controls input[type="range"] {
+    width: 96px;
+    max-width: 96px;
   }
 
   .thread-entry-row {

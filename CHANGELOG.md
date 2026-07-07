@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.26.0 - 2026-07-07
+
+### Added
+
+- Added a frameless Retro CRT presentation option to Writer Mode with the old
+  Capsule focus theme layouts, theme selection, and theme-default retro
+  typography.
+
+### Changed
+
+- Bumped the app version to 0.26.0.
+
 ## 0.25.2 - 2026-07-07
 
 ### Fixed
