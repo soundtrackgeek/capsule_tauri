@@ -172,6 +172,7 @@ pub fn get_path_settings() -> Result<PathSettingsResponse> {
         image_media_root: images::get_image_media_root()?,
         cover_wall_root: images::get_cover_wall_root(),
         backup_directory: db::path_to_string(&backup_directory),
+        backup_retention_count: db::backup_retention_count_for_database(&db_path),
         sync_path,
         github_gist_id,
         github_gist_token_configured,
@@ -193,6 +194,9 @@ pub fn set_path_settings(input: PathSettingsUpdateRequest) -> Result<PathSetting
     settings.image_media_root = normalize_string(input.image_media_root.as_deref());
     settings.cover_wall_root = normalize_string(input.cover_wall_root.as_deref());
     settings.backup_directory = normalize_string(input.backup_directory.as_deref());
+    settings.backup_retention_count = input
+        .backup_retention_count
+        .map(|count| count.clamp(1, db::MAX_BACKUP_RETENTION_COUNT));
     settings.sync_path = normalize_string(input.sync_path.as_deref());
     settings.github_gist_id = normalize_string(input.github_gist_id.as_deref());
     if input.clear_github_gist_token.unwrap_or(false) {

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.24.6 - 2026-07-07
+
+### Added
+
+- Added a configurable backup retention setting that defaults to 5 and prunes
+  the oldest Capsule-compatible backup databases plus matching manifests after a
+  successful backup.
+
+### Changed
+
+- Bumped the app version to 0.24.6.
+
 ## 0.24.5 - 2026-07-07
 
 ### Changed

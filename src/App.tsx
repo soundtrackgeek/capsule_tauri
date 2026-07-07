@@ -5734,6 +5734,7 @@ function SettingsView({
     githubGistId: "",
     githubGistToken: "",
     clearGithubGistToken: false,
+    backupRetentionCount: 5,
     autoSyncEnabled: false,
     autoSyncIntervalMinutes: 15,
     minimizeToTrayOnClose: false,
@@ -5786,6 +5787,7 @@ function SettingsView({
       githubGistId: pathSettings?.githubGistId ?? "",
       githubGistToken: "",
       clearGithubGistToken: false,
+      backupRetentionCount: pathSettings?.backupRetentionCount ?? 5,
       autoSyncEnabled: pathSettings?.autoSyncEnabled ?? false,
       autoSyncIntervalMinutes: pathSettings?.autoSyncIntervalMinutes ?? 15,
       minimizeToTrayOnClose: pathSettings?.minimizeToTrayOnClose ?? false,
@@ -5797,6 +5799,7 @@ function SettingsView({
     pathSettings?.autoSyncEnabled,
     pathSettings?.autoSyncIntervalMinutes,
     pathSettings?.backupDirectory,
+    pathSettings?.backupRetentionCount,
     pathSettings?.coverWallRoot,
     pathSettings?.databasePath,
     pathSettings?.debugMenuEnabled,
@@ -5854,6 +5857,7 @@ function SettingsView({
       githubGistId: pathDraft.githubGistId,
       githubGistToken: pathDraft.githubGistToken,
       clearGithubGistToken: pathDraft.clearGithubGistToken,
+      backupRetentionCount: pathDraft.backupRetentionCount,
       autoSyncEnabled: pathDraft.autoSyncEnabled,
       autoSyncIntervalMinutes: pathDraft.autoSyncIntervalMinutes,
       minimizeToTrayOnClose: pathDraft.minimizeToTrayOnClose,
@@ -6024,6 +6028,24 @@ function SettingsView({
             </div>
           </label>
           <label className="field">
+            <span>Backups to keep</span>
+            <input
+              max={1000}
+              min={1}
+              onChange={(event) =>
+                setPathDraft({
+                  ...pathDraft,
+                  backupRetentionCount: Math.min(
+                    1000,
+                    Math.max(1, Math.round(Number(event.target.value) || 5)),
+                  ),
+                })
+              }
+              type="number"
+              value={pathDraft.backupRetentionCount}
+            />
+          </label>
+          <label className="field">
             <span>GitHub Gist ID</span>
             <input
               onChange={(event) => setPathDraft({ ...pathDraft, githubGistId: event.target.value })}
@@ -6133,6 +6155,7 @@ function SettingsView({
           <Detail label="Readable" value={status?.readable ? "Yes" : "No"} />
           <Detail label="Security" value={status?.security.message ?? status?.security.mode ?? "Unknown"} />
           <Detail label="Backups" value={backupDirectory || "Not available"} />
+          <Detail label="Backup limit" value={pathSettings?.backupRetentionCount ?? 5} />
         </dl>
       </Panel>
 

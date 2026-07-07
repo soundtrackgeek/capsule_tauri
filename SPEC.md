@@ -383,13 +383,11 @@ Avoid:
 
 ### Rotation
 
-MVP should create backups but should not delete old backups automatically until backup rotation is implemented and tested.
-
-Later:
-
-- Respect Capsule `backup_count`, defaulting to 3.
+- Respect the saved backup retention count, defaulting to 5.
 - Rotate only files matching `capsule_backup_YYYYMMDD_HHMMSS.db`.
-- Never delete `.bak`, `_plain_text.db`, manifests, or manually named safety copies unless the user explicitly requests cleanup.
+- Delete the matching JSON manifest for each pruned Capsule backup.
+- Never delete `.bak`, `_plain_text.db`, or manually named safety copies unless
+  the user explicitly requests cleanup.
 
 ### Write Operations Requiring Backups
 

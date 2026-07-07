@@ -17,6 +17,8 @@ use crate::{
 const MVP_DATABASE_PATH: &str = r"C:\Users\jtill\.capsule\capsule.db";
 const PATH_SETTINGS_ENV: &str = "CAPSULE_PATH_SETTINGS_PATH";
 const BACKUP_DIRECTORY_ENV: &str = "CAPSULE_BACKUP_DIR";
+pub const DEFAULT_BACKUP_RETENTION_COUNT: usize = 5;
+pub const MAX_BACKUP_RETENTION_COUNT: usize = 1000;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +27,7 @@ pub struct LocalPathSettings {
     pub image_media_root: Option<String>,
     pub cover_wall_root: Option<String>,
     pub backup_directory: Option<String>,
+    pub backup_retention_count: Option<usize>,
     pub sync_path: Option<String>,
     pub github_gist_id: Option<String>,
     pub github_gist_token: Option<String>,
@@ -208,6 +211,16 @@ pub fn backup_directory_for_database(path: &Path) -> PathBuf {
     }
 
     database_directory_for_database(path)
+}
+
+pub fn backup_retention_count_for_database(path: &Path) -> usize {
+    if is_active_database_path(path) {
+        return read_local_path_settings()
+            .backup_retention_count
+            .unwrap_or(DEFAULT_BACKUP_RETENTION_COUNT);
+    }
+
+    DEFAULT_BACKUP_RETENTION_COUNT
 }
 
 pub fn database_directory_for_database(path: &Path) -> PathBuf {
@@ -402,6 +415,9 @@ impl LocalPathSettings {
         self.image_media_root = normalize_path_setting(self.image_media_root.take());
         self.cover_wall_root = normalize_path_setting(self.cover_wall_root.take());
         self.backup_directory = normalize_path_setting(self.backup_directory.take());
+        self.backup_retention_count = self
+            .backup_retention_count
+            .map(|count| count.clamp(1, MAX_BACKUP_RETENTION_COUNT));
         self.sync_path = normalize_path_setting(self.sync_path.take());
         self.github_gist_id = normalize_path_setting(self.github_gist_id.take());
         self.github_gist_token = normalize_path_setting(self.github_gist_token.take());

@@ -29,23 +29,7 @@ pub fn list_backups() -> Result<BackupListResponse> {
 
 pub fn list_backups_for_database(db_path: &Path) -> Result<BackupListResponse> {
     let backup_directory = db::backup_directory_for_database(db_path);
-    let mut backups = Vec::new();
-
-    if backup_directory.exists() {
-        for entry in fs::read_dir(&backup_directory)
-            .with_context(|| format!("failed to read {}", backup_directory.display()))?
-        {
-            let entry = entry?;
-            let path = entry.path();
-            if !is_capsule_backup_db(&path) {
-                continue;
-            }
-
-            backups.push(backup_info_from_path(&path)?);
-        }
-    }
-
-    backups.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+    let backups = backup_infos_in_directory(&backup_directory)?;
 
     Ok(BackupListResponse {
         backups,
@@ -100,6 +84,11 @@ pub fn create_backup_for_database(
     backup_info.operation = Some(manifest.operation);
     backup_info.created_at = Some(manifest.created_at);
     backup_info.verified = true;
+
+    apply_backup_retention(
+        &backup_directory,
+        db::backup_retention_count_for_database(db_path),
+    )?;
 
     Ok(BackupCreateResponse {
         backup: backup_info,
@@ -289,6 +278,53 @@ fn next_available_backup_path(directory: &Path, timestamp: DateTime<Utc>) -> Pat
     }
 
     directory.join(backup_filename_for(timestamp))
+}
+
+fn apply_backup_retention(backup_directory: &Path, retention_count: usize) -> Result<()> {
+    let retention_count = retention_count.clamp(1, db::MAX_BACKUP_RETENTION_COUNT);
+    let backups = backup_infos_in_directory(backup_directory)?;
+    if backups.len() <= retention_count {
+        return Ok(());
+    }
+
+    for backup in backups.into_iter().skip(retention_count) {
+        let backup_path = PathBuf::from(&backup.path);
+        let manifest_path = backup
+            .manifest_path
+            .map(PathBuf::from)
+            .unwrap_or_else(|| backup_path.with_extension(BACKUP_JSON_EXTENSION));
+        remove_if_exists(&backup_path)?;
+        remove_if_exists(&manifest_path)?;
+    }
+
+    Ok(())
+}
+
+fn backup_infos_in_directory(backup_directory: &Path) -> Result<Vec<BackupInfo>> {
+    let mut backups = Vec::new();
+
+    if backup_directory.exists() {
+        for entry in fs::read_dir(backup_directory)
+            .with_context(|| format!("failed to read {}", backup_directory.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if !is_capsule_backup_db(&path) {
+                continue;
+            }
+
+            backups.push(backup_info_from_path(&path)?);
+        }
+    }
+
+    backups.sort_by(|left, right| {
+        right
+            .created_at
+            .cmp(&left.created_at)
+            .then_with(|| right.path.cmp(&left.path))
+    });
+
+    Ok(backups)
 }
 
 fn verify_backup(path: &Path) -> Result<()> {
@@ -496,6 +532,46 @@ mod tests {
             })
             .expect("count backup entries");
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn create_backup_prunes_oldest_backup_and_manifest() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("capsule.db");
+        let connection = Connection::open(&db_path).expect("open db");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE entries (id INTEGER PRIMARY KEY, text TEXT);
+                INSERT INTO entries (text) VALUES ('safe');
+                ",
+            )
+            .expect("fixture");
+        drop(connection);
+
+        let mut first_backup_path = PathBuf::new();
+        let mut first_manifest_path = PathBuf::new();
+
+        for index in 0..=db::DEFAULT_BACKUP_RETENTION_COUNT {
+            let response = create_backup_for_database(
+                &db_path,
+                BackupCreateRequest {
+                    operation: Some(format!("test.backup.{index}")),
+                },
+            )
+            .expect("backup response");
+
+            if index == 0 {
+                first_backup_path = PathBuf::from(&response.backup.path);
+                first_manifest_path =
+                    PathBuf::from(response.backup.manifest_path.expect("manifest path"));
+            }
+        }
+
+        let response = list_backups_for_database(&db_path).expect("list backups");
+        assert_eq!(response.backups.len(), db::DEFAULT_BACKUP_RETENTION_COUNT);
+        assert!(!first_backup_path.exists());
+        assert!(!first_manifest_path.exists());
     }
 
     #[test]

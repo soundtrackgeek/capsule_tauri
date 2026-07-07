@@ -160,6 +160,7 @@ let mockGithubGistId = "";
 let mockGithubGistTokenConfigured = false;
 let mockAutoSyncEnabled = false;
 let mockAutoSyncIntervalMinutes = 15;
+let mockBackupRetentionCount = 5;
 let mockMinimizeToTrayOnClose = false;
 let mockDebugMenuEnabled = false;
 let mockDebugLogs: DebugLogEntry[] = [
@@ -249,7 +250,7 @@ let mockConfig: CapsuleConfigResponse = {
     { key: "openrouter_model", value: "moonshotai/kimi-k2.5" },
     { key: "ai_chat_context_limit", value: "all" },
     { key: "images.media_root", value: "C:\\Users\\jtill\\OneDrive\\_capsule\\images" },
-    { key: "backup_count", value: "3" },
+    { key: "backup_count", value: "5" },
     { key: "theme", value: "system" },
   ],
   warnings: [],
@@ -775,16 +776,22 @@ export async function createBackup(
       .replace(/[-:]/g, "")
       .replace(/\.\d{3}Z$/, "")
       .replace("T", "_");
-    return {
-      backup: {
-        path: `C:\\Users\\jtill\\.capsule\\capsule_backup_${stamp}.db`,
-        manifestPath: `C:\\Users\\jtill\\.capsule\\capsule_backup_${stamp}.json`,
-        createdAt,
-        sizeBytes: mockStatus.dbSizeBytes,
-        operation: input.operation ?? "manual",
-        verified: true,
-      },
+    const backup = {
+      path: `C:\\Users\\jtill\\.capsule\\capsule_backup_${stamp}.db`,
+      manifestPath: `C:\\Users\\jtill\\.capsule\\capsule_backup_${stamp}.json`,
+      createdAt,
+      sizeBytes: mockStatus.dbSizeBytes,
+      operation: input.operation ?? "manual",
+      verified: true,
     };
+    mockBackups = {
+      ...mockBackups,
+      backups: [backup, ...mockBackups.backups]
+        .sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? ""))
+        .slice(0, mockBackupRetentionCount),
+    };
+    syncMockBackupStatus();
+    return { backup };
   } catch (error) {
     throw normalizeError(error);
   }
@@ -965,6 +972,10 @@ export async function setPathSettings(
     const syncPath = normalizeNullable(input.syncPath);
     const githubGistId = normalizeNullable(input.githubGistId);
     const githubGistToken = normalizeNullable(input.githubGistToken);
+    const backupRetentionCount = Math.min(
+      1000,
+      Math.max(1, Math.round(input.backupRetentionCount ?? mockBackupRetentionCount)),
+    );
     const autoSyncInterval = Math.min(
       24 * 60,
       Math.max(1, Math.round(input.autoSyncIntervalMinutes ?? mockAutoSyncIntervalMinutes)),
@@ -990,6 +1001,12 @@ export async function setPathSettings(
     } else if (githubGistToken) {
       mockGithubGistTokenConfigured = true;
     }
+    mockBackupRetentionCount = backupRetentionCount;
+    mockBackups = {
+      ...mockBackups,
+      backups: mockBackups.backups.slice(0, mockBackupRetentionCount),
+    };
+    syncMockBackupStatus();
     mockAutoSyncEnabled = Boolean(input.autoSyncEnabled);
     mockAutoSyncIntervalMinutes = autoSyncInterval;
     mockMinimizeToTrayOnClose = Boolean(input.minimizeToTrayOnClose);
@@ -3002,6 +3019,7 @@ function mockPathSettings(): PathSettingsResponse {
       mockImageMediaRoot,
     coverWallRoot: mockCoverWallRoot,
     backupDirectory: mockBackups.backupDirectory,
+    backupRetentionCount: mockBackupRetentionCount,
     syncPath: mockSyncPath || null,
     githubGistId: mockGithubGistId || null,
     githubGistTokenConfigured: mockGithubGistTokenConfigured,
@@ -3011,6 +3029,14 @@ function mockPathSettings(): PathSettingsResponse {
     debugMenuEnabled: mockDebugMenuEnabled,
     settingsPath: mockPathSettingsPath,
     warnings: [],
+  };
+}
+
+function syncMockBackupStatus() {
+  mockStatus = {
+    ...mockStatus,
+    backupCount: mockBackups.backups.length,
+    lastBackupPath: mockBackups.backups[0]?.path ?? null,
   };
 }
 

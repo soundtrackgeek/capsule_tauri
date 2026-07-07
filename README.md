@@ -61,6 +61,8 @@ explicit capability-gated AI/sync surfaces:
 - Restore with a fresh safety backup before the live database is replaced.
 - Open-backup-folder command for the active backup directory.
 - JSON manifests written next to generated backups.
+- Configurable backup retention that keeps the newest Capsule backups and
+  matching manifests, defaulting to 5.
 - Capsule `config.json` display plus file-backed set/delete actions that create
   config backups before writing.
 - Entry location Settings controls for choosing IP lookup or a fixed default
@@ -137,6 +139,7 @@ config, then the default `C:\Users\jtill\OneDrive\_capsule\images`. Backup
 storage resolves `CAPSULE_BACKUP_DIR` first, then the saved local backup path
 from Settings, then the active database directory. Saved local paths are stored
 outside the journal database in the app path settings file shown in Settings.
+The same settings file stores the backup retention count, which defaults to 5.
 The same local settings file stores whether closing the main window should hide
 Capsule to the system tray instead of exiting. Tray-hidden sessions do not
 become the next launch mode; starting Capsule opens the main window.
@@ -287,6 +290,9 @@ capsule_backup_YYYYMMDD_HHMMSS.json
 
 The backup command verifies that the generated database exists, is non-empty,
 and can be opened with SQLite before reporting success.
+After a backup is created, Capsule keeps only the newest configured number of
+Capsule-compatible backup databases in the active backup directory and removes
+matching JSON manifests for pruned backups.
 
 Restore is constrained to Capsule-compatible backup files in the active database
 backup directory. Before restore replaces the live database, the app creates and

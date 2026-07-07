@@ -107,6 +107,7 @@ export type PathSettingsResponse = {
   imageMediaRoot: string;
   coverWallRoot: string;
   backupDirectory: string;
+  backupRetentionCount: number;
   syncPath: string | null;
   githubGistId: string | null;
   githubGistTokenConfigured: boolean;
@@ -123,6 +124,7 @@ export type PathSettingsUpdateRequest = {
   imageMediaRoot?: string | null;
   coverWallRoot?: string | null;
   backupDirectory?: string | null;
+  backupRetentionCount?: number | null;
   syncPath?: string | null;
   githubGistId?: string | null;
   githubGistToken?: string | null;
