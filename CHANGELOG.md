@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.24.4 - 2026-07-07
+
+### Fixed
+
+- Fixed sync so unchanged thread titles and summaries are not counted as
+  updated on every run.
+
+### Changed
+
+- Bumped the app version to 0.24.4.
+
 ## 0.24.3 - 2026-07-06
 
 ### Fixed

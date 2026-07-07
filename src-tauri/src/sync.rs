@@ -2510,6 +2510,12 @@ struct ExistingContinuation {
     updated_at: Option<String>,
 }
 
+#[derive(Debug)]
+struct ExistingThreadText {
+    value: String,
+    updated_at: String,
+}
+
 fn continuation_row(
     connection: &Connection,
     child_uuid: &str,
@@ -2657,13 +2663,14 @@ fn apply_thread_text_upsert(
             return Ok(());
         }
     }
-    let local_updated_at = thread_text_updated_at(connection, table, &root_uuid)?;
-    if local_updated_at
-        .as_ref()
-        .map(|local| normalized_timestamp(Some(local), "") > updated_at)
-        .unwrap_or(false)
-    {
-        return Ok(());
+    let existing = thread_text_row(connection, table, value_column, &root_uuid)?;
+    if let Some(existing) = existing.as_ref() {
+        let local_updated_at = normalized_timestamp(Some(&existing.updated_at), "");
+        if local_updated_at > updated_at
+            || (local_updated_at == updated_at && existing.value == value)
+        {
+            return Ok(());
+        }
     }
     connection.execute(
         &format!(
@@ -2679,7 +2686,7 @@ fn apply_thread_text_upsert(
         &format!("DELETE FROM {tombstone_table} WHERE thread_root_uuid = ?1"),
         [&root_uuid],
     )?;
-    if local_updated_at.is_some() {
+    if existing.is_some() {
         counts.updated += 1;
     } else {
         counts.imported += 1;
@@ -3655,6 +3662,27 @@ fn thread_text_updated_at(
         .map_err(Into::into)
 }
 
+fn thread_text_row(
+    connection: &Connection,
+    table: &str,
+    value_column: &str,
+    root_uuid: &str,
+) -> Result<Option<ExistingThreadText>> {
+    connection
+        .query_row(
+            &format!("SELECT {value_column}, updated_at FROM {table} WHERE thread_root_uuid = ?1"),
+            [root_uuid],
+            |row| {
+                Ok(ExistingThreadText {
+                    value: row.get(0)?,
+                    updated_at: row.get(1)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
 fn thread_text_tombstone_at(
     connection: &Connection,
     table: &str,
@@ -3872,5 +3900,82 @@ mod tests {
             .deleted_uuids
             .iter()
             .any(|uuid| uuid == "entry_locally_deleted"));
+    }
+
+    #[test]
+    fn sync_thread_text_skips_identical_rows() {
+        let db_dir = tempdir().expect("db tempdir");
+        let sync_dir = tempdir().expect("sync tempdir");
+        let db_path = db_dir.path().join("capsule.db");
+        create_sync_test_database(&db_path).expect("database");
+
+        let connection = Connection::open(&db_path).expect("open db");
+        ensure_sync_schema(&connection).expect("sync schema");
+        connection
+            .execute(
+                "INSERT INTO entries
+                    (uuid, created_at, updated_at, text, text_plain, content_format, starred, pinned, hidden)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0, 0)",
+                params![
+                    "entry_thread_root",
+                    "2026-01-03 09:00",
+                    "2026-01-03 09:00",
+                    "Thread root",
+                    "Thread root",
+                    "plain"
+                ],
+            )
+            .expect("root entry");
+        connection
+            .execute(
+                "INSERT INTO entry_thread_titles (thread_root_uuid, title, updated_at)
+                 VALUES (?1, ?2, ?3)",
+                params![
+                    "entry_thread_root",
+                    "Stable thread title",
+                    "2026-01-03 10:00"
+                ],
+            )
+            .expect("thread title");
+        connection
+            .execute(
+                "INSERT INTO entry_thread_summaries (thread_root_uuid, summary, updated_at)
+                 VALUES (?1, ?2, ?3)",
+                params![
+                    "entry_thread_root",
+                    "Stable thread summary",
+                    "2026-01-03 10:00"
+                ],
+            )
+            .expect("thread summary");
+        drop(connection);
+
+        let remote_threads = json!({
+            "version": thread_sync_version(),
+            "titles": [
+                {
+                    "thread_root_uuid": "entry_thread_root",
+                    "title": "Stable thread title",
+                    "updated_at": "2026-01-03 10:00"
+                }
+            ],
+            "summaries": [
+                {
+                    "thread_root_uuid": "entry_thread_root",
+                    "summary": "Stable thread summary",
+                    "updated_at": "2026-01-03 10:00"
+                }
+            ]
+        });
+        fs::write(
+            sync_dir.path().join(THREADS_SYNC_FILE),
+            serde_json::to_vec_pretty(&remote_threads).expect("json"),
+        )
+        .expect("threads sync file");
+
+        let response =
+            run_sync_with_retries(&db_path, sync_dir.path()).expect("sync should complete");
+        assert_eq!(response.updated_count, 0);
+        assert_eq!(response.summary, "nothing new");
     }
 }
