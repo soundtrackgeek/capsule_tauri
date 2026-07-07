@@ -3906,7 +3906,7 @@ function AnalyticsView({
           <div className="metric-strip metric-strip--seven">
             <Metric label="Entries" value={analytics.overview.totalEntries} />
             <Metric label="Words" value={analytics.overview.totalWords} />
-            <Metric label="Avg words" value={analytics.overview.averageWords} />
+            <Metric label="Avg words" value={analytics.overview.averageWords.toFixed(2)} />
             <Metric label="Avg mood" value={formatMoodSentiment(analytics.overview.averageMoodSentiment)} />
             <Metric label="Images" value={analytics.overview.totalImages} />
             <Metric label="Location" value={analytics.overview.entriesWithLocation} />

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.25.2 - 2026-07-07
+
+### Fixed
+
+- Fixed the Analytics average words metric so it displays two decimal places
+  and stays within its metric card.
+
+### Changed
+
+- Bumped the app version to 0.25.2.
+
 ## 0.25.1 - 2026-07-07
 
 ### Added
