@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.25.1 - 2026-07-07
+
+### Added
+
+- Added mouse-follow hover tooltips to Activity Trends bars and line points.
+
+### Changed
+
+- Bumped the app version to 0.25.1.
+
 ## 0.25.0 - 2026-07-07
 
 ### Added

@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import type { AnalyticsResponse } from "../types";
 import { formatMoodSentiment, sentimentPosition } from "../lib/analytics";
 
@@ -31,6 +31,15 @@ type LineSeries = {
   label: string;
   color: string;
   points: LinePoint[];
+};
+
+type ActivityTooltipState = {
+  color: string;
+  detail?: string;
+  title: string;
+  value: string;
+  x: number;
+  y: number;
 };
 
 const ACTIVITY_TABS: Array<{ id: ActivityTrendMode; label: string }> = [
@@ -387,6 +396,8 @@ function SvgBarChart({
   labelStep?: number;
   labelAngle?: number;
 }) {
+  const [tooltip, setTooltip] = useState<ActivityTooltipState | null>(null);
+
   if (points.length === 0 || !points.some((point) => point.value > 0)) {
     return <p className="muted activity-empty">{emptyText}</p>;
   }
@@ -399,9 +410,21 @@ function SvgBarChart({
   const barWidth = Math.max(5, Math.min(52, bandWidth * 0.66));
   const yFor = (value: number) =>
     BAR_MARGINS.top + innerHeight - (value / Math.max(...ticks)) * innerHeight;
+  const showTooltip = (
+    event: ReactMouseEvent<Element>,
+    point: BarPoint,
+  ) => {
+    setTooltip({
+      ...tooltipPosition(event),
+      color,
+      detail: point.detail,
+      title: point.label,
+      value: `${formatNumber(point.value)} ${valueLabel}`,
+    });
+  };
 
   return (
-    <div className="activity-chart-wrap">
+    <div className="activity-chart-wrap" onMouseLeave={() => setTooltip(null)}>
       <svg
         aria-label={`${valueLabel} chart`}
         className="activity-chart"
@@ -424,9 +447,17 @@ function SvgBarChart({
                 width={barWidth}
                 x={x}
                 y={y}
-              >
-                <title>{point.detail ?? `${point.label}: ${formatNumber(point.value)} ${valueLabel}`}</title>
-              </rect>
+              />
+              <rect
+                aria-label={`${point.label}: ${formatNumber(point.value)} ${valueLabel}`}
+                className="activity-hit-target"
+                height={innerHeight}
+                onMouseEnter={(event) => showTooltip(event, point)}
+                onMouseMove={(event) => showTooltip(event, point)}
+                width={bandWidth}
+                x={BAR_MARGINS.left + index * bandWidth}
+                y={BAR_MARGINS.top}
+              />
               {shouldShowLabel && (
                 <text
                   className="activity-axis-label"
@@ -458,6 +489,7 @@ function SvgBarChart({
           </text>
         ))}
       </svg>
+      <ActivityTooltip tooltip={tooltip} />
     </div>
   );
 }
@@ -481,6 +513,7 @@ function SvgLineChart({
   valueFormatter?: (value: number) => string;
   legend?: Array<{ color: string; label: string }>;
 }) {
+  const [tooltip, setTooltip] = useState<ActivityTooltipState | null>(null);
   const resolvedSeries = series ?? [
     {
       key: "value",
@@ -509,9 +542,22 @@ function SvgLineChart({
   const yFor = (value: number) =>
     LINE_MARGINS.top + innerHeight - (value / domainMax) * innerHeight;
   const labelStep = dailyLabelStep(xPoints.length);
+  const showTooltip = (
+    event: ReactMouseEvent<Element>,
+    point: LinePoint & { value: number },
+    item: LineSeries,
+  ) => {
+    setTooltip({
+      ...tooltipPosition(event),
+      color: item.color,
+      detail: point.detail,
+      title: point.label,
+      value: `${item.label}: ${valueFormatter(point.value)}`,
+    });
+  };
 
   return (
-    <div className="activity-chart-wrap">
+    <div className="activity-chart-wrap" onMouseLeave={() => setTooltip(null)}>
       <svg
         aria-label={`${valueLabel} chart`}
         className="activity-chart"
@@ -539,11 +585,18 @@ function SvgLineChart({
             <g key={item.key}>
               <path className="activity-line" d={path} stroke={item.color} />
               {coordinates.map((point) => (
-                <circle className="activity-dot" cx={point.x} cy={point.y} fill={item.color} key={`${item.key}-${point.key}`} r="4">
-                  <title>
-                    {point.detail ?? `${point.label}: ${valueFormatter(point.value)} ${valueLabel}`}
-                  </title>
-                </circle>
+                <g key={`${item.key}-${point.key}`}>
+                  <circle className="activity-dot" cx={point.x} cy={point.y} fill={item.color} r="4" />
+                  <circle
+                    aria-label={`${point.label}: ${item.label} ${valueFormatter(point.value)}`}
+                    className="activity-hit-target"
+                    cx={point.x}
+                    cy={point.y}
+                    onMouseEnter={(event) => showTooltip(event, point, item)}
+                    onMouseMove={(event) => showTooltip(event, point, item)}
+                    r="12"
+                  />
+                </g>
               ))}
             </g>
           );
@@ -584,6 +637,26 @@ function SvgLineChart({
           ))}
         </div>
       )}
+      <ActivityTooltip tooltip={tooltip} />
+    </div>
+  );
+}
+
+function ActivityTooltip({ tooltip }: { tooltip: ActivityTooltipState | null }) {
+  if (!tooltip) return null;
+
+  return (
+    <div
+      className="activity-tooltip"
+      role="tooltip"
+      style={{ left: tooltip.x, top: tooltip.y }}
+    >
+      <span>
+        <i style={{ background: tooltip.color }} />
+        {tooltip.title}
+      </span>
+      <strong>{tooltip.value}</strong>
+      {tooltip.detail && <em>{tooltip.detail}</em>}
     </div>
   );
 }
@@ -621,6 +694,16 @@ function ChartGrid({
       })}
     </g>
   );
+}
+
+function tooltipPosition(event: ReactMouseEvent<Element>) {
+  const tooltipWidth = 240;
+  const tooltipHeight = 100;
+  const offset = 14;
+  return {
+    x: Math.max(8, Math.min(event.clientX + offset, window.innerWidth - tooltipWidth - 8)),
+    y: Math.max(8, Math.min(event.clientY + offset, window.innerHeight - tooltipHeight - 8)),
+  };
 }
 
 function ChartAxes({

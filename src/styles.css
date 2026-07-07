@@ -2662,6 +2662,64 @@ button.entry-card {
   stroke-width: 2;
 }
 
+.activity-hit-target {
+  fill: transparent;
+  cursor: crosshair;
+  pointer-events: all;
+}
+
+.activity-grid-line,
+.activity-axis-line,
+.activity-line,
+.activity-dot {
+  pointer-events: none;
+}
+
+.activity-tooltip {
+  position: fixed;
+  z-index: 40;
+  display: grid;
+  gap: 5px;
+  max-width: 240px;
+  border: 1px solid #cbd5ce;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 16px 32px -24px rgba(24, 42, 32, 0.45);
+  color: #17201b;
+  padding: 10px 11px;
+  pointer-events: none;
+}
+
+.activity-tooltip span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #66756d;
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.activity-tooltip span i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.activity-tooltip strong {
+  font-size: 14px;
+  font-weight: 850;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-tooltip em {
+  color: #66756d;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
 .activity-reference-line {
   stroke: #7b8da0;
   stroke-dasharray: 6 6;
@@ -2770,6 +2828,18 @@ button.entry-card {
   stroke: #1d2520;
 }
 
+:root[data-theme="dark"] .activity-tooltip {
+  border-color: #34433a;
+  background: rgba(20, 26, 23, 0.97);
+  box-shadow: 0 18px 36px -22px rgba(0, 0, 0, 0.72);
+  color: #e9eee8;
+}
+
+:root[data-theme="dark"] .activity-tooltip span,
+:root[data-theme="dark"] .activity-tooltip em {
+  color: #aab8ae;
+}
+
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .activity-tab,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .activity-summary {
   border-color: var(--retro-card-border);
@@ -2801,6 +2871,18 @@ button.entry-card {
 
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .activity-dot {
   stroke: var(--retro-panel);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .activity-tooltip {
+  border-color: var(--retro-card-border);
+  background: var(--retro-control);
+  box-shadow: var(--retro-shadow);
+  color: var(--retro-text);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .activity-tooltip span,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .activity-tooltip em {
+  color: var(--retro-muted);
 }
 
 .bar-list {

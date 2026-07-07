@@ -88,7 +88,7 @@ explicit capability-gated AI/sync surfaces:
   recording.
 - Analytics dashboard with overview counts, Activity Trends charts for entry
   frequency, words, first/last Capsule timing, hourly/weekday activity, and
-  location activity, plus monthly trend, mood sentiment trend,
+  location activity with hover tooltips, plus monthly trend, mood sentiment trend,
   tag/mood/location breakdowns, weather breakdowns, top words, and streaks.
 - Writing Calendar heatmap for active days, words, images, mood metadata, and
   mood sentiment markers.
