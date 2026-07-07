@@ -13,7 +13,15 @@
    - Add entry under appropriate category (Added, Changed, Fixed, Removed)
    - Include date in format YYYY-MM-DD
 
-3. **Commit and push changes**:
+3. **Clean Rust build artifacts**:
+   - After finishing verification/build/test commands and before the final handoff,
+     run `cargo clean` from the `src-tauri` directory:
+     `cargo clean`
+   - Do this for every repo work session, including docs-only work, unless the
+     user explicitly asks to preserve build artifacts.
+   - Report if the cleanup command cannot be completed.
+
+4. **Commit and push changes**:
    - Use `git add` to stage all modified files (README.md, CHANGELOG.md, and code files)
    - Create descriptive commit message following existing style
    - Push to remote repository with `git push`

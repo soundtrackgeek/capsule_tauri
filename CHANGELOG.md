@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.5 - 2026-07-07
+
+### Changed
+
+- Documented the post-work `src-tauri` `cargo clean` cleanup workflow.
+
 ## 0.24.4 - 2026-07-07
 
 ### Fixed

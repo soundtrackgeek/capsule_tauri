@@ -245,6 +245,14 @@ cd src-tauri
 cargo test
 ```
 
+After local development, builds, or agent work, clean the Tauri crate build
+artifacts to keep `src-tauri/target` from growing too large:
+
+```powershell
+cd src-tauri
+cargo clean
+```
+
 The synthetic live provider smoke test is gated and sends no journal entries:
 
 ```powershell
