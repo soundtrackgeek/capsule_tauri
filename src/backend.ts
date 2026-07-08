@@ -149,7 +149,7 @@ const openAIModels = ["gpt-5.4-mini", "gpt-5.4-nano"];
 const openRouterModels = [
   "z-ai/glm-5.2",
   "moonshotai/kimi-k2.5",
-  "x-ai/grok-4.5",
+  "~x-ai/grok-latest",
   "qwen/qwen3.7-plus",
   "deepseek/deepseek-v4-flash",
   "xiaomi/mimo-v2.5",
@@ -3328,6 +3328,7 @@ function normalizeLegacyModel(value: string) {
   return {
     "gemini-3-flash-preview": "gemini-3.5-flash",
     "z-ai/glm-5.1": "z-ai/glm-5.2",
+    "x-ai/grok-4.5": "~x-ai/grok-latest",
     "qwen/qwen3.5-397b-a17b": "qwen/qwen3.7-plus",
   }[value.trim()] ?? value.trim();
 }

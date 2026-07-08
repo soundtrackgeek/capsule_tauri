@@ -72,13 +72,14 @@ describe("mock Cloud AI settings", () => {
     expect(openrouter?.availableModels).toEqual([
       "z-ai/glm-5.2",
       "moonshotai/kimi-k2.5",
-      "x-ai/grok-4.5",
+      "~x-ai/grok-latest",
       "qwen/qwen3.7-plus",
       "deepseek/deepseek-v4-flash",
       "xiaomi/mimo-v2.5",
       "minimax/minimax-m3",
     ]);
     expect(openrouter?.availableModels).not.toContain("z-ai/glm-5.1");
+    expect(openrouter?.availableModels).not.toContain("x-ai/grok-4.5");
     expect(openrouter?.availableModels).not.toContain("qwen/qwen3.5-397b-a17b");
   });
 
@@ -108,6 +109,20 @@ describe("mock Cloud AI settings", () => {
         { key: "ai_chat_context_since", value: "2026-01-01" },
         { key: "ai_chat_context_until", value: "2026-12-31" },
       ]),
+    );
+  });
+
+  test("migrates the direct Grok 4.5 slug to the OpenRouter Grok Latest alias", async () => {
+    await setCapsuleConfigValue("cloud_provider", "openrouter");
+    await setCapsuleConfigValue("openrouter_model", "x-ai/grok-4.5");
+
+    const migrated = await getAiSettings();
+    expect(migrated.openrouterModel).toBe("~x-ai/grok-latest");
+
+    await updateAiSettings(migrated);
+    const savedConfig = await getCapsuleConfig();
+    expect(savedConfig.values).toEqual(
+      expect.arrayContaining([{ key: "openrouter_model", value: "~x-ai/grok-latest" }]),
     );
   });
 

@@ -26,7 +26,7 @@ const OPENAI_MODELS: &[&str] = &["gpt-5.4-mini", "gpt-5.4-nano"];
 const OPENROUTER_MODELS: &[&str] = &[
     "z-ai/glm-5.2",
     "moonshotai/kimi-k2.5",
-    "x-ai/grok-4.5",
+    "~x-ai/grok-latest",
     "qwen/qwen3.7-plus",
     "deepseek/deepseek-v4-flash",
     "xiaomi/mimo-v2.5",
@@ -372,6 +372,7 @@ fn legacy_model_replacement(value: &str) -> Option<&'static str> {
     match value.trim() {
         "gemini-3-flash-preview" => Some("gemini-3.5-flash"),
         "z-ai/glm-5.1" => Some("z-ai/glm-5.2"),
+        "x-ai/grok-4.5" => Some("~x-ai/grok-latest"),
         "qwen/qwen3.5-397b-a17b" => Some("qwen/qwen3.7-plus"),
         _ => None,
     }
@@ -625,6 +626,20 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.contains("gemini_model was updated")));
+    }
+
+    #[test]
+    fn ai_settings_replace_direct_grok_45_with_latest_alias() {
+        let settings = ai_settings_from_config(&[crate::models::CapsuleConfigValue {
+            key: "openrouter_model".to_string(),
+            value: "x-ai/grok-4.5".to_string(),
+        }]);
+
+        assert_eq!(settings.openrouter_model, "~x-ai/grok-latest");
+        assert!(settings
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("openrouter_model was updated")));
     }
 
     #[test]

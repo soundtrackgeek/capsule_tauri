@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.27.3 - 2026-07-08
+
+### Fixed
+
+- Replaced the direct OpenRouter Grok 4.5 model slug with the Grok Latest alias
+  and migrated saved `x-ai/grok-4.5` selections after the direct endpoint
+  returned upstream 403 errors.
+
+### Changed
+
+- Bumped the app version to 0.27.3.
+
 ## 0.27.2 - 2026-07-08
 
 ### Fixed
