@@ -155,6 +155,58 @@ const openRouterModels = [
   "xiaomi/mimo-v2.5",
   "minimax/minimax-m3",
 ];
+const aiContextStopWords = new Set([
+  "about",
+  "all",
+  "also",
+  "and",
+  "any",
+  "are",
+  "ask",
+  "been",
+  "being",
+  "can",
+  "could",
+  "did",
+  "does",
+  "doing",
+  "entry",
+  "entries",
+  "find",
+  "for",
+  "from",
+  "give",
+  "had",
+  "has",
+  "have",
+  "ive",
+  "journal",
+  "just",
+  "make",
+  "more",
+  "note",
+  "notes",
+  "please",
+  "said",
+  "say",
+  "show",
+  "should",
+  "summarize",
+  "summary",
+  "tell",
+  "that",
+  "the",
+  "these",
+  "this",
+  "those",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "with",
+  "would",
+]);
 let mockCoverWallRoot = defaultMockCoverWallRoot;
 let mockSyncPath = "C:\\Users\\jtill\\OneDrive\\_capsule\\sync";
 let mockGithubGistId = "";
@@ -3324,21 +3376,26 @@ function mockPreviewAiChatContext(
   }
 
   let entries: Entry[];
+  const scopeIdentifiers = input.scopeIdentifiers
+    .map((identifier) => identifier.trim())
+    .filter(Boolean);
   if (input.contextEntryUuids?.length) {
     entries = input.contextEntryUuids
       .map((uuid) => mockEntries.find((entry) => entry.uuid === uuid))
       .filter(Boolean) as Entry[];
   } else if (input.scope === "entry") {
-    entries = input.scopeIdentifiers
+    entries = scopeIdentifiers
       .slice(0, 1)
       .map((identifier) => mockFindEntry(identifier))
       .filter(Boolean) as Entry[];
   } else if (input.scope === "entries") {
-    entries = input.scopeIdentifiers
-      .map((identifier) => mockFindEntry(identifier))
-      .filter(Boolean) as Entry[];
+    entries = scopeIdentifiers.length
+      ? (scopeIdentifiers
+          .map((identifier) => mockFindEntry(identifier))
+          .filter(Boolean) as Entry[])
+      : mockSearchContextEntries(input);
   } else if (input.scope === "thread") {
-    const anchor = mockFindEntry(input.scopeIdentifiers[0] ?? "");
+    const anchor = mockFindEntry(scopeIdentifiers[0] ?? "");
     const rootUuid = anchor?.thread?.rootUuid ?? anchor?.uuid;
     entries = rootUuid
       ? mockEntries.filter((entry) => (entry.thread?.rootUuid ?? entry.uuid) === rootUuid)
@@ -3370,7 +3427,7 @@ function mockPreviewAiChatContext(
 
 function mockSearchContextEntries(input: AIChatContextPreviewRequest) {
   const filters = input.contextFilters;
-  const text = (filters?.text ?? input.message ?? "").trim().toLowerCase();
+  const terms = mockAiContextSearchTerms(filters?.text ?? input.message ?? "");
   const since = filters?.since ?? input.since ?? null;
   const until = filters?.until ?? input.until ?? null;
   const tags = new Set((filters?.tags ?? []).map((tag) => tag.toLowerCase()));
@@ -3394,7 +3451,7 @@ function mockSearchContextEntries(input: AIChatContextPreviewRequest) {
       const mood = entry.mood?.toLowerCase() ?? "";
       if (moods.size && !moods.has(mood)) return false;
       if (excludeMoods.size && excludeMoods.has(mood)) return false;
-      if (!text) return true;
+      if (terms.length === 0) return true;
       const searchable = [
         entry.textPlain,
         entry.title ?? "",
@@ -3404,10 +3461,7 @@ function mockSearchContextEntries(input: AIChatContextPreviewRequest) {
       ]
         .join(" ")
         .toLowerCase();
-      return text
-        .split(/\s+/)
-        .filter((term) => term.length > 2)
-        .some((term) => searchable.includes(term));
+      return terms.some((term) => searchable.includes(term));
     })
     .sort((left, right) => {
       const direction = filters?.sort === "asc" ? 1 : -1;
@@ -3803,6 +3857,18 @@ function mapToBreakdown(values: Map<string, number>) {
     .map(([label, count]) => ({ label, count }))
     .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label))
     .slice(0, 12);
+}
+
+function mockAiContextSearchTerms(value: string) {
+  return value
+    .split(/[^\p{L}\p{N}_\-/:]+/u)
+    .map((term) => term.replace(/^[_\-/:]+|[_\-/:]+$/g, "").toLowerCase())
+    .filter((term, index, terms) => {
+      if (!term) return false;
+      if (term.length < 3 && !/^\d+$/.test(term)) return false;
+      if (aiContextStopWords.has(term)) return false;
+      return terms.indexOf(term) === index;
+    });
 }
 
 function buildMockWeekdayTrend(): AnalyticsResponse["weekdayTrend"] {

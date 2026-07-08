@@ -96,9 +96,10 @@ explicit capability-gated AI/sync surfaces:
 - Cover Wall view backed by ignored local cover files under `local-assets/covers`
   with generated thumbnails cached under the local app settings directory and
   an inline reader for the linked entry behind a selected cover.
-- AI chat workspace with saved conversations, context preview/removal,
-  provider/model selection, streamed cloud responses, stop/cancel, retry, and
-  delete actions, plus secondary local metadata suggestions.
+- AI chat workspace with saved conversations, natural-language context search,
+  context preview/removal, provider/model selection, streamed cloud responses,
+  stop/cancel, retry, and delete actions, plus secondary local metadata
+  suggestions.
 - Cloud AI Settings for Gemini, OpenAI, and OpenRouter provider/model defaults,
   including OpenRouter Grok 4.5, chat context defaults, and redacted API key
   status without exposing stored secrets to the frontend.
@@ -182,12 +183,14 @@ only redacted key status, resolving key presence from the OS credential store,
 process environment variables, `CAPSULE_ENV_PATH`, a `.env` beside the active
 Capsule config, then the current working directory `.env`; `.env` files are
 ignored by Git. AI chat uses the selected provider/model and sends only the
-previewed text context after a first-use privacy confirmation; image files are
-not uploaded. Composer title/summary generation also uses the selected
-provider/model, sends only the current draft text after its own first-use
-privacy confirmation, and applies suggestions to editable fields only after
-review. Conversations and assistant drafts are persisted in the local database,
-and interrupted/error turns can be retried.
+previewed text context after a first-use privacy confirmation; natural-language
+questions are reduced to topical context search terms, and blank Entries scope
+falls back to that filtered context selection. Image files are not uploaded.
+Composer title/summary generation also uses the selected provider/model, sends
+only the current draft text after its own first-use privacy confirmation, and
+applies suggestions to editable fields only after review. Conversations and
+assistant drafts are persisted in the local database, and interrupted/error
+turns can be retried.
 
 Location auto-capture on entry creation uses the same Capsule configuration keys
 as the existing app: `location.auto_capture`, `location.auto_capture_method`,

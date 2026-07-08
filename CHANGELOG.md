@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.27.1 - 2026-07-08
+
+### Fixed
+
+- Fixed AI chat context selection so natural-language prompts extract topical
+  search terms before provider requests, and blank Entries scope no longer
+  sends empty context when the message identifies matching entries.
+
+### Changed
+
+- Bumped the app version to 0.27.1.
+
 ## 0.27.0 - 2026-07-08
 
 ### Added

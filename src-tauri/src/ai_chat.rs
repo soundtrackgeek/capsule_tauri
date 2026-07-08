@@ -33,6 +33,7 @@ const EVENT_INTERRUPTED: &str = "ai-chat-interrupted";
 const EVENT_ERROR: &str = "ai-chat-error";
 const CONTEXT_PAGE_LIMIT: i64 = 200;
 const LARGE_CONTEXT_WARNING: usize = 50;
+const AI_CONTEXT_MIN_SEARCH_TERM_CHARS: usize = 3;
 
 static ACTIVE_STREAMS: OnceLock<Mutex<HashMap<String, ActiveStreamState>>> = OnceLock::new();
 
@@ -116,12 +117,15 @@ pub(crate) fn preview_ai_chat_context_for_database(
                 include_hidden,
                 &mut warnings,
             )?,
-            "entries" => explicit_context_entries(
-                db_path,
-                input.scope_identifiers.clone(),
-                include_hidden,
-                &mut warnings,
-            )?,
+            "entries" => {
+                let identifiers =
+                    normalize_vec(Some(input.scope_identifiers.clone())).unwrap_or_default();
+                if identifiers.is_empty() {
+                    search_context_entries(db_path, &input, effective_limit)?
+                } else {
+                    explicit_context_entries(db_path, identifiers, include_hidden, &mut warnings)?
+                }
+            }
             "thread" => thread_context_entries(db_path, &input, include_hidden, &mut warnings)?,
             _ => unreachable!(),
         }
@@ -509,7 +513,8 @@ fn search_context_entries(
     let query_text = filters
         .as_ref()
         .and_then(|filters| normalize_optional(filters.text.as_deref()))
-        .or_else(|| normalize_optional(input.message.as_deref()));
+        .or_else(|| normalize_optional(input.message.as_deref()))
+        .and_then(|text| ai_context_search_text(&text));
     let mut entry_filters = EntryFilters {
         text: query_text,
         since: normalize_optional(input.since.as_deref()).or_else(|| {
@@ -1302,6 +1307,88 @@ fn normalized_uuid_list(values: Option<Vec<String>>) -> Option<Vec<String>> {
     (!values.is_empty()).then_some(values)
 }
 
+fn ai_context_search_text(value: &str) -> Option<String> {
+    let terms = value
+        .split(|character: char| {
+            !(character.is_alphanumeric() || matches!(character, '_' | '-' | '/' | ':'))
+        })
+        .filter_map(|term| {
+            let term = term.trim_matches(['_', '-', '/', ':']).to_lowercase();
+            if term.chars().count() < AI_CONTEXT_MIN_SEARCH_TERM_CHARS
+                && !term.chars().all(|character| character.is_ascii_digit())
+            {
+                return None;
+            }
+            if is_ai_context_stop_word(&term) {
+                return None;
+            }
+            Some(term)
+        })
+        .fold(Vec::new(), |mut acc, term| {
+            if !acc.contains(&term) {
+                acc.push(term);
+            }
+            acc
+        });
+    (!terms.is_empty()).then(|| terms.join(" "))
+}
+
+fn is_ai_context_stop_word(value: &str) -> bool {
+    matches!(
+        value,
+        "about"
+            | "all"
+            | "also"
+            | "and"
+            | "any"
+            | "are"
+            | "ask"
+            | "been"
+            | "being"
+            | "can"
+            | "could"
+            | "did"
+            | "does"
+            | "doing"
+            | "entry"
+            | "entries"
+            | "find"
+            | "for"
+            | "from"
+            | "give"
+            | "had"
+            | "has"
+            | "have"
+            | "ive"
+            | "journal"
+            | "just"
+            | "make"
+            | "more"
+            | "note"
+            | "notes"
+            | "please"
+            | "said"
+            | "say"
+            | "show"
+            | "should"
+            | "summarize"
+            | "summary"
+            | "tell"
+            | "that"
+            | "the"
+            | "these"
+            | "this"
+            | "those"
+            | "what"
+            | "when"
+            | "where"
+            | "which"
+            | "who"
+            | "with"
+            | "would"
+    )
+}
+
 fn normalize_scope(scope: &str) -> Result<String> {
     match scope.trim().to_lowercase().as_str() {
         "search" => Ok("search".to_string()),
@@ -1380,6 +1467,28 @@ fn truncate_for_display(value: &str, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static ACTIVE_STREAM_TEST_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> =
+        std::sync::OnceLock::new();
+
+    struct ActiveStreamTestGuard {
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Drop for ActiveStreamTestGuard {
+        fn drop(&mut self) {
+            active_streams().lock().expect("streams").clear();
+        }
+    }
+
+    fn active_stream_test_guard() -> ActiveStreamTestGuard {
+        let guard = ACTIVE_STREAM_TEST_LOCK
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .expect("active stream test lock");
+        active_streams().lock().expect("streams").clear();
+        ActiveStreamTestGuard { _guard: guard }
+    }
 
     fn fixture_db() -> (tempfile::TempDir, PathBuf) {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -1550,6 +1659,80 @@ mod tests {
     }
 
     #[test]
+    fn preview_search_context_extracts_topic_from_question() {
+        let (_temp, db_path) = fixture_db();
+        let connection = db::open_read_write_connection(&db_path).expect("open");
+        connection
+            .execute(
+                "UPDATE entries SET text = ?1, text_plain = ?1 WHERE uuid = 'entry_child'",
+                ["Lunch with Mihnea covered the old Capsule journal import."],
+            )
+            .expect("update");
+        drop(connection);
+
+        let preview = preview_ai_chat_context_for_database(
+            &db_path,
+            AiChatContextPreviewRequest {
+                message: Some("Give me a summary of what I've said about Mihnea".to_string()),
+                scope: "search".to_string(),
+                scope_identifiers: vec![],
+                context_filters: None,
+                context_limit: None,
+                since: None,
+                until: None,
+                context_entry_uuids: None,
+            },
+        )
+        .expect("preview");
+
+        assert_eq!(
+            preview
+                .entries
+                .iter()
+                .map(|entry| entry.uuid.as_str())
+                .collect::<Vec<_>>(),
+            vec!["entry_child"]
+        );
+    }
+
+    #[test]
+    fn preview_entries_scope_without_ids_uses_message_context() {
+        let (_temp, db_path) = fixture_db();
+        let connection = db::open_read_write_connection(&db_path).expect("open");
+        connection
+            .execute(
+                "UPDATE entries SET text = ?1, text_plain = ?1 WHERE uuid = 'entry_root'",
+                ["Mihnea came up in a careful reflection about trust."],
+            )
+            .expect("update");
+        drop(connection);
+
+        let preview = preview_ai_chat_context_for_database(
+            &db_path,
+            AiChatContextPreviewRequest {
+                message: Some("Give me a summary of what I've said about Mihnea".to_string()),
+                scope: "entries".to_string(),
+                scope_identifiers: vec![],
+                context_filters: None,
+                context_limit: None,
+                since: None,
+                until: None,
+                context_entry_uuids: Some(vec![]),
+            },
+        )
+        .expect("preview");
+
+        assert_eq!(
+            preview
+                .entries
+                .iter()
+                .map(|entry| entry.uuid.as_str())
+                .collect::<Vec<_>>(),
+            vec!["entry_root"]
+        );
+    }
+
+    #[test]
     fn prompt_uses_full_text_from_previewed_entries() {
         let (_temp, db_path) = fixture_db();
         let connection = db::open_read_write_connection(&db_path).expect("open");
@@ -1642,6 +1825,7 @@ mod tests {
 
     #[test]
     fn stale_streaming_messages_reopen_as_interrupted() {
+        let _active_stream_guard = active_stream_test_guard();
         let (_temp, db_path) = fixture_db();
         let connection = db::open_read_write_connection(&db_path).expect("open");
         ensure_ai_chat_schema(&connection).expect("schema");
@@ -1681,6 +1865,7 @@ mod tests {
 
     #[test]
     fn active_streaming_messages_are_not_marked_stale() {
+        let _active_stream_guard = active_stream_test_guard();
         let (_temp, db_path) = fixture_db();
         let connection = db::open_read_write_connection(&db_path).expect("open");
         ensure_ai_chat_schema(&connection).expect("schema");
