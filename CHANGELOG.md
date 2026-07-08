@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.27.2 - 2026-07-08
+
+### Fixed
+
+- Fixed Writer Mode display preferences so Retro CRT presentation, selected
+  retro theme, and font size restore after restarting Capsule.
+
+### Changed
+
+- Bumped the app version to 0.27.2.
+
 ## 0.27.1 - 2026-07-08
 
 ### Fixed

@@ -55,6 +55,7 @@ import {
   DEFAULT_RETRO_FOCUS_THEME_ID,
   RETRO_FOCUS_THEMES,
   RETRO_FOCUS_THEMES_BY_ID,
+  isRetroFocusThemeId,
   type RetroFocusThemeId,
 } from "./lib/retro-focus/themes";
 import {
@@ -459,8 +460,13 @@ const defaultWriterSettings: WriterSettings = {
   retroThemeId: DEFAULT_RETRO_FOCUS_THEME_ID,
 };
 
+const writerFontSizeMin = 16;
+const writerFontSizeMax = 28;
+const writerLineSpacingMin = 1.3;
+const writerLineSpacingMax = 2.2;
 const draftStorageKey = "capsule-tauri-composer-draft-v1";
 const uiSettingsStorageKey = "capsule-tauri-ui-settings-v1";
+const writerSettingsStorageKey = "capsule-tauri-writer-settings-v1";
 const noticeAutoDismissMs = 5 * 1000;
 const appUpdateCheckIntervalMs = 60 * 60 * 1000;
 
@@ -503,6 +509,69 @@ function normalizeUiSettings(value: unknown): UiSettings {
     sidebarMode: isSidebarMode(partial.sidebarMode)
       ? partial.sidebarMode
       : defaultUiSettings.sidebarMode,
+  };
+}
+
+function isWriterPresentation(value: unknown): value is WriterPresentation {
+  return value === "standard" || value === "retro";
+}
+
+function normalizeColorSetting(value: unknown, fallback: string) {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+}
+
+function normalizeStringSetting(value: unknown, fallback: string) {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function normalizeNumberSetting(value: unknown, fallback: number, min: number, max: number) {
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim()
+        ? Number(value)
+        : Number.NaN;
+
+  if (!Number.isFinite(numericValue)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, numericValue));
+}
+
+function normalizeWriterSettings(value: unknown): WriterSettings {
+  if (!value || typeof value !== "object") {
+    return defaultWriterSettings;
+  }
+
+  const partial = value as Partial<Record<keyof WriterSettings, unknown>>;
+  const retroThemeId =
+    typeof partial.retroThemeId === "string" && isRetroFocusThemeId(partial.retroThemeId)
+      ? partial.retroThemeId
+      : defaultWriterSettings.retroThemeId;
+
+  return {
+    background: normalizeColorSetting(partial.background, defaultWriterSettings.background),
+    color: normalizeColorSetting(partial.color, defaultWriterSettings.color),
+    fontFamily: normalizeStringSetting(partial.fontFamily, defaultWriterSettings.fontFamily),
+    fontSize: Math.round(
+      normalizeNumberSetting(
+        partial.fontSize,
+        defaultWriterSettings.fontSize,
+        writerFontSizeMin,
+        writerFontSizeMax,
+      ),
+    ),
+    lineSpacing: normalizeNumberSetting(
+      partial.lineSpacing,
+      defaultWriterSettings.lineSpacing,
+      writerLineSpacingMin,
+      writerLineSpacingMax,
+    ),
+    presentation: isWriterPresentation(partial.presentation)
+      ? partial.presentation
+      : defaultWriterSettings.presentation,
+    retroThemeId,
   };
 }
 
@@ -1286,9 +1355,26 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const rawSettings = window.localStorage.getItem(writerSettingsStorageKey);
+    if (!rawSettings) {
+      return;
+    }
+
+    try {
+      setWriterSettings(normalizeWriterSettings(JSON.parse(rawSettings)));
+    } catch {
+      window.localStorage.removeItem(writerSettingsStorageKey);
+    }
+  }, []);
+
+  useEffect(() => {
     window.localStorage.setItem(uiSettingsStorageKey, JSON.stringify(uiSettings));
     document.documentElement.dataset.theme = uiSettings.theme;
   }, [uiSettings]);
+
+  useEffect(() => {
+    window.localStorage.setItem(writerSettingsStorageKey, JSON.stringify(writerSettings));
+  }, [writerSettings]);
 
   useEffect(() => {
     setWriterSettings((settings) => applyWriterThemeDefaults(settings, uiSettings.theme));
@@ -5558,8 +5644,8 @@ function WriterModeView({
             <option value={monoWriterFont}>Mono</option>
           </select>
           <input
-            max={28}
-            min={16}
+            max={writerFontSizeMax}
+            min={writerFontSizeMin}
             onChange={(event) => setSettings({ ...settings, fontSize: Number(event.target.value) })}
             title="Font size"
             type="range"
@@ -5567,8 +5653,8 @@ function WriterModeView({
           />
           {!retroMode && (
             <input
-              max={2.2}
-              min={1.3}
+              max={writerLineSpacingMax}
+              min={writerLineSpacingMin}
               onChange={(event) =>
                 setSettings({ ...settings, lineSpacing: Number(event.target.value) })
               }
