@@ -149,6 +149,7 @@ const openAIModels = ["gpt-5.4-mini", "gpt-5.4-nano"];
 const openRouterModels = [
   "z-ai/glm-5.2",
   "moonshotai/kimi-k2.5",
+  "x-ai/grok-4.5",
   "qwen/qwen3.7-plus",
   "deepseek/deepseek-v4-flash",
   "xiaomi/mimo-v2.5",

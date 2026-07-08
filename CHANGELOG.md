@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.27.0 - 2026-07-08
+
+### Added
+
+- Added OpenRouter Grok 4.5 (`x-ai/grok-4.5`) as a selectable Cloud AI model.
+
+### Changed
+
+- Bumped the app version to 0.27.0.
+
 ## 0.26.0 - 2026-07-07
 
 ### Added
