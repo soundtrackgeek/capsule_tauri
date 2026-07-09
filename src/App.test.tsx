@@ -76,4 +76,34 @@ describe("App Writer settings", () => {
       });
     });
   });
+
+  test("opens a fresh Writer draft after saving an edited entry", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Entries" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Phase 1 shape/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+
+    await screen.findAllByRole("heading", { name: "Edit Entry" });
+
+    const writerButtons = screen.getAllByRole("button", { name: "Writer" });
+    fireEvent.click(writerButtons[writerButtons.length - 1]);
+
+    await screen.findByText("Edit");
+    fireEvent.change(screen.getByPlaceholderText("Write"), {
+      target: { value: "Writer edit saved from regression test." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(
+      () => expect(screen.getByRole("heading", { name: "Entries" })).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Dashboard" }));
+    fireEvent.click(screen.getByRole("button", { name: "Writer" }));
+
+    await screen.findByText("New");
+    expect((screen.getByPlaceholderText("Write") as HTMLTextAreaElement).value).toBe("");
+  });
 });

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.27.4 - 2026-07-09
+
+### Fixed
+
+- Fixed Writer Mode so saving an edited entry clears the edit target and future
+  Writer launches open a fresh new-entry draft.
+
+### Changed
+
+- Bumped the app version to 0.27.4.
+
 ## 0.27.3 - 2026-07-08
 
 ### Fixed

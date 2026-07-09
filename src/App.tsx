@@ -1953,6 +1953,15 @@ function App() {
     setActiveView("composer");
   }, []);
 
+  const resetComposerToNewEntry = useCallback(() => {
+    setComposerMode("create");
+    setEditingEntry(null);
+    setComposerEntryImages(null);
+    setComposerDraft(emptyComposerDraft);
+    setDraftRecovered(false);
+    window.localStorage.removeItem(draftStorageKey);
+  }, []);
+
   const applyMutationResponse = useCallback(
     async (response: EntryMutationResponse) => {
       setNotice(`Saved with backup: ${response.audit.backupPath}`);
@@ -2287,6 +2296,7 @@ function App() {
       }
       setComposerImageDrafts([]);
       setComposerAiSuggestion(null);
+      resetComposerToNewEntry();
       await applyMutationResponse(response);
       if (attachedCount > 0) {
         const noun = attachedCount === 1 ? "image" : "images";
@@ -2298,7 +2308,14 @@ function App() {
     } finally {
       setSavingEntry(false);
     }
-  }, [applyMutationResponse, attachQueuedComposerImages, composerDraft, composerMode, editingEntry]);
+  }, [
+    applyMutationResponse,
+    attachQueuedComposerImages,
+    composerDraft,
+    composerMode,
+    editingEntry,
+    resetComposerToNewEntry,
+  ]);
 
   const handleEntryAction = useCallback(
     async (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => {

@@ -41,7 +41,8 @@ explicit capability-gated AI/sync surfaces:
   attachments with thumbnail previews, writing stats, local draft recovery, and
   apply-before-save AI title/summary generation through the selected cloud
   provider and model.
-- Distraction-free Writer Mode with local display preferences, optional
+- Distraction-free Writer Mode with local display preferences, edit-entry save
+  completion that returns future Writer launches to a fresh draft, optional
   frameless Retro CRT layouts from the old Capsule focus themes, and a global
   `Ctrl+Alt+W` shortcut that opens Capsule directly into Writer Mode.
 - Entry history review for legacy Capsule edit snapshots.
