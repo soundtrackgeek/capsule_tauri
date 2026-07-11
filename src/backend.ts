@@ -145,7 +145,7 @@ const defaultMockCoverWallRoot = "C:\\_code\\capsule_tauri\\local-assets\\covers
 const mockImageMediaRoot = "C:\\Users\\jtill\\OneDrive\\_capsule\\images";
 const mockPathSettingsPath = "C:\\Users\\jtill\\AppData\\Roaming\\Capsule\\path_settings.json";
 const geminiModels = ["gemini-3.5-flash", "gemini-3.1-flash-lite-preview"];
-const openAIModels = ["gpt-5.4-mini", "gpt-5.4-nano"];
+const openAIModels = ["gpt-5.6-luna", "gpt-5.4-nano"];
 const openRouterModels = [
   "z-ai/glm-5.2",
   "moonshotai/kimi-k2.5",
@@ -299,7 +299,7 @@ let mockConfig: CapsuleConfigResponse = {
   values: [
     { key: "cloud_provider", value: "gemini" },
     { key: "gemini_model", value: "gemini-3.5-flash" },
-    { key: "openai_model", value: "gpt-5.4-mini" },
+    { key: "openai_model", value: "gpt-5.6-luna" },
     { key: "openrouter_model", value: "moonshotai/kimi-k2.5" },
     { key: "ai_chat_context_limit", value: "all" },
     { key: "images.media_root", value: "C:\\Users\\jtill\\OneDrive\\_capsule\\images" },
@@ -3249,7 +3249,7 @@ function mockAiSettings(): AISettings {
   const openaiModel = normalizeMockModel(
     mockConfig.values.find((item) => item.key === "openai_model")?.value,
     openAIModels,
-    "gpt-5.4-mini",
+    "gpt-5.6-luna",
   );
   const openrouterModel = normalizeMockModel(
     mockConfig.values.find((item) => item.key === "openrouter_model")?.value,
@@ -3327,6 +3327,7 @@ function normalizeMockModel(
 function normalizeLegacyModel(value: string) {
   return {
     "gemini-3-flash-preview": "gemini-3.5-flash",
+    "gpt-5.4-mini": "gpt-5.6-luna",
     "z-ai/glm-5.1": "z-ai/glm-5.2",
     "x-ai/grok-4.5": "~x-ai/grok-latest",
     "qwen/qwen3.5-397b-a17b": "qwen/qwen3.7-plus",

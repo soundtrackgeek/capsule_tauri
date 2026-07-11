@@ -5953,7 +5953,7 @@ function SettingsView({
   const [aiDraft, setAiDraft] = useState({
     cloudProvider: "gemini" as AICloudProvider,
     geminiModel: "gemini-3.5-flash",
-    openaiModel: "gpt-5.4-mini",
+    openaiModel: "gpt-5.6-luna",
     openrouterModel: "moonshotai/kimi-k2.5",
     defaultContextLimit: "",
     defaultSince: "",
@@ -6496,7 +6496,7 @@ function SettingsView({
               }
               value={aiDraft.openaiModel}
             >
-              {modelsForProvider(aiProviderStatuses, "openai", ["gpt-5.4-mini"]).map((model) => (
+              {modelsForProvider(aiProviderStatuses, "openai", ["gpt-5.6-luna"]).map((model) => (
                 <option key={model} value={model}>
                   {model}
                 </option>

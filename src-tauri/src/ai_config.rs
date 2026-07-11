@@ -22,7 +22,7 @@ const KEYRING_SERVICE: &str = "capsule-tauri.ai";
 const DEFAULT_PROVIDER: &str = "gemini";
 
 const GEMINI_MODELS: &[&str] = &["gemini-3.5-flash", "gemini-3.1-flash-lite-preview"];
-const OPENAI_MODELS: &[&str] = &["gpt-5.4-mini", "gpt-5.4-nano"];
+const OPENAI_MODELS: &[&str] = &["gpt-5.6-luna", "gpt-5.4-nano"];
 const OPENROUTER_MODELS: &[&str] = &[
     "z-ai/glm-5.2",
     "moonshotai/kimi-k2.5",
@@ -34,7 +34,7 @@ const OPENROUTER_MODELS: &[&str] = &[
 ];
 
 const DEFAULT_GEMINI_MODEL: &str = "gemini-3.5-flash";
-const DEFAULT_OPENAI_MODEL: &str = "gpt-5.4-mini";
+const DEFAULT_OPENAI_MODEL: &str = "gpt-5.6-luna";
 const DEFAULT_OPENROUTER_MODEL: &str = "moonshotai/kimi-k2.5";
 
 #[derive(Debug, Clone, Copy)]
@@ -371,6 +371,7 @@ fn validate_model(label: &str, value: &str, models: &[&str]) -> Result<String> {
 fn legacy_model_replacement(value: &str) -> Option<&'static str> {
     match value.trim() {
         "gemini-3-flash-preview" => Some("gemini-3.5-flash"),
+        "gpt-5.4-mini" => Some("gpt-5.6-luna"),
         "z-ai/glm-5.1" => Some("z-ai/glm-5.2"),
         "x-ai/grok-4.5" => Some("~x-ai/grok-latest"),
         "qwen/qwen3.5-397b-a17b" => Some("qwen/qwen3.7-plus"),
@@ -612,6 +613,10 @@ mod tests {
                 value: "gemini-3-flash-preview".to_string(),
             },
             crate::models::CapsuleConfigValue {
+                key: "openai_model".to_string(),
+                value: "gpt-5.4-mini".to_string(),
+            },
+            crate::models::CapsuleConfigValue {
                 key: "openrouter_model".to_string(),
                 value: "qwen/qwen3.5-397b-a17b".to_string(),
             },
@@ -621,6 +626,7 @@ mod tests {
 
         assert_eq!(settings.cloud_provider, "openrouter");
         assert_eq!(settings.gemini_model, "gemini-3.5-flash");
+        assert_eq!(settings.openai_model, "gpt-5.6-luna");
         assert_eq!(settings.openrouter_model, "qwen/qwen3.7-plus");
         assert!(settings
             .warnings
@@ -685,7 +691,7 @@ mod tests {
             AiSettingsUpdateRequest {
                 cloud_provider: "openrouter".to_string(),
                 gemini_model: "gemini-3.5-flash".to_string(),
-                openai_model: "gpt-5.4-mini".to_string(),
+                openai_model: "gpt-5.6-luna".to_string(),
                 openrouter_model: "z-ai/glm-5.2".to_string(),
                 default_context_limit: Some(25),
                 default_since: Some("2026-01-01".to_string()),
@@ -719,7 +725,7 @@ mod tests {
             AiSettingsUpdateRequest {
                 cloud_provider: "gemini".to_string(),
                 gemini_model: "gemini-not-real".to_string(),
-                openai_model: "gpt-5.4-mini".to_string(),
+                openai_model: "gpt-5.6-luna".to_string(),
                 openrouter_model: DEFAULT_OPENROUTER_MODEL.to_string(),
                 default_context_limit: None,
                 default_since: None,

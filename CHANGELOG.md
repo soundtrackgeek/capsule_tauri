@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.27.5 - 2026-07-11
+
+### Changed
+
+- Replaced the OpenAI GPT-5.4 Mini option with GPT-5.6 Luna, migrated saved
+  GPT-5.4 Mini selections, and configured Luna requests to use low reasoning.
+- Bumped the app version to 0.27.5.
+
 ## 0.27.4 - 2026-07-09
 
 ### Fixed

@@ -22,7 +22,7 @@ async function resetAiSettings() {
   await updateAiSettings({
     cloudProvider: "gemini",
     geminiModel: "gemini-3.5-flash",
-    openaiModel: "gpt-5.4-mini",
+    openaiModel: "gpt-5.6-luna",
     openrouterModel: "moonshotai/kimi-k2.5",
     defaultContextLimit: null,
     defaultSince: null,
@@ -59,16 +59,19 @@ describe("mock Cloud AI settings", () => {
     const settings = await getAiSettings();
     const statuses = await getAiProviderStatus();
     const gemini = statuses.find((status) => status.provider === "gemini");
+    const openai = statuses.find((status) => status.provider === "openai");
     const openrouter = statuses.find((status) => status.provider === "openrouter");
 
     expect(settings.cloudProvider).toBe("gemini");
     expect(settings.geminiModel).toBe("gemini-3.5-flash");
-    expect(settings.openaiModel).toBe("gpt-5.4-mini");
+    expect(settings.openaiModel).toBe("gpt-5.6-luna");
     expect(settings.openrouterModel).toBe("moonshotai/kimi-k2.5");
     expect(gemini?.availableModels).toEqual([
       "gemini-3.5-flash",
       "gemini-3.1-flash-lite-preview",
     ]);
+    expect(openai?.availableModels).toEqual(["gpt-5.6-luna", "gpt-5.4-nano"]);
+    expect(openai?.availableModels).not.toContain("gpt-5.4-mini");
     expect(openrouter?.availableModels).toEqual([
       "z-ai/glm-5.2",
       "moonshotai/kimi-k2.5",
@@ -86,11 +89,13 @@ describe("mock Cloud AI settings", () => {
   test("shows legacy model replacements and saves the replacements", async () => {
     await setCapsuleConfigValue("cloud_provider", "openrouter");
     await setCapsuleConfigValue("gemini_model", "gemini-3-flash-preview");
+    await setCapsuleConfigValue("openai_model", "gpt-5.4-mini");
     await setCapsuleConfigValue("openrouter_model", "qwen/qwen3.5-397b-a17b");
     await setCapsuleConfigValue("ai_chat_context_limit", "all");
 
     const migrated = await getAiSettings();
     expect(migrated.geminiModel).toBe("gemini-3.5-flash");
+    expect(migrated.openaiModel).toBe("gpt-5.6-luna");
     expect(migrated.openrouterModel).toBe("qwen/qwen3.7-plus");
     expect(migrated.defaultContextLimit).toBeNull();
 

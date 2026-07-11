@@ -12,6 +12,8 @@ use reqwest::blocking::{Client, Response};
 use reqwest::StatusCode;
 use serde_json::{json, Value as JsonValue};
 
+const OPENAI_LOW_REASONING_MODEL: &str = "gpt-5.6-luna";
+
 #[derive(Debug, Clone)]
 pub(crate) struct ProviderChatMessage {
     pub role: String,
@@ -88,16 +90,18 @@ fn stream_openai(
             })
         })
         .collect::<Vec<_>>();
+    let mut body = json!({
+        "model": request.model,
+        "instructions": request.system_prompt,
+        "input": input,
+        "stream": true,
+        "store": false,
+    });
+    add_openai_reasoning(&mut body, &request.model);
     let response = client()?
         .post("https://api.openai.com/v1/responses")
         .bearer_auth(&request.api_key)
-        .json(&json!({
-            "model": request.model,
-            "instructions": request.system_prompt,
-            "input": input,
-            "stream": true,
-            "store": false,
-        }))
+        .json(&body)
         .send()
         .context("OpenAI request failed before streaming started.")?;
     let response = ensure_success(response, "OpenAI")?;
@@ -120,6 +124,7 @@ fn generate_openai(request: ProviderGenerateRequest) -> Result<String> {
         "stream": false,
         "store": false,
     });
+    add_openai_reasoning(&mut body, &request.model);
     if let Some(max_output_tokens) = request.max_output_tokens {
         body["max_output_tokens"] = json!(max_output_tokens);
     }
@@ -144,6 +149,12 @@ fn generate_openai(request: ProviderGenerateRequest) -> Result<String> {
     openai_response_text(&value)
         .filter(|text| !text.trim().is_empty())
         .ok_or_else(|| anyhow!("OpenAI completed without returning text."))
+}
+
+fn add_openai_reasoning(body: &mut JsonValue, model: &str) {
+    if model == OPENAI_LOW_REASONING_MODEL {
+        body["reasoning"] = json!({ "effort": "low" });
+    }
 }
 
 fn stream_gemini(
@@ -577,6 +588,17 @@ mod tests {
     }
 
     #[test]
+    fn configures_low_reasoning_for_luna_only() {
+        let mut luna_body = json!({});
+        add_openai_reasoning(&mut luna_body, "gpt-5.6-luna");
+        assert_eq!(luna_body["reasoning"]["effort"], "low");
+
+        let mut other_body = json!({});
+        add_openai_reasoning(&mut other_body, "gpt-5.4-nano");
+        assert!(other_body.get("reasoning").is_none());
+    }
+
+    #[test]
     fn extracts_non_streaming_provider_text() {
         let gemini = json!({
             "candidates": [{
@@ -608,7 +630,7 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let providers = [
             ("gemini", "gemini-3.5-flash"),
-            ("openai", "gpt-5.4-mini"),
+            ("openai", "gpt-5.6-luna"),
             ("openrouter", "moonshotai/kimi-k2.5"),
         ];
 
