@@ -1,15 +1,21 @@
 use std::{
-    collections::{HashMap, HashSet},
-    fs,
+    collections::{hash_map::DefaultHasher, HashMap, HashSet},
+    fmt, fs,
+    hash::{Hash, Hasher},
+    io::Write,
+    marker::PhantomData,
     path::{Path, PathBuf},
-    time::{Duration, SystemTime},
+    time::Duration,
 };
 
 use anyhow::{anyhow, Context, Result};
 use chrono::{Local, Utc};
 use reqwest::blocking::{Client, RequestBuilder};
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{
+    de::{DeserializeOwned, Visitor},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 use serde_json::{json, Map, Value as JsonValue};
 
 use crate::{
@@ -24,6 +30,7 @@ const GITHUB_API_BASE: &str = "https://api.github.com";
 const GITHUB_API_VERSION: &str = "2026-03-10";
 const GITHUB_USER_AGENT: &str = "Capsule-Tauri";
 const GITHUB_SYNC_FILES: [&str; 3] = [MAIN_SYNC_FILE, THREADS_SYNC_FILE, AI_CHATS_SYNC_FILE];
+const MAIN_SYNC_VERSION: i64 = 5;
 const SYNC_RETRY_LIMIT: usize = 3;
 const SYNC_HISTORY_RETENTION_LIMIT: i64 = 200;
 
@@ -36,8 +43,7 @@ struct GithubGistConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FileSignature {
     exists: bool,
-    len: Option<u64>,
-    modified: Option<SystemTime>,
+    content_hash: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -78,6 +84,79 @@ struct MainSyncPayload {
     extra: Map<String, JsonValue>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+enum SyncValue<T> {
+    #[default]
+    Missing,
+    Null,
+    Value(T),
+}
+
+impl<T> SyncValue<T> {
+    fn is_missing(&self) -> bool {
+        matches!(self, Self::Missing)
+    }
+
+    fn from_option(value: Option<T>) -> Self {
+        value.map_or(Self::Null, Self::Value)
+    }
+}
+
+impl<T> Serialize for SyncValue<T>
+where
+    T: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Missing | Self::Null => serializer.serialize_none(),
+            Self::Value(value) => serializer.serialize_some(value),
+        }
+    }
+}
+
+impl<'de, T> Deserialize<'de> for SyncValue<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct SyncValueVisitor<T>(PhantomData<T>);
+
+        impl<'de, T> Visitor<'de> for SyncValueVisitor<T>
+        where
+            T: Deserialize<'de>,
+        {
+            type Value = SyncValue<T>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a sync field value or null")
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E> {
+                Ok(SyncValue::Null)
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                Ok(SyncValue::Null)
+            }
+
+            fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                T::deserialize(deserializer).map(SyncValue::Value)
+            }
+        }
+
+        deserializer.deserialize_option(SyncValueVisitor(PhantomData))
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 struct SyncEntry {
     #[serde(default)]
@@ -88,24 +167,24 @@ struct SyncEntry {
     created_at: String,
     #[serde(default)]
     updated_at: Option<String>,
-    #[serde(default)]
-    title: Option<String>,
-    #[serde(default)]
-    summary: Option<String>,
+    #[serde(default, skip_serializing_if = "SyncValue::is_missing")]
+    title: SyncValue<String>,
+    #[serde(default, skip_serializing_if = "SyncValue::is_missing")]
+    summary: SyncValue<String>,
     #[serde(default)]
     text: String,
-    #[serde(default)]
-    content_format: Option<String>,
-    #[serde(default)]
-    mood: Option<String>,
-    #[serde(default)]
-    tags: Vec<String>,
-    #[serde(default)]
-    starred: bool,
-    #[serde(default)]
-    pinned: bool,
-    #[serde(default)]
-    hidden: bool,
+    #[serde(default, skip_serializing_if = "SyncValue::is_missing")]
+    content_format: SyncValue<String>,
+    #[serde(default, skip_serializing_if = "SyncValue::is_missing")]
+    mood: SyncValue<String>,
+    #[serde(default, skip_serializing_if = "SyncValue::is_missing")]
+    tags: SyncValue<Vec<String>>,
+    #[serde(default, skip_serializing_if = "SyncValue::is_missing")]
+    starred: SyncValue<bool>,
+    #[serde(default, skip_serializing_if = "SyncValue::is_missing")]
+    pinned: SyncValue<bool>,
+    #[serde(default, skip_serializing_if = "SyncValue::is_missing")]
+    hidden: SyncValue<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -662,19 +741,72 @@ fn write_text_replace(path: &Path, content: &str) -> Result<()> {
             .timestamp_nanos_opt()
             .unwrap_or_else(|| Utc::now().timestamp_micros() * 1_000)
     ));
-    fs::write(&tmp_path, content)
-        .with_context(|| format!("failed to write {}", tmp_path.display()))?;
-    if path.exists() {
-        fs::remove_file(path).with_context(|| format!("failed to replace {}", path.display()))?;
+    write_bytes_replace(path, &tmp_path, content.as_bytes())
+}
+
+fn write_bytes_replace(path: &Path, tmp_path: &Path, content: &[u8]) -> Result<()> {
+    let write_result = (|| -> Result<()> {
+        let mut file = fs::File::create(tmp_path)
+            .with_context(|| format!("failed to create {}", tmp_path.display()))?;
+        file.write_all(content)
+            .with_context(|| format!("failed to write {}", tmp_path.display()))?;
+        file.sync_all()
+            .with_context(|| format!("failed to flush {}", tmp_path.display()))?;
+        drop(file);
+        replace_file(tmp_path, path)
+    })();
+
+    if write_result.is_err() {
+        let _ = fs::remove_file(tmp_path);
     }
-    fs::rename(&tmp_path, path).with_context(|| {
-        format!(
-            "failed to move {} to {}",
-            tmp_path.display(),
-            path.display()
+    write_result
+}
+
+#[cfg(windows)]
+fn replace_file(source: &Path, destination: &Path) -> Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source_wide = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination_wide = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let moved = unsafe {
+        MoveFileExW(
+            source_wide.as_ptr(),
+            destination_wide.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
         )
-    })?;
+    };
+    if moved == 0 {
+        return Err(std::io::Error::last_os_error()).with_context(|| {
+            format!(
+                "failed to atomically replace {} with {}",
+                destination.display(),
+                source.display()
+            )
+        });
+    }
     Ok(())
+}
+
+#[cfg(not(windows))]
+fn replace_file(source: &Path, destination: &Path) -> Result<()> {
+    fs::rename(source, destination).with_context(|| {
+        format!(
+            "failed to atomically replace {} with {}",
+            destination.display(),
+            source.display()
+        )
+    })
 }
 
 fn github_summary_note(pulled: bool, pushed: bool, read_only: bool) -> Option<String> {
@@ -716,7 +848,7 @@ fn run_sync_without_backup_if_unchanged(
     let sync_file = sync_dir.join(MAIN_SYNC_FILE);
     let threads_sync_file = sync_dir.join(THREADS_SYNC_FILE);
     let ai_chat_sync_file = sync_dir.join(AI_CHATS_SYNC_FILE);
-    let starting_signature = file_signature(&sync_file)?;
+    let starting_signatures = sync_file_signatures(sync_dir)?;
 
     let remote_main = read_main_payload(&sync_file)?;
     let remote_threads = read_json_file::<ThreadSyncPayload>(&threads_sync_file)?;
@@ -738,7 +870,7 @@ fn run_sync_without_backup_if_unchanged(
         return Ok(None);
     }
 
-    if file_signature(&sync_file)? != starting_signature {
+    if sync_file_signatures(sync_dir)? != starting_signatures {
         return Ok(None);
     }
 
@@ -811,8 +943,8 @@ fn sync_payloads_match(
 
 fn run_sync_with_retries(db_path: &Path, sync_dir: &Path) -> Result<SyncRunResponse> {
     let mut last_error = None;
-    for attempt in 0..SYNC_RETRY_LIMIT {
-        match run_sync_once(db_path, sync_dir, attempt + 1)? {
+    for _ in 0..SYNC_RETRY_LIMIT {
+        match run_sync_once(db_path, sync_dir)? {
             SyncAttempt::Complete(response) => return Ok(response),
             SyncAttempt::Retry => {
                 last_error = Some("Sync file changed during merge; retrying with the latest file.");
@@ -826,12 +958,12 @@ fn run_sync_with_retries(db_path: &Path, sync_dir: &Path) -> Result<SyncRunRespo
     ))
 }
 
-fn run_sync_once(db_path: &Path, sync_dir: &Path, attempt: usize) -> Result<SyncAttempt> {
+fn run_sync_once(db_path: &Path, sync_dir: &Path) -> Result<SyncAttempt> {
     entries::ensure_entry_ids_for_database(db_path)?;
     let sync_file = sync_dir.join(MAIN_SYNC_FILE);
     let threads_sync_file = sync_dir.join(THREADS_SYNC_FILE);
     let ai_chat_sync_file = sync_dir.join(AI_CHATS_SYNC_FILE);
-    let starting_signature = file_signature(&sync_file)?;
+    let starting_signatures = sync_file_signatures(sync_dir)?;
 
     let remote_main = read_main_payload(&sync_file)?;
     let remote_threads = read_json_file::<ThreadSyncPayload>(&threads_sync_file)?;
@@ -878,11 +1010,14 @@ fn run_sync_once(db_path: &Path, sync_dir: &Path, attempt: usize) -> Result<Sync
         let thread_payload = build_threads_payload(&tx)?;
         let ai_payload = build_ai_chats_payload(&tx)?;
         counts.exported = main_payload.entries.len() as i64;
+        if sync_file_signatures(sync_dir)? != starting_signatures {
+            return Ok(SyncAttempt::Retry);
+        }
         tx.commit()?;
         (main_payload, thread_payload, ai_payload)
     };
 
-    if attempt < SYNC_RETRY_LIMIT && file_signature(&sync_file)? != starting_signature {
+    if sync_file_signatures(sync_dir)? != starting_signatures {
         return Ok(SyncAttempt::Retry);
     }
 
@@ -919,7 +1054,7 @@ fn run_sync_once(db_path: &Path, sync_dir: &Path, attempt: usize) -> Result<Sync
 fn read_main_payload(path: &Path) -> Result<MainSyncPayload> {
     if !path.exists() {
         return Ok(MainSyncPayload {
-            version: Some(4),
+            version: Some(MAIN_SYNC_VERSION),
             ..MainSyncPayload::default()
         });
     }
@@ -975,35 +1110,34 @@ where
             .timestamp_nanos_opt()
             .unwrap_or_else(|| Utc::now().timestamp_micros() * 1_000)
     ));
-    fs::write(&tmp_path, serde_json::to_vec_pretty(value)?)
-        .with_context(|| format!("failed to write {}", tmp_path.display()))?;
-    if path.exists() {
-        fs::remove_file(path).with_context(|| format!("failed to replace {}", path.display()))?;
-    }
-    fs::rename(&tmp_path, path).with_context(|| {
-        format!(
-            "failed to move {} to {}",
-            tmp_path.display(),
-            path.display()
-        )
-    })?;
-    Ok(())
+    let payload = serde_json::to_vec_pretty(value)?;
+    write_bytes_replace(path, &tmp_path, &payload)
 }
 
 fn file_signature(path: &Path) -> Result<FileSignature> {
-    match fs::metadata(path) {
-        Ok(metadata) => Ok(FileSignature {
-            exists: true,
-            len: Some(metadata.len()),
-            modified: metadata.modified().ok(),
-        }),
+    match fs::read(path) {
+        Ok(bytes) => {
+            let mut hasher = DefaultHasher::new();
+            bytes.hash(&mut hasher);
+            Ok(FileSignature {
+                exists: true,
+                content_hash: Some(hasher.finish()),
+            })
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(FileSignature {
             exists: false,
-            len: None,
-            modified: None,
+            content_hash: None,
         }),
-        Err(error) => Err(error).with_context(|| format!("failed to inspect {}", path.display())),
+        Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
     }
+}
+
+fn sync_file_signatures(sync_dir: &Path) -> Result<(FileSignature, FileSignature, FileSignature)> {
+    Ok((
+        file_signature(&sync_dir.join(MAIN_SYNC_FILE))?,
+        file_signature(&sync_dir.join(THREADS_SYNC_FILE))?,
+        file_signature(&sync_dir.join(AI_CHATS_SYNC_FILE))?,
+    ))
 }
 
 fn ensure_sync_schema(connection: &Connection) -> Result<()> {
@@ -1173,12 +1307,6 @@ fn apply_remote_entries(
             )
             .optional()?;
 
-        let content_format = normalize_content_format(item.content_format.as_deref());
-        let title = normalize_optional_text(item.title.as_deref());
-        let summary = normalize_optional_text(item.summary.as_deref());
-        let mood = normalize_optional_text(item.mood.as_deref());
-        let tags = normalize_tags(item.tags);
-
         if let Some(existing) = existing {
             let local_updated_at =
                 normalized_timestamp(existing.updated_at.as_deref(), &existing.created_at);
@@ -1189,6 +1317,15 @@ fn apply_remote_entries(
                 continue;
             }
             let local_tags = load_entry_tags(connection, existing.id)?;
+            let content_format =
+                resolve_sync_content_format(&item.content_format, &existing.content_format);
+            let title = resolve_sync_optional_text(&item.title, existing.title.as_deref());
+            let summary = resolve_sync_optional_text(&item.summary, existing.summary.as_deref());
+            let mood = resolve_sync_optional_text(&item.mood, existing.mood.as_deref());
+            let tags = resolve_sync_tags(&item.tags, &local_tags);
+            let starred = resolve_sync_bool(&item.starred, existing.starred);
+            let pinned = resolve_sync_bool(&item.pinned, existing.pinned);
+            let hidden = resolve_sync_bool(&item.hidden, existing.hidden);
             if entry_changed(
                 &existing,
                 &text,
@@ -1196,9 +1333,9 @@ fn apply_remote_entries(
                 title.as_deref(),
                 summary.as_deref(),
                 mood.as_deref(),
-                item.starred,
-                item.pinned,
-                item.hidden,
+                starred,
+                pinned,
+                hidden,
                 &tags,
                 &local_tags,
             ) {
@@ -1210,15 +1347,23 @@ fn apply_remote_entries(
                     title.as_deref(),
                     summary.as_deref(),
                     mood.as_deref(),
-                    item.starred,
-                    item.pinned,
-                    item.hidden,
+                    starred,
+                    pinned,
+                    hidden,
                     &updated_at,
                 )?;
                 replace_entry_tags(connection, existing.id, &tags)?;
                 counts.updated += 1;
             }
         } else if !entry_exists_by_created_text(connection, &created_at, &text)? {
+            let content_format = resolve_sync_content_format(&item.content_format, "plain");
+            let title = resolve_sync_optional_text(&item.title, None);
+            let summary = resolve_sync_optional_text(&item.summary, None);
+            let mood = resolve_sync_optional_text(&item.mood, None);
+            let tags = resolve_sync_tags(&item.tags, &[]);
+            let starred = resolve_sync_bool(&item.starred, false);
+            let pinned = resolve_sync_bool(&item.pinned, false);
+            let hidden = resolve_sync_bool(&item.hidden, false);
             let entry_id = insert_entry_for_sync(
                 connection,
                 &uuid,
@@ -1229,9 +1374,9 @@ fn apply_remote_entries(
                 title.as_deref(),
                 summary.as_deref(),
                 mood.as_deref(),
-                item.starred,
-                item.pinned,
-                item.hidden,
+                starred,
+                pinned,
+                hidden,
             )?;
             replace_entry_tags(connection, entry_id, &tags)?;
             counts.imported += 1;
@@ -1525,21 +1670,23 @@ fn build_main_payload(
             uuid: row.get(1)?,
             created_at: row.get(2)?,
             updated_at: row.get(3)?,
-            title: row.get(4)?,
-            summary: row.get(5)?,
+            title: SyncValue::from_option(row.get(4)?),
+            summary: SyncValue::from_option(row.get(5)?),
             text: row.get(6)?,
-            content_format: row.get(7)?,
-            mood: row.get(8)?,
-            tags: Vec::new(),
-            starred: row.get::<_, i64>(9)? != 0,
-            pinned: row.get::<_, i64>(10)? != 0,
-            hidden: row.get::<_, i64>(11)? != 0,
+            content_format: SyncValue::Value(normalize_content_format(
+                row.get::<_, Option<String>>(7)?.as_deref(),
+            )),
+            mood: SyncValue::from_option(row.get(8)?),
+            tags: SyncValue::Value(Vec::new()),
+            starred: SyncValue::Value(row.get::<_, i64>(9)? != 0),
+            pinned: SyncValue::Value(row.get::<_, i64>(10)? != 0),
+            hidden: SyncValue::Value(row.get::<_, i64>(11)? != 0),
         })
     })?;
     let mut entries = rows.collect::<rusqlite::Result<Vec<_>>>()?;
     for entry in entries.iter_mut() {
         if let Some(id) = entry.id {
-            entry.tags = load_entry_tags(connection, id)?;
+            entry.tags = SyncValue::Value(load_entry_tags(connection, id)?);
         }
     }
 
@@ -1558,7 +1705,7 @@ fn build_main_payload(
     deleted_uuids.sort();
 
     Ok(MainSyncPayload {
-        version: Some(4),
+        version: Some(MAIN_SYNC_VERSION),
         entries,
         deleted_uuids,
         extra,
@@ -3518,6 +3665,38 @@ fn normalize_optional_text(value: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
+fn resolve_sync_optional_text(incoming: &SyncValue<String>, local: Option<&str>) -> Option<String> {
+    match incoming {
+        SyncValue::Missing => normalize_optional_text(local),
+        SyncValue::Null => None,
+        SyncValue::Value(value) => normalize_optional_text(Some(value)),
+    }
+}
+
+fn resolve_sync_content_format(incoming: &SyncValue<String>, local: &str) -> String {
+    match incoming {
+        SyncValue::Value(value) => normalize_content_format(Some(value)),
+        SyncValue::Null => normalize_content_format(None),
+        SyncValue::Missing => normalize_content_format(Some(local)),
+    }
+}
+
+fn resolve_sync_tags(incoming: &SyncValue<Vec<String>>, local: &[String]) -> Vec<String> {
+    match incoming {
+        SyncValue::Value(values) => normalize_tags(values.clone()),
+        SyncValue::Null => Vec::new(),
+        SyncValue::Missing => normalize_tags(local.to_vec()),
+    }
+}
+
+fn resolve_sync_bool(incoming: &SyncValue<bool>, local: bool) -> bool {
+    match incoming {
+        SyncValue::Value(value) => *value,
+        SyncValue::Null => false,
+        SyncValue::Missing => local,
+    }
+}
+
 fn normalize_tags(values: Vec<String>) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut tags = values
@@ -3654,12 +3833,13 @@ fn normalize_content_format(value: Option<&str>) -> String {
 fn normalized_timestamp(value: Option<&str>, fallback: &str) -> String {
     let raw = value.unwrap_or("").trim();
     let raw = if raw.is_empty() { fallback.trim() } else { raw };
-    raw.trim_end_matches('Z')
-        .replace('T', " ")
-        .split('.')
-        .next()
-        .unwrap_or(raw)
-        .to_string()
+    let mut normalized = raw.trim_end_matches('Z').replace('T', " ");
+    if normalized.len() > 19 {
+        if let Some(offset_index) = normalized[19..].find(['+', '-']) {
+            normalized.truncate(19 + offset_index);
+        }
+    }
+    normalized
 }
 
 fn build_text_plain(text: &str) -> String {
@@ -4050,6 +4230,163 @@ mod tests {
             .deleted_uuids
             .iter()
             .any(|uuid| uuid == "entry_locally_deleted"));
+    }
+
+    #[test]
+    fn sync_legacy_entry_omissions_preserve_local_metadata() {
+        let db_dir = tempdir().expect("db tempdir");
+        let sync_dir = tempdir().expect("sync tempdir");
+        let db_path = db_dir.path().join("capsule.db");
+        create_sync_test_database(&db_path).expect("database");
+
+        let connection = Connection::open(&db_path).expect("open db");
+        connection
+            .execute(
+                "UPDATE entries
+                 SET title = ?1, summary = ?2, mood = ?3, starred = 1, pinned = 1, hidden = 1
+                 WHERE uuid = 'entry_remote_deleted'",
+                params!["Local title", "Local summary", "calm"],
+            )
+            .expect("metadata");
+        connection
+            .execute("INSERT INTO tags (name) VALUES ('preserve-me')", [])
+            .expect("tag");
+        connection
+            .execute(
+                "INSERT INTO entry_tags (entry_id, tag_id)
+                 SELECT e.id, t.id FROM entries e, tags t
+                 WHERE e.uuid = 'entry_remote_deleted' AND t.name = 'preserve-me'",
+                [],
+            )
+            .expect("entry tag");
+        drop(connection);
+
+        let legacy_payload = json!({
+            "version": 4,
+            "entries": [
+                {
+                    "uuid": "entry_remote_deleted",
+                    "created_at": "2026-01-01 09:00",
+                    "updated_at": "2026-01-01 09:00",
+                    "text": "Local row"
+                }
+            ],
+            "deleted_uuids": []
+        });
+        fs::write(
+            sync_dir.path().join(MAIN_SYNC_FILE),
+            serde_json::to_vec_pretty(&legacy_payload).expect("json"),
+        )
+        .expect("sync file");
+
+        let response =
+            run_sync_with_retries(&db_path, sync_dir.path()).expect("sync should complete");
+        assert_eq!(response.updated_count, 0);
+
+        let connection = Connection::open(&db_path).expect("open db");
+        let row = connection
+            .query_row(
+                "SELECT title, summary, mood, starred, pinned, hidden
+                 FROM entries WHERE uuid = 'entry_remote_deleted'",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
+                    ))
+                },
+            )
+            .expect("entry metadata");
+        assert_eq!(row.0.as_deref(), Some("Local title"));
+        assert_eq!(row.1.as_deref(), Some("Local summary"));
+        assert_eq!(row.2.as_deref(), Some("calm"));
+        assert_eq!((row.3, row.4, row.5), (1, 1, 1));
+        assert_eq!(
+            load_entry_tags(&connection, 1).expect("tags"),
+            vec!["preserve-me".to_string()]
+        );
+
+        let output = fs::read(sync_dir.path().join(MAIN_SYNC_FILE)).expect("output sync file");
+        let output_payload: MainSyncPayload =
+            serde_json::from_slice(&output).expect("output payload");
+        assert_eq!(output_payload.version, Some(MAIN_SYNC_VERSION));
+    }
+
+    #[test]
+    fn sync_explicit_newer_null_clears_entry_title_and_summary() {
+        let db_dir = tempdir().expect("db tempdir");
+        let sync_dir = tempdir().expect("sync tempdir");
+        let db_path = db_dir.path().join("capsule.db");
+        create_sync_test_database(&db_path).expect("database");
+
+        let connection = Connection::open(&db_path).expect("open db");
+        connection
+            .execute(
+                "UPDATE entries
+                 SET updated_at = '2026-01-01 09:00:00.100000',
+                     title = 'Local title', summary = 'Local summary', mood = 'calm'
+                 WHERE uuid = 'entry_remote_deleted'",
+                [],
+            )
+            .expect("metadata");
+        drop(connection);
+
+        let payload = json!({
+            "version": MAIN_SYNC_VERSION,
+            "entries": [
+                {
+                    "uuid": "entry_remote_deleted",
+                    "created_at": "2026-01-01 09:00",
+                    "updated_at": "2026-01-01 09:00:00.200000",
+                    "title": null,
+                    "summary": null,
+                    "text": "Local row"
+                }
+            ],
+            "deleted_uuids": []
+        });
+        fs::write(
+            sync_dir.path().join(MAIN_SYNC_FILE),
+            serde_json::to_vec_pretty(&payload).expect("json"),
+        )
+        .expect("sync file");
+
+        let response =
+            run_sync_with_retries(&db_path, sync_dir.path()).expect("sync should complete");
+        assert_eq!(response.updated_count, 1);
+
+        let connection = Connection::open(&db_path).expect("open db");
+        let row = connection
+            .query_row(
+                "SELECT title, summary, mood, updated_at
+                 FROM entries WHERE uuid = 'entry_remote_deleted'",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
+            )
+            .expect("entry metadata");
+        assert_eq!(row.0, None);
+        assert_eq!(row.1, None);
+        assert_eq!(row.2.as_deref(), Some("calm"));
+        assert_eq!(row.3, "2026-01-01 09:00:00.200000");
+    }
+
+    #[test]
+    fn timestamp_normalization_preserves_subsecond_ordering() {
+        let older = normalized_timestamp(Some("2026-01-01T09:00:00.100000Z"), "");
+        let newer = normalized_timestamp(Some("2026-01-01T09:00:00.200000Z"), "");
+        assert_eq!(older, "2026-01-01 09:00:00.100000");
+        assert!(newer > older);
     }
 
     #[test]

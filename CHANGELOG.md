@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.27.6 - 2026-07-15
+
+### Fixed
+
+- Fixed mixed-client shared-folder sync so metadata omitted by older Capsule
+  payloads preserves the local title, summary, format, mood, tags, and entry
+  flags, while explicit version-5 nulls still clear nullable fields.
+- Preserved fractional timestamp precision during conflict ordering to prevent
+  an older snapshot from winning when edits occur within the same second.
+- Prevented last-attempt sync overwrites when the main or sidecar files change
+  during a merge, and replaced sync JSON through flushed atomic file swaps.
+
+### Changed
+
+- Advanced the main shared-folder payload to protocol version 5 and bumped the
+  app version to 0.27.6.
+
 ## 0.27.5 - 2026-07-11
 
 ### Changed

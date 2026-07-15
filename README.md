@@ -111,7 +111,9 @@ explicit capability-gated AI/sync surfaces:
 - Native Capsule-compatible shared-folder sync using `capsule_sync.json`,
   `capsule_threads_sync.json`, and `capsule_ai_chats_sync.json`, including entry,
   image metadata, location, custom library, thread, AI chat, and tombstone
-  merging.
+  merging. Sync protocol v5 distinguishes omitted legacy metadata from explicit
+  clears, so an older client cannot erase titles, summaries, tags, moods, or
+  visibility flags merely because it does not export those fields.
 - Sync controls in Settings for reviewed manual runs, configurable automatic
   sync intervals, shared-folder paths, and per-user GitHub Gist ID/token links.
   The Sync page reports status, history, tombstone counts, and Gist pull/push
@@ -319,7 +321,9 @@ files, but skip retained database backup creation. Manual sync runs only from an
 explicit Settings or Sync-page action, and automatic sync runs only when enabled
 with a saved interval. Sync applies remote delete tombstones before upserts,
 keeps newer local rows when they win by timestamp, rewrites the latest sync files
-after merging, and retries if the shared file changes during a run.
+after merging, and retries if any of the three shared files changes during a run.
+Writes use flushed same-folder temporary files and atomic replacement so another
+client cannot observe partially written JSON.
 
 AI chat live requests and semantic vector ranking remain capability-gated.
 Tauri reads their existing state, but it does not send journal data to cloud
