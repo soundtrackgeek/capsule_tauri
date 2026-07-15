@@ -114,6 +114,7 @@ export type PathSettingsResponse = {
   autoSyncEnabled: boolean;
   autoSyncIntervalMinutes: number;
   minimizeToTrayOnClose: boolean;
+  startWithWindows: boolean;
   debugMenuEnabled: boolean;
   settingsPath: string;
   warnings: string[];
@@ -132,6 +133,7 @@ export type PathSettingsUpdateRequest = {
   autoSyncEnabled?: boolean | null;
   autoSyncIntervalMinutes?: number | null;
   minimizeToTrayOnClose?: boolean | null;
+  startWithWindows?: boolean | null;
   debugMenuEnabled?: boolean | null;
 };
 

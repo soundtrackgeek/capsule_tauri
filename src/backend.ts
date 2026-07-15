@@ -215,6 +215,7 @@ let mockAutoSyncEnabled = false;
 let mockAutoSyncIntervalMinutes = 15;
 let mockBackupRetentionCount = 5;
 let mockMinimizeToTrayOnClose = false;
+let mockStartWithWindows = false;
 let mockDebugMenuEnabled = false;
 let mockDebugLogs: DebugLogEntry[] = [
   {
@@ -1063,6 +1064,7 @@ export async function setPathSettings(
     mockAutoSyncEnabled = Boolean(input.autoSyncEnabled);
     mockAutoSyncIntervalMinutes = autoSyncInterval;
     mockMinimizeToTrayOnClose = Boolean(input.minimizeToTrayOnClose);
+    mockStartWithWindows = Boolean(input.startWithWindows);
     mockDebugMenuEnabled = Boolean(input.debugMenuEnabled);
 
     return mockPathSettings();
@@ -3131,6 +3133,7 @@ function mockPathSettings(): PathSettingsResponse {
     autoSyncEnabled: mockAutoSyncEnabled,
     autoSyncIntervalMinutes: mockAutoSyncIntervalMinutes,
     minimizeToTrayOnClose: mockMinimizeToTrayOnClose,
+    startWithWindows: mockStartWithWindows,
     debugMenuEnabled: mockDebugMenuEnabled,
     settingsPath: mockPathSettingsPath,
     warnings: [],

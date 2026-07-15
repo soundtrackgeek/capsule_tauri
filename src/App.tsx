@@ -5948,6 +5948,7 @@ function SettingsView({
     autoSyncEnabled: false,
     autoSyncIntervalMinutes: 15,
     minimizeToTrayOnClose: false,
+    startWithWindows: false,
     debugMenuEnabled: false,
   });
   const [aiDraft, setAiDraft] = useState({
@@ -6001,6 +6002,7 @@ function SettingsView({
       autoSyncEnabled: pathSettings?.autoSyncEnabled ?? false,
       autoSyncIntervalMinutes: pathSettings?.autoSyncIntervalMinutes ?? 15,
       minimizeToTrayOnClose: pathSettings?.minimizeToTrayOnClose ?? false,
+      startWithWindows: pathSettings?.startWithWindows ?? false,
       debugMenuEnabled: pathSettings?.debugMenuEnabled ?? false,
     });
   }, [
@@ -6016,6 +6018,7 @@ function SettingsView({
     pathSettings?.githubGistId,
     pathSettings?.imageMediaRoot,
     pathSettings?.minimizeToTrayOnClose,
+    pathSettings?.startWithWindows,
     pathSettings?.syncPath,
     status?.dbPath,
   ]);
@@ -6071,6 +6074,7 @@ function SettingsView({
       autoSyncEnabled: pathDraft.autoSyncEnabled,
       autoSyncIntervalMinutes: pathDraft.autoSyncIntervalMinutes,
       minimizeToTrayOnClose: pathDraft.minimizeToTrayOnClose,
+      startWithWindows: pathDraft.startWithWindows,
       debugMenuEnabled: pathDraft.debugMenuEnabled,
     });
   const aiContextLimitInvalid = contextLimitDraftInvalid(aiDraft.defaultContextLimit);
@@ -6693,6 +6697,19 @@ function SettingsView({
               type="checkbox"
             />
             <span>Minimize to tray on close</span>
+          </label>
+          <label className="check-row">
+            <input
+              checked={pathDraft.startWithWindows}
+              onChange={(event) =>
+                setPathDraft({
+                  ...pathDraft,
+                  startWithWindows: event.target.checked,
+                })
+              }
+              type="checkbox"
+            />
+            <span>Start with Windows (in tray)</span>
           </label>
           <label className="check-row">
             <input

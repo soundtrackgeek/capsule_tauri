@@ -48,6 +48,8 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager,
 };
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+use tauri_plugin_autostart::ManagerExt;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, ShortcutState};
 
@@ -58,6 +60,7 @@ const TRAY_OPEN_INTERFACE_ID: &str = "tray-open-interface";
 const TRAY_OPEN_WRITER_ID: &str = "tray-open-writer";
 const TRAY_OPEN_SETTINGS_ID: &str = "tray-open-settings";
 const TRAY_QUIT_ID: &str = "tray-quit";
+const START_IN_TRAY_ARG: &str = "--start-in-tray";
 
 #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
@@ -469,21 +472,72 @@ async fn set_location_config(
 }
 
 #[tauri::command]
-async fn get_path_settings() -> Result<PathSettingsResponse, String> {
-    tauri::async_runtime::spawn_blocking(settings::get_path_settings)
+async fn get_path_settings(app: tauri::AppHandle) -> Result<PathSettingsResponse, String> {
+    let mut response = tauri::async_runtime::spawn_blocking(settings::get_path_settings)
         .await
         .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    response.start_with_windows = start_with_windows_enabled(&app)?;
+    Ok(response)
 }
 
 #[tauri::command]
 async fn set_path_settings(
+    app: tauri::AppHandle,
     input: PathSettingsUpdateRequest,
 ) -> Result<PathSettingsResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || settings::set_path_settings(input))
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())
+    if let Some(enabled) = input.start_with_windows {
+        set_start_with_windows(&app, enabled)?;
+    }
+
+    let mut response =
+        tauri::async_runtime::spawn_blocking(move || settings::set_path_settings(input))
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|error| error.to_string())?;
+    response.start_with_windows = start_with_windows_enabled(&app)?;
+    Ok(response)
+}
+
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+fn start_with_windows_enabled<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<bool, String> {
+    app.autolaunch()
+        .is_enabled()
+        .map_err(|error| format!("Unable to read the Windows startup setting: {error}"))
+}
+
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
+fn start_with_windows_enabled<R: tauri::Runtime>(
+    _app: &tauri::AppHandle<R>,
+) -> Result<bool, String> {
+    Ok(false)
+}
+
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+fn set_start_with_windows<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    enabled: bool,
+) -> Result<(), String> {
+    if enabled {
+        app.autolaunch().enable()
+    } else {
+        app.autolaunch().disable()
+    }
+    .map_err(|error| format!("Unable to update the Windows startup setting: {error}"))
+}
+
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
+fn set_start_with_windows<R: tauri::Runtime>(
+    _app: &tauri::AppHandle<R>,
+    enabled: bool,
+) -> Result<(), String> {
+    if enabled {
+        Err("Starting with Windows is only available in the desktop app.".to_string())
+    } else {
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -847,6 +901,14 @@ pub fn run() {
 
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
 
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    let builder = builder.plugin(
+        tauri_plugin_autostart::Builder::new()
+            .arg(START_IN_TRAY_ARG)
+            .app_name("Capsule")
+            .build(),
+    );
+
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder.plugin(
         tauri_plugin_global_shortcut::Builder::new()
@@ -1050,14 +1112,32 @@ fn setup_global_shortcuts<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 }
 
 fn show_main_window_on_startup<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    match db::consume_show_window_after_update_restart() {
-        Ok(_) => {}
-        Err(error) => eprintln!("Failed to read Capsule update restart window request: {error}"),
+    let show_after_update = match db::consume_show_window_after_update_restart() {
+        Ok(requested) => requested,
+        Err(error) => {
+            eprintln!("Failed to read Capsule update restart window request: {error}");
+            false
+        }
+    };
+
+    if !should_show_main_window_on_startup(std::env::args_os(), show_after_update) {
+        return;
     }
 
     if let Err(error) = open_main_window(app) {
         eprintln!("Failed to show Capsule on startup: {error}");
     }
+}
+
+fn should_show_main_window_on_startup<I, S>(args: I, show_after_update: bool) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    show_after_update
+        || !args
+            .into_iter()
+            .any(|arg| arg.as_ref() == std::ffi::OsStr::new(START_IN_TRAY_ARG))
 }
 
 fn open_app_view<R: tauri::Runtime>(app: &tauri::AppHandle<R>, view: &str) -> tauri::Result<()> {
@@ -1102,3 +1182,32 @@ fn set_windows_app_user_model_id() {
 
 #[cfg(not(windows))]
 fn set_windows_app_user_model_id() {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn regular_launch_opens_the_main_window() {
+        assert!(should_show_main_window_on_startup(
+            ["capsule-tauri.exe"],
+            false
+        ));
+    }
+
+    #[test]
+    fn windows_startup_launch_stays_in_the_tray() {
+        assert!(!should_show_main_window_on_startup(
+            ["capsule-tauri.exe", START_IN_TRAY_ARG],
+            false
+        ));
+    }
+
+    #[test]
+    fn update_restart_overrides_the_tray_start_argument() {
+        assert!(should_show_main_window_on_startup(
+            ["capsule-tauri.exe", START_IN_TRAY_ARG],
+            true
+        ));
+    }
+}

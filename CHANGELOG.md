@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.28.0 - 2026-07-15
+
+### Added
+
+- Added a Start with Windows setting that registers Capsule for sign-in startup
+  and launches it directly into the system tray without opening the main window.
+- Added startup lifecycle coverage so ordinary launches and update restarts still
+  open the main window while Windows startup launches remain in the tray.
+
+### Changed
+
+- Bumped the app version to 0.28.0.
+
 ## 0.27.6 - 2026-07-15
 
 ### Fixed

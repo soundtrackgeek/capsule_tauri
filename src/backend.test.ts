@@ -8,15 +8,31 @@ import {
   getAiProviderStatus,
   getAiSettings,
   getCapsuleConfig,
+  getPathSettings,
   listAiConversations,
   previewAiChatContext,
   retryAiChatStream,
   setAiApiKey,
   setCapsuleConfigValue,
+  setPathSettings,
   startAiChatStream,
   subscribeAiChatEvents,
   updateAiSettings,
 } from "./backend";
+
+describe("mock Windows startup setting", () => {
+  afterEach(async () => {
+    await setPathSettings({ startWithWindows: false });
+  });
+
+  test("reports the active start-with-Windows registration", async () => {
+    expect((await getPathSettings()).startWithWindows).toBe(false);
+
+    const enabled = await setPathSettings({ startWithWindows: true });
+    expect(enabled.startWithWindows).toBe(true);
+    expect((await getPathSettings()).startWithWindows).toBe(true);
+  });
+});
 
 async function resetAiSettings() {
   await updateAiSettings({

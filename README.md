@@ -15,8 +15,9 @@ explicit capability-gated AI/sync surfaces:
 - Single-instance startup protection so launching Capsule again hands off to
   the running app instead of creating duplicate tray icons.
 - System tray support with Open Interface, Writer, Settings, and Quit actions,
-  plus a global `Ctrl+Alt+W` Writer shortcut and a Settings option to hide
-  Capsule to the tray when the main window is closed.
+  plus a global `Ctrl+Alt+W` Writer shortcut, a Settings option to hide Capsule
+  to the tray when the main window is closed, and a Start with Windows option
+  that launches Capsule directly into the tray at sign-in.
 - React + TypeScript + Vite frontend.
 - Browser-only mock backend for `npm run dev`.
 - Read-only database status for the active Capsule database.
@@ -152,7 +153,12 @@ outside the journal database in the app path settings file shown in Settings.
 The same settings file stores the backup retention count, which defaults to 5.
 The same local settings file stores whether closing the main window should hide
 Capsule to the system tray instead of exiting. Tray-hidden sessions do not
-become the next launch mode; starting Capsule opens the main window.
+become the next launch mode; starting Capsule normally opens the main window.
+The Interface settings also expose the active Windows startup registration.
+When enabled, Windows launches Capsule with a tray-start argument at sign-in so
+the tray icon and global Writer shortcut are ready without opening the main
+window. Opening Capsule normally or restarting after an update still shows the
+main window.
 The hidden Debug menu flag is stored in the same local settings file and stays
 off until it is explicitly enabled in Settings.
 Shared-folder sync resolves `CAPSULE_SYNC_PATH` first, then the saved sync path

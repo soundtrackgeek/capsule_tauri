@@ -182,6 +182,7 @@ pub fn get_path_settings() -> Result<PathSettingsResponse> {
             .unwrap_or(15)
             .clamp(1, 24 * 60),
         minimize_to_tray_on_close: local_settings.minimize_to_tray_on_close.unwrap_or(false),
+        start_with_windows: false,
         debug_menu_enabled: local_settings.debug_menu_enabled.unwrap_or(false),
         settings_path: db::path_to_string(&db::local_path_settings_path()),
         warnings,
