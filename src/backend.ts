@@ -718,6 +718,12 @@ function mapAppUpdate(update: Update): AppUpdateInfo {
   };
 }
 
+async function setUpdateNotification(version: string | null): Promise<void> {
+  if (runningInTauri()) {
+    await invoke<void>("set_update_notification", { version });
+  }
+}
+
 export async function checkForAppUpdate(): Promise<AppUpdateInfo | null> {
   try {
     if (runningInTauri()) {
@@ -726,6 +732,7 @@ export async function checkForAppUpdate(): Promise<AppUpdateInfo | null> {
         void pendingAppUpdate.close().catch(() => undefined);
       }
       pendingAppUpdate = update;
+      await setUpdateNotification(update?.version ?? null);
       return update ? mapAppUpdate(update) : null;
     }
 
@@ -781,6 +788,7 @@ export async function installAppUpdate(
         throw error;
       }
       pendingAppUpdate = null;
+      await setUpdateNotification(null);
       return;
     }
 

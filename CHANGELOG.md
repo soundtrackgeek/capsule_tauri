@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.28.1 - 2026-07-16
+
+### Added
+
+- Added a small update notification dot to the taskbar and system tray icons
+  whenever a new Capsule version is available.
+- Added the available version to the system tray tooltip while the update
+  notification is active.
+
+### Changed
+
+- Bumped the app version to 0.28.1.
+
 ## 0.28.0 - 2026-07-15
 
 ### Added

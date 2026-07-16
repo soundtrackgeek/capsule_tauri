@@ -55,6 +55,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, ShortcutS
 
 const APP_ICON_BYTES: &[u8] = include_bytes!("../icons/icon-256.png");
 const WINDOWS_APP_USER_MODEL_ID: &str = "com.local.capsule";
+const TRAY_ICON_ID: &str = "capsule-tray";
 const TRAY_OPEN_VIEW_EVENT: &str = "capsule://open-view";
 const TRAY_OPEN_INTERFACE_ID: &str = "tray-open-interface";
 const TRAY_OPEN_WRITER_ID: &str = "tray-open-writer";
@@ -879,6 +880,14 @@ async fn set_update_restart_window_request(requested: bool) -> Result<(), String
 }
 
 #[tauri::command]
+fn set_update_notification<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    version: Option<String>,
+) -> Result<(), String> {
+    update_app_icons(&app, version.as_deref()).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn claim_quest(input: QuestClaimRequest) -> Result<QuestClaimResponse, String> {
     tauri::async_runtime::spawn_blocking(move || phase6::claim_quest(input))
         .await
@@ -1068,6 +1077,7 @@ pub fn run() {
             get_plugin_overview,
             get_gamification_overview,
             set_update_restart_window_request,
+            set_update_notification,
             claim_quest
         ])
         .run(tauri::generate_context!())
@@ -1078,7 +1088,7 @@ fn set_main_window_icon<R: tauri::Runtime>(
     app: &mut tauri::App<R>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(window) = app.get_webview_window("main") {
-        window.set_icon(load_app_icon()?)?;
+        window.set_icon(load_app_icon(false)?)?;
     }
 
     Ok(())
@@ -1094,8 +1104,8 @@ fn setup_tray<R: tauri::Runtime>(
         .text(TRAY_QUIT_ID, "Quit")
         .build()?;
 
-    TrayIconBuilder::new()
-        .icon(load_app_icon()?)
+    TrayIconBuilder::with_id(TRAY_ICON_ID)
+        .icon(load_app_icon(false)?)
         .tooltip("Capsule")
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -1156,14 +1166,67 @@ fn open_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Resu
     Ok(())
 }
 
-fn load_app_icon() -> Result<tauri::image::Image<'static>, ::image::ImageError> {
-    let icon_rgba = ::image::load_from_memory(APP_ICON_BYTES)?.into_rgba8();
+fn update_app_icons<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    update_version: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let icon = load_app_icon(update_version.is_some())?;
+
+    if let Some(window) = app.get_webview_window("main") {
+        window.set_icon(icon.clone())?;
+    }
+
+    if let Some(tray) = app.tray_by_id(TRAY_ICON_ID) {
+        tray.set_icon(Some(icon))?;
+        let tooltip = update_version
+            .map(|version| format!("Capsule - Update {version} available"))
+            .unwrap_or_else(|| "Capsule".to_string());
+        tray.set_tooltip(Some(tooltip))?;
+    }
+
+    Ok(())
+}
+
+fn load_app_icon(
+    show_update_notification: bool,
+) -> Result<tauri::image::Image<'static>, ::image::ImageError> {
+    let mut icon_rgba = ::image::load_from_memory(APP_ICON_BYTES)?.into_rgba8();
+    if show_update_notification {
+        add_update_notification_badge(&mut icon_rgba);
+    }
     let (width, height) = icon_rgba.dimensions();
     Ok(tauri::image::Image::new_owned(
         icon_rgba.into_raw(),
         width,
         height,
     ))
+}
+
+fn add_update_notification_badge(icon: &mut ::image::RgbaImage) {
+    let (width, height) = icon.dimensions();
+    let scale = width.min(height);
+    let outer_radius = (scale * 18 / 128).max(2);
+    let border_width = (scale * 4 / 128).max(1);
+    let margin = (scale * 6 / 128).max(1);
+    let center_x = width.saturating_sub(outer_radius + margin);
+    let center_y = height.saturating_sub(outer_radius + margin);
+    let inner_radius = outer_radius.saturating_sub(border_width);
+    let outer_radius_squared = i64::from(outer_radius).pow(2);
+    let inner_radius_squared = i64::from(inner_radius).pow(2);
+
+    for y in center_y.saturating_sub(outer_radius)..=(center_y + outer_radius).min(height - 1) {
+        for x in center_x.saturating_sub(outer_radius)..=(center_x + outer_radius).min(width - 1) {
+            let dx = i64::from(x) - i64::from(center_x);
+            let dy = i64::from(y) - i64::from(center_y);
+            let distance_squared = dx * dx + dy * dy;
+
+            if distance_squared <= inner_radius_squared {
+                icon.put_pixel(x, y, ::image::Rgba([239, 68, 68, 255]));
+            } else if distance_squared <= outer_radius_squared {
+                icon.put_pixel(x, y, ::image::Rgba([255, 255, 255, 255]));
+            }
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -1209,5 +1272,16 @@ mod tests {
             ["capsule-tauri.exe", START_IN_TRAY_ARG],
             true
         ));
+    }
+
+    #[test]
+    fn update_notification_badge_adds_a_red_dot_with_white_border() {
+        let mut icon = ::image::RgbaImage::from_pixel(32, 32, ::image::Rgba([0, 0, 0, 0]));
+
+        add_update_notification_badge(&mut icon);
+
+        assert_eq!(icon.get_pixel(27, 27), &::image::Rgba([239, 68, 68, 255]));
+        assert_eq!(icon.get_pixel(27, 23), &::image::Rgba([255, 255, 255, 255]));
+        assert_eq!(icon.get_pixel(0, 0), &::image::Rgba([0, 0, 0, 0]));
     }
 }
