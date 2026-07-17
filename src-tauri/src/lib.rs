@@ -54,6 +54,7 @@ use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, ShortcutState};
 
 const APP_ICON_BYTES: &[u8] = include_bytes!("../icons/icon-256.png");
+#[cfg(windows)]
 const WINDOWS_APP_USER_MODEL_ID: &str = "com.local.capsule";
 const TRAY_ICON_ID: &str = "capsule-tray";
 const TRAY_OPEN_VIEW_EVENT: &str = "capsule://open-view";
@@ -506,7 +507,7 @@ fn start_with_windows_enabled<R: tauri::Runtime>(
 ) -> Result<bool, String> {
     app.autolaunch()
         .is_enabled()
-        .map_err(|error| format!("Unable to read the Windows startup setting: {error}"))
+        .map_err(|error| format!("Unable to read the startup setting: {error}"))
 }
 
 #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
@@ -526,7 +527,7 @@ fn set_start_with_windows<R: tauri::Runtime>(
     } else {
         app.autolaunch().disable()
     }
-    .map_err(|error| format!("Unable to update the Windows startup setting: {error}"))
+    .map_err(|error| format!("Unable to update the startup setting: {error}"))
 }
 
 #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
@@ -535,7 +536,7 @@ fn set_start_with_windows<R: tauri::Runtime>(
     enabled: bool,
 ) -> Result<(), String> {
     if enabled {
-        Err("Starting with Windows is only available in the desktop app.".to_string())
+        Err("Launch at sign-in is only available in the desktop app.".to_string())
     } else {
         Ok(())
     }

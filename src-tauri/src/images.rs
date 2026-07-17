@@ -21,6 +21,7 @@ use crate::{
     },
 };
 
+#[cfg(windows)]
 const DEFAULT_MEDIA_ROOT: &str = r"C:\Users\jtill\OneDrive\_capsule\images";
 const MAX_UPLOAD_BYTES: u64 = 10 * 1024 * 1024;
 pub(crate) const COVER_ROOT_ENV: &str = "CAPSULE_COVERS_ROOT";
@@ -66,8 +67,8 @@ pub fn list_entry_images(identifier: String) -> Result<ImageEntryListResponse> {
 pub fn get_image_media_root() -> Result<String> {
     let db_path = db::resolve_database_path();
     let roots = media_roots_for_database(&db_path, None);
-    let root =
-        first_existing_or_default_root(&roots).unwrap_or_else(|| PathBuf::from(DEFAULT_MEDIA_ROOT));
+    let root = first_existing_or_default_root(&roots)
+        .unwrap_or_else(|| db::database_directory_for_database(&db_path).join("media"));
     Ok(db::path_to_string(&root))
 }
 
@@ -848,6 +849,7 @@ pub(crate) fn media_roots_for_database(
     if let Some(configured) = config_media_root(db_path) {
         push_unique_path(&mut roots, configured);
     }
+    #[cfg(windows)]
     push_unique_path(&mut roots, PathBuf::from(DEFAULT_MEDIA_ROOT));
     push_unique_path(
         &mut roots,

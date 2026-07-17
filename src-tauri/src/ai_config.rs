@@ -517,7 +517,13 @@ fn ensure_credential_store() -> Result<()> {
         Ok(())
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        keyring_core::set_default_store(apple_native_keyring_store::keychain::Store::new()?);
+        Ok(())
+    }
+
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         Err(anyhow!(
             "OS credential store is not configured for this platform."

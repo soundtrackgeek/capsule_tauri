@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.29.0 - 2026-07-17
+
+### Added
+
+- Added universal macOS release builds for Apple Silicon and Intel Macs, with a
+  DMG installer and signed updater archive attached to each GitHub Release.
+- Added macOS Keychain storage for cloud AI API keys.
+
+### Changed
+
+- Added macOS to Rust CI coverage and made startup/update wording
+  platform-neutral.
+- Made macOS use `$HOME/.capsule` for its default database and local settings,
+  with database-adjacent media storage when no image path is configured.
+- Bumped the app version to 0.29.0.
+
 ## 0.28.1 - 2026-07-16
 
 ### Added

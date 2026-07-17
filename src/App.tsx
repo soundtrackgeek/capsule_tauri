@@ -800,7 +800,7 @@ function App() {
     }
 
     if (updateProgress?.phase === "finished") {
-      return "Download finished. Windows will apply the update.";
+      return "Download finished. Capsule will apply the update.";
     }
 
     if (updateProgress?.contentLength) {
@@ -1706,7 +1706,7 @@ function App() {
 
     if (
       !window.confirm(
-        `Install Capsule ${availableUpdate.version}? Capsule may close while Windows applies the update.`,
+        `Install Capsule ${availableUpdate.version}? Capsule may close while applying the update.`,
       )
     ) {
       return;
@@ -6709,7 +6709,7 @@ function SettingsView({
               }
               type="checkbox"
             />
-            <span>Start with Windows (in tray)</span>
+            <span>Launch at sign-in (in tray)</span>
           </label>
           <label className="check-row">
             <input

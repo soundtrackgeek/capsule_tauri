@@ -185,8 +185,8 @@ test("uses the AI chat workspace with mock streaming and retry", async ({ page }
 
   await page.getByPlaceholder("Ask about the selected entries").fill("Summarize the Codex workflow note");
   await page.getByRole("button", { name: "Send" }).click();
-  await expect(page.locator(".ai-message--user")).toHaveCount(1);
   await page.getByRole("button", { name: "Stop" }).click();
+  await expect(page.locator(".ai-message--user")).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
   await page.getByRole("button", { name: "Retry" }).click();
   await expect(page.locator(".ai-transcript")).toContainText("mock streamer");

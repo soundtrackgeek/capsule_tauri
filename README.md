@@ -16,9 +16,10 @@ explicit capability-gated AI/sync surfaces:
   the running app instead of creating duplicate tray icons.
 - System tray support with Open Interface, Writer, Settings, and Quit actions,
   plus a global `Ctrl+Alt+W` Writer shortcut, a Settings option to hide Capsule
-  to the tray when the main window is closed, and a Start with Windows option
-  that launches Capsule directly into the tray at sign-in. Available app updates
-  add a small notification dot to both the taskbar and system tray icons.
+  to the tray when the main window is closed, and a launch-at-sign-in option
+  on Windows and macOS that launches Capsule directly into the tray at sign-in.
+  Available app updates add a small notification dot to both the taskbar and
+  system tray icons.
 - React + TypeScript + Vite frontend.
 - Browser-only mock backend for `npm run dev`.
 - Read-only database status for the active Capsule database.
@@ -140,26 +141,30 @@ explicit capability-gated AI/sync surfaces:
   quest claiming.
 
 The database resolver checks an explicit `CAPSULE_DB_PATH` first. When that is
-not set, it uses the saved local database path from Settings, then prefers the
-MVP production database at `C:\Users\jtill\.capsule\capsule.db`, then falls
-back to `%USERPROFILE%\.capsule\capsule.db` and finally
-`CAPSULE_HOME\capsule.db`.
+not set, it uses the saved local database path from Settings. Windows then
+prefers the MVP production database at
+`C:\Users\jtill\.capsule\capsule.db` before trying
+`%USERPROFILE%\.capsule\capsule.db`; macOS uses
+`$HOME/.capsule/capsule.db`. `CAPSULE_HOME/capsule.db` is the final configured
+fallback.
 
 Image storage resolves `CAPSULE_IMAGES_MEDIA_ROOT` first, then
 the saved local image path from Settings, then `images.media_root` from Capsule
-config, then the default `C:\Users\jtill\OneDrive\_capsule\images`. Backup
+config, then `C:\Users\jtill\OneDrive\_capsule\images` on Windows or a `media`
+directory beside the active database on macOS. Backup
 storage resolves `CAPSULE_BACKUP_DIR` first, then the saved local backup path
 from Settings, then the active database directory. Saved local paths are stored
-outside the journal database in the app path settings file shown in Settings.
+outside the journal database in the app path settings file shown in Settings,
+under `%APPDATA%\Capsule` on Windows or `$HOME/.capsule` on macOS.
 The same settings file stores the backup retention count, which defaults to 5.
 The same local settings file stores whether closing the main window should hide
 Capsule to the system tray instead of exiting. Tray-hidden sessions do not
 become the next launch mode; starting Capsule normally opens the main window.
-The Interface settings also expose the active Windows startup registration.
-When enabled, Windows launches Capsule with a tray-start argument at sign-in so
-the tray icon and global Writer shortcut are ready without opening the main
-window. Opening Capsule normally or restarting after an update still shows the
-main window.
+The Interface settings also expose the active system startup registration.
+When enabled, Windows or macOS launches Capsule with a tray-start argument at
+sign-in so the tray icon and global Writer shortcut are ready without opening
+the main window. Opening Capsule normally or restarting after an update still
+shows the main window.
 The hidden Debug menu flag is stored in the same local settings file and stays
 off until it is explicitly enabled in Settings.
 Shared-folder sync resolves `CAPSULE_SYNC_PATH` first, then the saved sync path
@@ -179,7 +184,7 @@ Cover Wall image storage resolves `CAPSULE_COVERS_ROOT` first, then the saved
 Cover Wall image path from Settings, then `local-assets/covers`.
 Cover Wall thumbnails are generated on demand and cached under the local app
 settings directory, for example `%APPDATA%\Capsule\cover_thumbnails` on
-Windows.
+Windows or `$HOME/.capsule/cover_thumbnails` on macOS.
 Mood sentiment scoring for Analytics and Calendar uses the bundled legacy mood
 scale in `src-tauri/mood_sentiment.json`.
 
@@ -187,7 +192,8 @@ Cloud AI Settings write non-secret defaults to Capsule `config.json` with a
 backup before every save: `cloud_provider`, `gemini_model`, `openai_model`,
 `openrouter_model`, `ai_chat_context_limit`, `ai_chat_context_since`, and
 `ai_chat_context_until`. API keys are stored only in the operating system
-credential store, such as Windows Credential Manager, when saved in Settings;
+credential store, using Windows Credential Manager or macOS Keychain, when
+saved in Settings;
 the main Cloud AI save action also stores any non-empty key fields shown in
 that panel. Readiness checks report
 only redacted key status, resolving key presence from the OS credential store,
@@ -217,7 +223,7 @@ Norway.
 
 ## Commands
 
-```powershell
+```shell
 npm install
 npm run dev
 npm run lint
@@ -228,33 +234,42 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
-`npm run tauri:build` creates signed updater artifacts and Windows release
-executables that launch without an extra console window. In CI the signing key
-comes from GitHub Secrets; for a local release build, set
+`npm run tauri:build` creates platform-native bundles and signed updater
+artifacts. Windows release executables launch without an extra console window;
+macOS builds produce an application bundle and DMG. In CI the updater signing
+key comes from GitHub Secrets; for a local release build, set
 `TAURI_SIGNING_PRIVATE_KEY` to the private key content before running the
 command. For a passwordless key, set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` to an
 empty string.
 
 ## Releases
 
-Windows release bundles are built and attached to GitHub Releases by the
-`Release Windows Installer` workflow. After updating the app version and
-committing the release changes, push a semantic version tag to publish the
-installer assets:
+Windows and universal macOS release bundles are built and attached to GitHub
+Releases by the `Release Desktop Installers` workflow. After updating the app
+version and committing the release changes, push a semantic version tag to
+publish the installer assets:
 
-```powershell
+```shell
 git tag vMAJOR.MINOR.PATCH
 git push origin vMAJOR.MINOR.PATCH
 ```
 
-The workflow runs `npm ci` and `npm run tauri:build` on `windows-latest`, then
-uploads the generated NSIS setup executable, MSI, updater signatures, and
-`latest.json` manifest from `src-tauri/target/release/bundle` to the matching
-GitHub Release.
+The workflow builds on `windows-latest` and `macos-latest`. It uploads the NSIS
+setup executable and MSI for Windows, plus a universal DMG for both Apple
+Silicon and Intel Macs. It also uploads each platform's signed updater archive
+and a combined `latest.json` manifest so in-app updates work on both operating
+systems.
 
-In-app updates use Tauri's signed updater. The app contains only the public
-verification key; release builds sign updater artifacts with the
-`TAURI_SIGNING_PRIVATE_KEY` GitHub secret, plus the optional
+On macOS, download the DMG, open it, and drag Capsule into Applications. The Mac
+bundle is ad-hoc signed because this repository does not currently have Apple
+Developer signing and notarization credentials. On first launch, macOS may
+require approving Capsule in System Settings > Privacy & Security before it can
+open. Adding Developer ID and notarization secrets later will remove that manual
+approval step.
+
+In-app updates use Tauri's signed updater independently of Apple code signing.
+The app contains only the public verification key; release builds sign updater
+artifacts with the `TAURI_SIGNING_PRIVATE_KEY` GitHub secret, plus the optional
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secret if the key is password protected.
 Users do not need these keys. Anyone on a build older than the first
 updater-enabled release must install that release manually once before future
@@ -262,7 +277,7 @@ updates can be installed from inside Capsule.
 
 Rust tests can be run from the Tauri crate:
 
-```powershell
+```shell
 cd src-tauri
 cargo test
 ```
@@ -270,16 +285,15 @@ cargo test
 After local development, builds, or agent work, clean the Tauri crate build
 artifacts to keep `src-tauri/target` from growing too large:
 
-```powershell
+```shell
 cd src-tauri
 cargo clean
 ```
 
 The synthetic live provider smoke test is gated and sends no journal entries:
 
-```powershell
-$env:CAPSULE_AI_LIVE_SMOKE='1'
-cargo test --manifest-path src-tauri\Cargo.toml ai_providers::tests::live_provider_smoke_uses_synthetic_context_only -- --ignored --nocapture
+```shell
+CAPSULE_AI_LIVE_SMOKE=1 cargo test --manifest-path src-tauri/Cargo.toml ai_providers::tests::live_provider_smoke_uses_synthetic_context_only -- --ignored --nocapture
 ```
 
 ## Continuous Integration
@@ -291,7 +305,8 @@ frontend with `npm run build`, installs Playwright's Chromium browser, runs
 browser E2E coverage with `npm run test:e2e`, checks Rust formatting with
 `cargo fmt --check`, runs Rust linting with
 `cargo clippy --all-targets -- -D warnings`, and runs the Tauri crate tests
-with `cargo test --locked`.
+with `cargo test --locked`. Rust lint and test checks run on both Windows and
+macOS.
 
 ## Safety Baseline
 

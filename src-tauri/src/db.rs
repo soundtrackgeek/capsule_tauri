@@ -156,20 +156,35 @@ pub fn database_status_for_path(path: PathBuf) -> Result<DatabaseStatus> {
 }
 
 pub fn resolve_database_path() -> PathBuf {
+    let user_home = user_home_directory();
+    let default_database_path = platform_default_database_path(user_home.as_deref());
     resolve_database_path_from_parts(
         env_value("CAPSULE_DB_PATH"),
         read_local_path_settings().database_path,
-        env_value("USERPROFILE"),
+        user_home,
         env_value("CAPSULE_HOME"),
-        Path::new(MVP_DATABASE_PATH),
+        &default_database_path,
         Path::exists,
     )
+}
+
+#[cfg(windows)]
+fn platform_default_database_path(_user_home: Option<&str>) -> PathBuf {
+    PathBuf::from(MVP_DATABASE_PATH)
+}
+
+#[cfg(not(windows))]
+fn platform_default_database_path(user_home: Option<&str>) -> PathBuf {
+    user_home
+        .map(PathBuf::from)
+        .map(|home| home.join(".capsule").join("capsule.db"))
+        .unwrap_or_else(|| PathBuf::from(MVP_DATABASE_PATH))
 }
 
 fn resolve_database_path_from_parts(
     capsule_db_path: Option<String>,
     local_database_path: Option<String>,
-    userprofile: Option<String>,
+    user_home: Option<String>,
     capsule_home: Option<String>,
     mvp_database_path: &Path,
     path_exists: impl Fn(&Path) -> bool,
@@ -186,8 +201,8 @@ fn resolve_database_path_from_parts(
         return mvp_database_path.to_path_buf();
     }
 
-    if let Some(profile) = userprofile {
-        let profile_path = PathBuf::from(profile).join(".capsule").join("capsule.db");
+    if let Some(home) = user_home {
+        let profile_path = PathBuf::from(home).join(".capsule").join("capsule.db");
         if path_exists(&profile_path) {
             return profile_path;
         }
@@ -262,13 +277,17 @@ pub fn local_path_settings_path() -> PathBuf {
             .join("path_settings.json");
     }
 
-    if let Some(profile) = env_value("USERPROFILE") {
-        return PathBuf::from(profile)
+    if let Some(home) = user_home_directory() {
+        return PathBuf::from(home)
             .join(".capsule")
             .join("path_settings.json");
     }
 
     PathBuf::from("path_settings.json")
+}
+
+fn user_home_directory() -> Option<String> {
+    env_value("USERPROFILE").or_else(|| env_value("HOME"))
 }
 
 pub fn local_github_gist_sync_cache_path() -> PathBuf {
@@ -509,6 +528,16 @@ mod tests {
         );
 
         assert_eq!(resolved, PathBuf::from(override_path));
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn platform_default_database_uses_home_capsule_directory() {
+        let home = PathBuf::from("/Users/capsule");
+        let expected = home.join(".capsule").join("capsule.db");
+        let resolved = platform_default_database_path(Some(&home.to_string_lossy()));
+
+        assert_eq!(resolved, expected);
     }
 
     #[test]

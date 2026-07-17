@@ -31,7 +31,8 @@
    - After pushing a release version commit, create and push the matching Git tag
      in `vMAJOR.MINOR.PATCH` format, for example `git tag v0.8.1` followed by
      `git push origin v0.8.1`
-   - Pushing the version tag triggers the `Release Windows Installer` GitHub
-     Actions workflow, which builds the Windows Tauri bundles and uploads the
-     generated NSIS setup executable and MSI to the matching GitHub Release
+   - Pushing the version tag triggers the `Release Desktop Installers` GitHub
+     Actions workflow, which builds the Windows and universal macOS Tauri
+     bundles and uploads the generated NSIS setup executable, MSI, and DMG to
+     the matching GitHub Release
    - Do not create a release tag for docs-only changes or non-release work
