@@ -684,6 +684,8 @@ function App() {
   const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Entry | null>(null);
   const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
+  const [aiMetadataPrivacyPromptOpen, setAiMetadataPrivacyPromptOpen] = useState(false);
+  const [aiMetadataPrivacyConfirming, setAiMetadataPrivacyConfirming] = useState(false);
   const [searchForm, setSearchForm] = useState<SearchForm>(defaultSearchForm);
   const [searchLimit, setSearchLimit] = useState(40);
   const [searchResponse, setSearchResponse] = useState<SearchResponse | null>(null);
@@ -1204,6 +1206,25 @@ function App() {
     }
   }, [status?.readable]);
 
+  const loadAiConfiguration = useCallback(async () => {
+    try {
+      const [nextConfig, nextAiSettings, nextAiProviderStatuses] = await Promise.all([
+        getCapsuleConfig(),
+        getAiSettings(),
+        getAiProviderStatus(),
+      ]);
+      setCapsuleConfig(nextConfig);
+      setAiSettingsState(nextAiSettings);
+      setAiProviderStatuses(nextAiProviderStatuses);
+    } catch (aiConfigError) {
+      setError(
+        aiConfigError instanceof Error
+          ? aiConfigError.message
+          : "Unable to load Cloud AI configuration",
+      );
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -1260,7 +1281,8 @@ function App() {
 
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+    void loadAiConfiguration();
+  }, [loadAiConfiguration, refresh]);
 
   useEffect(() => {
     if (!notice) {
@@ -2102,49 +2124,15 @@ function App() {
     }
   }, [aiSuggestionIdentifier, recentEntries, selectedEntry?.uuid]);
 
-  const ensureAiMetadataPrivacyConfirmed = useCallback(async () => {
-    if (
-      capsuleConfig?.values.some(
-        (item) => item.key === "ai_metadata_privacy_confirmed_at" && item.value.trim(),
-      )
-    ) {
-      return true;
-    }
-
-    const confirmed = window.confirm(
-      "Generating a title and summary sends the current draft text to the selected cloud provider. Image files and API keys are not sent.",
-    );
-    if (!confirmed) {
-      return false;
-    }
-
-    const timestamp = new Date().toISOString();
-    const response = await setCapsuleConfigValue("ai_metadata_privacy_confirmed_at", timestamp);
-    setCapsuleConfig(response.config);
-    return true;
-  }, [capsuleConfig]);
-
-  const handleSuggestComposerMetadata = useCallback(async () => {
-    if (!composerDraft.text.trim()) {
-      setError("Entry text is required before generating metadata.");
-      return;
-    }
-
+  const generateComposerAiMetadata = useCallback(async () => {
     const provider = aiSettings?.cloudProvider ?? "gemini";
     const providerStatus =
       aiProviderStatuses.find((status) => status.provider === provider) ?? null;
-    if (isTauriRuntime() && !providerStatus?.configured) {
-      setError(`Configure ${providerEnvLabel(provider)} before generating metadata.`);
-      return;
-    }
 
     setComposerAiSuggesting(true);
     setError(null);
     setNotice(null);
     try {
-      if (!(await ensureAiMetadataPrivacyConfirmed())) {
-        return;
-      }
       const model =
         providerStatus?.selectedModel ??
         (aiSettings ? selectedDraftModel(aiSettings) : null);
@@ -2171,8 +2159,60 @@ function App() {
     aiProviderStatuses,
     aiSettings,
     composerDraft.text,
-    ensureAiMetadataPrivacyConfirmed,
   ]);
+
+  const handleSuggestComposerMetadata = useCallback(async () => {
+    if (!composerDraft.text.trim()) {
+      setError("Entry text is required before generating metadata.");
+      return;
+    }
+
+    const provider = aiSettings?.cloudProvider ?? "gemini";
+    const providerStatus =
+      aiProviderStatuses.find((status) => status.provider === provider) ?? null;
+    if (isTauriRuntime() && !providerStatus?.configured) {
+      setError(`Configure ${providerEnvLabel(provider)} before generating metadata.`);
+      return;
+    }
+
+    const privacyConfirmed = capsuleConfig?.values.some(
+      (item) => item.key === "ai_metadata_privacy_confirmed_at" && item.value.trim(),
+    );
+    if (!privacyConfirmed) {
+      setError(null);
+      setNotice(null);
+      setAiMetadataPrivacyPromptOpen(true);
+      return;
+    }
+
+    await generateComposerAiMetadata();
+  }, [
+    aiProviderStatuses,
+    aiSettings?.cloudProvider,
+    capsuleConfig?.values,
+    composerDraft.text,
+    generateComposerAiMetadata,
+  ]);
+
+  const handleConfirmAiMetadataPrivacy = useCallback(async () => {
+    setAiMetadataPrivacyConfirming(true);
+    setError(null);
+    try {
+      const timestamp = new Date().toISOString();
+      const response = await setCapsuleConfigValue("ai_metadata_privacy_confirmed_at", timestamp);
+      setCapsuleConfig(response.config);
+      setAiMetadataPrivacyPromptOpen(false);
+      await generateComposerAiMetadata();
+    } catch (privacyError) {
+      setError(
+        privacyError instanceof Error
+          ? privacyError.message
+          : "Unable to save the Cloud AI privacy confirmation",
+      );
+    } finally {
+      setAiMetadataPrivacyConfirming(false);
+    }
+  }, [generateComposerAiMetadata]);
 
   const handleApplyComposerMetadataSuggestion = useCallback(() => {
     if (!composerAiSuggestion) {
@@ -3097,6 +3137,20 @@ function App() {
           overview={syncOverview}
           pathSettings={pathSettings}
           status={status}
+        />
+      )}
+
+      {aiMetadataPrivacyPromptOpen && (
+        <AiMetadataPrivacyDialog
+          mutating={aiMetadataPrivacyConfirming}
+          onCancel={() => setAiMetadataPrivacyPromptOpen(false)}
+          onConfirm={() => void handleConfirmAiMetadataPrivacy()}
+          providerLabel={providerEnvLabel(aiSettings?.cloudProvider ?? "gemini")}
+          providerModel={
+            aiProviderStatuses.find(
+              (status) => status.provider === (aiSettings?.cloudProvider ?? "gemini"),
+            )?.selectedModel ?? (aiSettings ? selectedDraftModel(aiSettings) : "selected model")
+          }
         />
       )}
     </div>
@@ -8418,6 +8472,68 @@ type SyncViewProps = {
   onRefresh: () => void;
   onRunSync: () => void;
 };
+
+type AiMetadataPrivacyDialogProps = {
+  providerLabel: string;
+  providerModel: string;
+  mutating: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+};
+
+function AiMetadataPrivacyDialog({
+  providerLabel,
+  providerModel,
+  mutating,
+  onCancel,
+  onConfirm,
+}: AiMetadataPrivacyDialogProps) {
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <section
+        aria-labelledby="ai-metadata-privacy-title"
+        aria-modal="true"
+        className="confirm-dialog"
+        role="dialog"
+      >
+        <div className="confirm-dialog-header">
+          <div className="safety-mark" aria-hidden="true">
+            <Sparkles size={22} />
+          </div>
+          <div>
+            <p className="eyebrow">Cloud AI privacy</p>
+            <h3 id="ai-metadata-privacy-title">Send this entry to {providerLabel}?</h3>
+          </div>
+          <button
+            className="icon-button icon-button--small"
+            disabled={mutating}
+            onClick={onCancel}
+            title="Cancel"
+            type="button"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <p>
+          Capsule will send the current draft text to {providerLabel} using {providerModel} to
+          generate a title and summary. Image files and API keys are never sent.
+        </p>
+        <p className="muted">Capsule remembers this confirmation for future metadata requests.</p>
+
+        <div className="confirm-dialog-actions">
+          <button className="secondary-button" disabled={mutating} onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button className="primary-button" disabled={mutating} onClick={onConfirm} type="button">
+            <Sparkles size={17} />
+            {mutating ? "Continuing" : "Continue"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
 
 type SyncRunConfirmationDialogProps = {
   status: DatabaseStatus | null;

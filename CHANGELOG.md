@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.29.1 - 2026-07-19
+
+### Fixed
+
+- Fixed Cloud AI title/summary generation after restarting Capsule by loading
+  provider readiness during startup instead of requiring a visit to Settings or
+  AI before opening the entry composer.
+- Replaced the platform-native metadata privacy prompt with a visible in-app
+  confirmation so the first Generate action cannot stall behind a hidden macOS
+  WebView dialog.
+
+### Changed
+
+- Bumped the app version to 0.29.1.
+
 ## 0.29.0 - 2026-07-17
 
 ### Added

@@ -102,6 +102,42 @@ test("creates a journal entry through the composer", async ({ page }) => {
   expect(browserErrors).toEqual([]);
 });
 
+test("initializes Cloud AI and confirms metadata generation in the composer", async ({ page }) => {
+  const browserErrors = trackBrowserErrors(page);
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /^New$/ }).click();
+
+  const composer = page.getByRole("region", { name: "New entry" });
+  await composer
+    .getByRole("textbox", { name: "Entry" })
+    .fill("A quiet morning walk made the next project decision feel much clearer.");
+
+  const generateButton = composer.getByRole("button", { name: "Generate" });
+  await expect(generateButton).toBeEnabled();
+  await expect(generateButton).toHaveAttribute(
+    "title",
+    "Generate title and summary with Gemini / gemini-3.5-flash",
+  );
+  await generateButton.click();
+
+  const privacyDialog = page.getByRole("dialog", {
+    name: "Send this entry to Gemini?",
+  });
+  await expect(privacyDialog).toBeVisible();
+  await expect(privacyDialog).toContainText("Image files and API keys are never sent.");
+  await privacyDialog.getByRole("button", { name: "Continue" }).click();
+
+  await expect(privacyDialog).not.toBeVisible();
+  await expect(composer.getByRole("heading", { name: "AI Suggestion" })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText(
+    "Generated title and summary with Gemini / gemini-3.5-flash.",
+  );
+  await expect(generateButton).toBeEnabled();
+
+  expect(browserErrors).toEqual([]);
+});
+
 test("requires sync safety confirmation before manual sync", async ({ page }) => {
   const browserErrors = trackBrowserErrors(page);
 
