@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.29.2 - 2026-07-19
+
+### Fixed
+
+- Replaced the platform-native update installation prompt with a visible in-app
+  confirmation so the update banner and Settings install buttons respond on
+  macOS instead of stalling behind a hidden WebView dialog.
+
+### Changed
+
+- Added a development-only mock update query parameter for updater interaction
+  testing and bumped the app version to 0.29.2.
+
 ## 0.29.1 - 2026-07-19
 
 ### Fixed

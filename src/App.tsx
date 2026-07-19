@@ -683,6 +683,7 @@ function App() {
   const [entryResponse, setEntryResponse] = useState<EntryListResponse | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Entry | null>(null);
+  const [updateInstallPromptOpen, setUpdateInstallPromptOpen] = useState(false);
   const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
   const [aiMetadataPrivacyPromptOpen, setAiMetadataPrivacyPromptOpen] = useState(false);
   const [aiMetadataPrivacyConfirming, setAiMetadataPrivacyConfirming] = useState(false);
@@ -1720,17 +1721,20 @@ function App() {
     }
   }, []);
 
-  const handleInstallUpdate = useCallback(async () => {
+  const handleRequestInstallUpdate = useCallback(() => {
     if (!availableUpdate) {
       setUpdateError("Check for updates before installing.");
       return;
     }
 
-    if (
-      !window.confirm(
-        `Install Capsule ${availableUpdate.version}? Capsule may close while applying the update.`,
-      )
-    ) {
+    setUpdateError(null);
+    setUpdateInstallPromptOpen(true);
+  }, [availableUpdate]);
+
+  const handleConfirmInstallUpdate = useCallback(async () => {
+    if (!availableUpdate) {
+      setUpdateInstallPromptOpen(false);
+      setUpdateError("Check for updates before installing.");
       return;
     }
 
@@ -1743,10 +1747,12 @@ function App() {
       await installAppUpdate(setUpdateProgress);
       setNotice("Update installed. Restart Capsule to finish applying it.");
       setAvailableUpdate(null);
+      setUpdateInstallPromptOpen(false);
     } catch (installError) {
       const message = installError instanceof Error ? installError.message : "Unable to install update";
       setUpdateError(message);
       setError(message);
+      setUpdateInstallPromptOpen(false);
     } finally {
       setUpdateInstalling(false);
     }
@@ -2785,7 +2791,7 @@ function App() {
             <button
               className="text-button"
               disabled={updateInstalling}
-              onClick={() => void handleInstallUpdate()}
+              onClick={handleRequestInstallUpdate}
               type="button"
             >
               {updateInstalling ? "Installing" : "Install update"}
@@ -3083,7 +3089,7 @@ function App() {
             onCheckForUpdates={() => void handleCheckForUpdates(false)}
             onBrowseDatabasePath={handleBrowseDatabasePath}
             onBrowseDirectoryPath={handleBrowseDirectoryPath}
-            onInstallUpdate={() => void handleInstallUpdate()}
+            onInstallUpdate={handleRequestInstallUpdate}
             onRefresh={loadDataTools}
             onRunMutation={runDataToolMutation}
             onRunSync={openSyncConfirmation}
@@ -3126,6 +3132,15 @@ function App() {
           entry={deleteCandidate}
           onCancel={() => setDeleteCandidate(null)}
           onConfirm={handleConfirmDeleteEntry}
+        />
+      )}
+
+      {updateInstallPromptOpen && availableUpdate && (
+        <UpdateInstallDialog
+          mutating={updateInstalling}
+          onCancel={() => setUpdateInstallPromptOpen(false)}
+          onConfirm={() => void handleConfirmInstallUpdate()}
+          version={availableUpdate.version}
         />
       )}
 
@@ -8480,6 +8495,66 @@ type AiMetadataPrivacyDialogProps = {
   onCancel: () => void;
   onConfirm: () => void;
 };
+
+type UpdateInstallDialogProps = {
+  version: string;
+  mutating: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+};
+
+function UpdateInstallDialog({
+  version,
+  mutating,
+  onCancel,
+  onConfirm,
+}: UpdateInstallDialogProps) {
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <section
+        aria-labelledby="update-install-title"
+        aria-modal="true"
+        className="confirm-dialog"
+        role="dialog"
+      >
+        <div className="confirm-dialog-header">
+          <div className="safety-mark" aria-hidden="true">
+            <Download size={22} />
+          </div>
+          <div>
+            <p className="eyebrow">Signed application update</p>
+            <h3 id="update-install-title">Install Capsule {version}?</h3>
+          </div>
+          <button
+            aria-label="Cancel update installation"
+            className="icon-button icon-button--small"
+            disabled={mutating}
+            onClick={onCancel}
+            title="Cancel"
+            type="button"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <p>
+          Capsule will download and verify the signed update, then may close while the operating
+          system replaces the application. Reopen Capsule if it does not restart automatically.
+        </p>
+
+        <div className="confirm-dialog-actions">
+          <button className="secondary-button" disabled={mutating} onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button className="primary-button" disabled={mutating} onClick={onConfirm} type="button">
+            <Download size={17} />
+            {mutating ? "Installing" : "Install update"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
 
 function AiMetadataPrivacyDialog({
   providerLabel,

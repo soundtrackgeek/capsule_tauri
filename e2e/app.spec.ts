@@ -138,6 +138,40 @@ test("initializes Cloud AI and confirms metadata generation in the composer", as
   expect(browserErrors).toEqual([]);
 });
 
+test("confirms update installation inside the app from the banner and Settings", async ({ page }) => {
+  const browserErrors = trackBrowserErrors(page);
+
+  await page.goto("/?mock-app-update=0.29.3");
+
+  await expect(page.getByText("Capsule 0.29.3 is available.")).toBeVisible();
+  await page.getByRole("button", { name: "Install update" }).click();
+
+  const bannerDialog = page.getByRole("dialog", { name: "Install Capsule 0.29.3?" });
+  await expect(bannerDialog).toBeVisible();
+  await expect(bannerDialog).toContainText("download and verify the signed update");
+  await bannerDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(bannerDialog).not.toBeVisible();
+
+  await page
+    .getByRole("navigation", { name: "Primary" })
+    .getByRole("button", { name: "Settings" })
+    .click();
+  const applicationPanel = page.locator(".panel").filter({
+    has: page.getByRole("heading", { name: "Application" }),
+  });
+  await applicationPanel.getByRole("button", { name: "Install update" }).click();
+
+  const settingsDialog = page.getByRole("dialog", { name: "Install Capsule 0.29.3?" });
+  await expect(settingsDialog).toBeVisible();
+  await settingsDialog.getByRole("button", { name: "Install update" }).click();
+
+  await expect(settingsDialog).not.toBeVisible();
+  await expect(page.getByRole("status")).toContainText(
+    "Update installed. Restart Capsule to finish applying it.",
+  );
+  expect(browserErrors).toEqual([]);
+});
+
 test("requires sync safety confirmation before manual sync", async ({ page }) => {
   const browserErrors = trackBrowserErrors(page);
 

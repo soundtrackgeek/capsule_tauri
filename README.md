@@ -125,9 +125,10 @@ explicit capability-gated AI/sync surfaces:
   paths, Gist mode, auto-sync, and pending deletion markers before merging.
 - Signed in-app updates, including an hourly background check, an update banner
   when a new version is available, and a manual Check for updates button in
-  Settings. Capsule reopens the main window after an update restart, and the
-  Settings Application panel reports the installed Tauri runtime version so it
-  matches updater decisions.
+  Settings. Installation uses a visible in-app confirmation so the action cannot
+  be hidden behind the macOS WebView. Capsule reopens the main window after an
+  update restart, and the Settings Application panel reports the installed
+  Tauri runtime version so it matches updater decisions.
 - About screen changelog panel backed by the bundled `CHANGELOG.md` release
   history.
 - Legacy plugin-prefixed media and location tables remain supported for Capsule
@@ -234,6 +235,11 @@ npm run build
 npm run tauri:dev
 npm run tauri:build
 ```
+
+To exercise the updater confirmation without downloading a release, run
+`npm run dev` and open
+`http://127.0.0.1:1430/?mock-app-update=MAJOR.MINOR.PATCH`. This mock is enabled
+only by the Vite development environment.
 
 `npm run tauri:build` creates platform-native bundles and signed updater
 artifacts. Windows release executables launch without an extra console window;

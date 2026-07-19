@@ -738,6 +738,17 @@ export async function checkForAppUpdate(): Promise<AppUpdateInfo | null> {
 
     await pause(150);
     pendingAppUpdate = null;
+    const mockUpdateVersion = import.meta.env.DEV
+      ? new URLSearchParams(window.location.search).get("mock-app-update")?.trim()
+      : null;
+    if (mockUpdateVersion) {
+      return {
+        currentVersion: packageJson.version,
+        version: mockUpdateVersion,
+        date: null,
+        body: "Mock signed update for local interaction testing.",
+      };
+    }
     return null;
   } catch (error) {
     throw normalizeError(error);

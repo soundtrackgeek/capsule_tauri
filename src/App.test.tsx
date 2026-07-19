@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, test } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import App from "./App";
 
@@ -32,6 +32,7 @@ describe("App Writer settings", () => {
   beforeEach(() => {
     installLocalStorageMock();
     window.localStorage.clear();
+    window.history.replaceState({}, "", "/");
   });
 
   test("restores and persists Retro CRT display preferences", async () => {
@@ -105,5 +106,30 @@ describe("App Writer settings", () => {
 
     await screen.findByText("New");
     expect((screen.getByPlaceholderText("Write") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  test("confirms update installation inside the app without opening a native prompt", async () => {
+    window.history.replaceState({}, "", "/?mock-app-update=0.29.3");
+    const nativeConfirm = vi.spyOn(window, "confirm");
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Install update" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Install Capsule 0.29.3?" });
+    expect(nativeConfirm).not.toHaveBeenCalled();
+    expect(dialog).toHaveTextContent("download and verify the signed update");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Install update" }));
+    const confirmedDialog = await screen.findByRole("dialog", {
+      name: "Install Capsule 0.29.3?",
+    });
+    fireEvent.click(within(confirmedDialog).getByRole("button", { name: "Install update" }));
+
+    expect(await screen.findByText("Update installed. Restart Capsule to finish applying it.")).toBeVisible();
+    expect(nativeConfirm).not.toHaveBeenCalled();
   });
 });
