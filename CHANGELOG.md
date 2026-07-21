@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.29.3 - 2026-07-21
+
+### Fixed
+
+- Fixed GitHub Gist mobile sync so pending `mobile_notes.json` entries are
+  imported with their timestamp, mood, tags, and coordinates, deduplicated by
+  `client_id`, and acknowledged without removing notes added during the sync.
+
+### Changed
+
+- Bumped the app version to 0.29.3.
+
 ## 0.29.2 - 2026-07-19
 
 ### Fixed

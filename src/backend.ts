@@ -2047,8 +2047,8 @@ export async function getSyncOverview(): Promise<SyncOverviewResponse> {
               configured: Boolean(mockGithubGistId),
               readOnly: !mockGithubGistTokenConfigured,
               detail: mockGithubGistTokenConfigured
-                ? "Pulls Capsule sync files before merge and pushes merged files back to GitHub Gist."
-                : "Pulls Capsule sync files before merge; add a Gist token to push merged files back.",
+                ? "Imports pending mobile notes, pushes merged sync files, and clears processed notes from GitHub Gist."
+                : "Imports pending mobile notes read-only; add a Gist token to push merged files and clear processed notes.",
             }
         : capability,
     );

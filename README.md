@@ -173,10 +173,14 @@ Shared-folder sync resolves `CAPSULE_SYNC_PATH` first, then the saved sync path
 from Settings, and writes the same three sync files used by the older Capsule
 app. GitHub Gist sync resolves `CAPSULE_GITHUB_GIST_ID` and
 `CAPSULE_GITHUB_GIST_TOKEN` first, then the saved Gist ID/token from Settings.
-Manual or automatic sync pulls the three Capsule sync files from the Gist before
-merging. If a token is configured, the merged files are pushed back to the Gist;
-without a token the Gist link is pull-only. If no sync folder is configured,
-Gist sync uses a local cache folder under the app path settings directory.
+Manual or automatic sync pulls the three Capsule sync files plus an optional
+`mobile_notes.json` queue from the Gist before merging. Pending mobile notes
+preserve their timestamp, mood, tags, and coordinates and use `client_id` for
+idempotent imports. If a token is configured, the merged files are pushed back
+and only successfully processed mobile note IDs are removed from the latest
+queue; without a token the Gist link is pull-only and pending notes remain in the
+queue. If no sync folder is configured, Gist sync uses a local cache folder under
+the app path settings directory.
 Uploaded originals use Capsule's legacy image key layout
 `<hash-prefix>/<sha256>.<ext>` and thumbnails use
 `thumb/<hash-prefix>/<sha256>.jpg`, with attachment metadata stored in

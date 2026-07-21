@@ -306,9 +306,9 @@ pub(crate) fn get_sync_overview_for_database(db_path: &Path) -> Result<SyncOverv
                 true,
                 !github_gist_token_configured,
                 if github_gist_token_configured {
-                    "Pulls Capsule sync files before merge and pushes merged files back to GitHub Gist."
+                    "Imports pending mobile notes, pushes merged sync files, and clears processed notes from GitHub Gist."
                 } else {
-                    "Pulls Capsule sync files before merge; add a Gist token to push merged files back."
+                    "Imports pending mobile notes read-only; add a Gist token to push merged files and clear processed notes."
                 },
             ),
             capability(

@@ -26,6 +26,7 @@ use crate::{
 const MAIN_SYNC_FILE: &str = "capsule_sync.json";
 const THREADS_SYNC_FILE: &str = "capsule_threads_sync.json";
 const AI_CHATS_SYNC_FILE: &str = "capsule_ai_chats_sync.json";
+const MOBILE_NOTES_FILE: &str = "mobile_notes.json";
 const GITHUB_API_BASE: &str = "https://api.github.com";
 const GITHUB_API_VERSION: &str = "2026-03-10";
 const GITHUB_USER_AGENT: &str = "Capsule-Tauri";
@@ -70,6 +71,34 @@ struct GithubGistFile {
     raw_url: Option<String>,
     #[serde(default)]
     truncated: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct GithubGistPullResult {
+    pulled: bool,
+    mobile_notes: Vec<MobileNote>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct MobileNote {
+    #[serde(default)]
+    client_id: String,
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    mood: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    when: String,
+    #[serde(default)]
+    location: Option<MobileNoteLocation>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct MobileNoteLocation {
+    latitude: f64,
+    longitude: f64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -508,9 +537,12 @@ pub fn run_sync(input: Option<SyncRunRequest>) -> Result<SyncRunResponse> {
         .with_context(|| format!("failed to create {}", sync_dir.display()))?;
     let sync_file = sync_dir.join(MAIN_SYNC_FILE);
     let db_path = db::resolve_database_path();
-    let github_gist_pulled = if let Some(config) = gist_config.as_ref() {
-        match pull_github_gist_files(config, &sync_dir) {
-            Ok(pulled) => pulled,
+    let (github_gist_pulled, mobile_note_ids) = if let Some(config) = gist_config.as_ref() {
+        match pull_github_gist_files(config, &sync_dir).and_then(|pull| {
+            let mobile_note_ids = stage_mobile_notes(&sync_dir, &pull.mobile_notes)?;
+            Ok((pull.pulled, mobile_note_ids))
+        }) {
+            Ok(result) => result,
             Err(error) => {
                 if let Err(status_error) =
                     record_sync_error(&db_path, &sync_file, &error.to_string())
@@ -521,7 +553,7 @@ pub fn run_sync(input: Option<SyncRunRequest>) -> Result<SyncRunResponse> {
             }
         }
     } else {
-        false
+        (false, HashSet::new())
     };
 
     let mut response = match run_sync_with_backup_if_needed(&db_path, &sync_dir) {
@@ -536,7 +568,11 @@ pub fn run_sync(input: Option<SyncRunRequest>) -> Result<SyncRunResponse> {
     response.github_gist_pulled = github_gist_pulled;
     response.github_gist_pushed = if let Some(config) = gist_config.as_ref() {
         if config.token.is_some() {
-            match push_github_gist_files(config, &PathBuf::from(&response.sync_path)) {
+            match push_github_gist_files(
+                config,
+                &PathBuf::from(&response.sync_path),
+                &mobile_note_ids,
+            ) {
                 Ok(pushed) => pushed,
                 Err(error) => {
                     if let Err(status_error) = record_sync_error(
@@ -627,8 +663,7 @@ fn github_request(builder: RequestBuilder, token: Option<&str>) -> RequestBuilde
     }
 }
 
-fn pull_github_gist_files(config: &GithubGistConfig, sync_dir: &Path) -> Result<bool> {
-    let client = github_client()?;
+fn fetch_github_gist(client: &Client, config: &GithubGistConfig) -> Result<GithubGistResponse> {
     let url = format!("{GITHUB_API_BASE}/gists/{}", config.gist_id);
     let response = github_request(client.get(url), config.token.as_deref())
         .send()
@@ -642,8 +677,16 @@ fn pull_github_gist_files(config: &GithubGistConfig, sync_dir: &Path) -> Result<
         ));
     }
 
-    let gist: GithubGistResponse = response.json().context("failed to parse GitHub Gist")?;
-    let mut pulled = false;
+    response.json().context("failed to parse GitHub Gist")
+}
+
+fn pull_github_gist_files(
+    config: &GithubGistConfig,
+    sync_dir: &Path,
+) -> Result<GithubGistPullResult> {
+    let client = github_client()?;
+    let gist = fetch_github_gist(&client, config)?;
+    let mut result = GithubGistPullResult::default();
     for filename in GITHUB_SYNC_FILES {
         if let Some(file) = gist.files.get(filename) {
             let content = github_gist_file_content(&client, config, file)
@@ -651,11 +694,113 @@ fn pull_github_gist_files(config: &GithubGistConfig, sync_dir: &Path) -> Result<
             validate_sync_file_json(filename, &content)?;
             write_text_replace(&sync_dir.join(filename), &content)
                 .with_context(|| format!("failed to write fetched GitHub Gist file {filename}"))?;
-            pulled = true;
+            result.pulled = true;
         }
     }
 
-    Ok(pulled)
+    if let Some(file) = gist.files.get(MOBILE_NOTES_FILE) {
+        let content = github_gist_file_content(&client, config, file)
+            .with_context(|| format!("failed to fetch {MOBILE_NOTES_FILE} from GitHub Gist"))?;
+        result.mobile_notes = serde_json::from_str(&content).with_context(|| {
+            format!("{MOBILE_NOTES_FILE} from GitHub Gist is not a valid note array")
+        })?;
+        result.pulled = true;
+    }
+
+    Ok(result)
+}
+
+fn stage_mobile_notes(sync_dir: &Path, mobile_notes: &[MobileNote]) -> Result<HashSet<String>> {
+    if mobile_notes.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    let sync_file = sync_dir.join(MAIN_SYNC_FILE);
+    let mut main_payload = read_main_payload(&sync_file)?;
+    let mut locations =
+        parse_extra_payload::<LocationSyncPayload>(&main_payload.extra, "locations")?
+            .unwrap_or_default();
+    let mut entry_uuids = main_payload
+        .entries
+        .iter()
+        .filter_map(|entry| normalize_string(entry.uuid.clone()))
+        .collect::<HashSet<_>>();
+    let mut location_uuids = locations
+        .locations
+        .iter()
+        .filter_map(|location| normalize_string(Some(location.entry_uuid.clone())))
+        .collect::<HashSet<_>>();
+    let mut acknowledged_ids = HashSet::new();
+    let mut entries_changed = false;
+    let mut locations_changed = false;
+
+    for mobile_note in mobile_notes {
+        let client_id = normalize_string(Some(mobile_note.client_id.clone()))
+            .ok_or_else(|| anyhow!("{MOBILE_NOTES_FILE} contains a note without a client_id"))?;
+        let text = mobile_note.text.replace("\r\n", "\n").replace('\r', "\n");
+        if text.trim().is_empty() {
+            return Err(anyhow!(
+                "{MOBILE_NOTES_FILE} note {client_id} does not contain text"
+            ));
+        }
+        let when = normalize_string(Some(mobile_note.when.clone())).ok_or_else(|| {
+            anyhow!("{MOBILE_NOTES_FILE} note {client_id} does not contain a timestamp")
+        })?;
+        let entry_uuid = format!("mobile_{client_id}");
+
+        if let Some(location) = mobile_note.location.as_ref() {
+            if !location.latitude.is_finite()
+                || !location.longitude.is_finite()
+                || !(-90.0..=90.0).contains(&location.latitude)
+                || !(-180.0..=180.0).contains(&location.longitude)
+            {
+                return Err(anyhow!(
+                    "{MOBILE_NOTES_FILE} note {client_id} contains invalid coordinates"
+                ));
+            }
+            if location_uuids.insert(entry_uuid.clone()) {
+                locations.locations.push(LocationPayload {
+                    entry_uuid: entry_uuid.clone(),
+                    latitude: location.latitude,
+                    longitude: location.longitude,
+                    source: "mobile".to_string(),
+                    created_at: when.clone(),
+                    ..LocationPayload::default()
+                });
+                locations.supported = true;
+                locations_changed = true;
+            }
+        }
+
+        if entry_uuids.insert(entry_uuid.clone()) {
+            main_payload.entries.push(SyncEntry {
+                uuid: Some(entry_uuid),
+                created_at: when.clone(),
+                updated_at: Some(when),
+                text,
+                content_format: SyncValue::Value("plain".to_string()),
+                mood: SyncValue::from_option(normalize_string(mobile_note.mood.clone())),
+                tags: SyncValue::Value(normalize_tags(mobile_note.tags.clone())),
+                starred: SyncValue::Value(false),
+                pinned: SyncValue::Value(false),
+                hidden: SyncValue::Value(false),
+                ..SyncEntry::default()
+            });
+            entries_changed = true;
+        }
+        acknowledged_ids.insert(client_id);
+    }
+
+    if locations_changed {
+        main_payload
+            .extra
+            .insert("locations".to_string(), serde_json::to_value(locations)?);
+    }
+    if entries_changed || locations_changed {
+        write_json_replace(&sync_file, &main_payload)?;
+    }
+
+    Ok(acknowledged_ids)
 }
 
 fn github_gist_file_content(
@@ -690,7 +835,11 @@ fn github_gist_file_content(
         .context("failed to read raw GitHub Gist file")
 }
 
-fn push_github_gist_files(config: &GithubGistConfig, sync_dir: &Path) -> Result<bool> {
+fn push_github_gist_files(
+    config: &GithubGistConfig,
+    sync_dir: &Path,
+    acknowledged_mobile_note_ids: &HashSet<String>,
+) -> Result<bool> {
     let token = config
         .token
         .as_deref()
@@ -705,11 +854,16 @@ fn push_github_gist_files(config: &GithubGistConfig, sync_dir: &Path) -> Result<
             files.insert(filename.to_string(), json!({ "content": content }));
         }
     }
+    let client = github_client()?;
+    if let Some(content) =
+        mobile_notes_after_acknowledgement(&client, config, acknowledged_mobile_note_ids)?
+    {
+        files.insert(MOBILE_NOTES_FILE.to_string(), json!({ "content": content }));
+    }
     if files.is_empty() {
         return Ok(false);
     }
 
-    let client = github_client()?;
     let url = format!("{GITHUB_API_BASE}/gists/{}", config.gist_id);
     let response = github_request(client.patch(url), Some(token))
         .json(&json!({ "files": files }))
@@ -725,6 +879,52 @@ fn push_github_gist_files(config: &GithubGistConfig, sync_dir: &Path) -> Result<
     }
 
     Ok(true)
+}
+
+fn mobile_notes_after_acknowledgement(
+    client: &Client,
+    config: &GithubGistConfig,
+    acknowledged_ids: &HashSet<String>,
+) -> Result<Option<String>> {
+    if acknowledged_ids.is_empty() {
+        return Ok(None);
+    }
+
+    let gist = fetch_github_gist(client, config)?;
+    let Some(file) = gist.files.get(MOBILE_NOTES_FILE) else {
+        return Ok(None);
+    };
+    let content = github_gist_file_content(client, config, file)
+        .with_context(|| format!("failed to refetch {MOBILE_NOTES_FILE} from GitHub Gist"))?;
+    filter_acknowledged_mobile_notes(&content, acknowledged_ids)
+}
+
+fn filter_acknowledged_mobile_notes(
+    content: &str,
+    acknowledged_ids: &HashSet<String>,
+) -> Result<Option<String>> {
+    let value: JsonValue = serde_json::from_str(content)
+        .with_context(|| format!("{MOBILE_NOTES_FILE} from GitHub Gist is not valid JSON"))?;
+    let JsonValue::Array(mut notes) = value else {
+        return Err(anyhow!(
+            "{MOBILE_NOTES_FILE} from GitHub Gist is not a note array"
+        ));
+    };
+    let original_len = notes.len();
+    notes.retain(|note| {
+        note.get("client_id")
+            .and_then(JsonValue::as_str)
+            .map(str::trim)
+            .is_none_or(|client_id| !acknowledged_ids.contains(client_id))
+    });
+    if notes.len() == original_len {
+        return Ok(None);
+    }
+
+    Ok(Some(format!(
+        "{}\n",
+        serde_json::to_string_pretty(&JsonValue::Array(notes))?
+    )))
 }
 
 fn validate_sync_file_json(filename: &str, content: &str) -> Result<()> {
@@ -4464,6 +4664,129 @@ mod tests {
             run_sync_with_retries(&db_path, sync_dir.path()).expect("sync should complete");
         assert_eq!(response.updated_count, 0);
         assert_eq!(response.summary, "nothing new");
+    }
+
+    #[test]
+    fn mobile_notes_stage_entries_tags_moods_and_locations() {
+        let db_dir = tempdir().expect("db tempdir");
+        let sync_dir = tempdir().expect("sync tempdir");
+        let db_path = db_dir.path().join("capsule.db");
+        create_sync_test_database(&db_path).expect("database");
+        let mobile_notes: Vec<MobileNote> = serde_json::from_value(json!([
+            {
+                "client_id": "3353c210-611a-4eec-ae28-7e35f107bb31",
+                "text": "A mobile test",
+                "mood": "great",
+                "tags": ["Coding", "coding"],
+                "when": "2026-07-21 13:24",
+                "location": {
+                    "latitude": 69.69432754942983,
+                    "longitude": 19.003339221916928
+                }
+            },
+            {
+                "client_id": "51e83087-6054-456f-94f9-e06a76d2fbdc",
+                "text": "Another mobile test",
+                "mood": "good",
+                "tags": ["vibe-coding"],
+                "when": "2026-07-21 14:18"
+            }
+        ]))
+        .expect("mobile notes");
+
+        let acknowledged =
+            stage_mobile_notes(sync_dir.path(), &mobile_notes).expect("stage mobile notes");
+        assert_eq!(acknowledged.len(), 2);
+        stage_mobile_notes(sync_dir.path(), &mobile_notes).expect("stage idempotently");
+
+        let staged =
+            read_main_payload(&sync_dir.path().join(MAIN_SYNC_FILE)).expect("staged main payload");
+        assert_eq!(
+            staged
+                .entries
+                .iter()
+                .filter(|entry| {
+                    entry
+                        .uuid
+                        .as_deref()
+                        .is_some_and(|uuid| uuid.starts_with("mobile_"))
+                })
+                .count(),
+            2
+        );
+
+        let response =
+            run_sync_with_retries(&db_path, sync_dir.path()).expect("sync should complete");
+        assert_eq!(response.imported_count, 2);
+
+        let connection = Connection::open(&db_path).expect("open db");
+        let (entry_id, created_at, text, mood) = connection
+            .query_row(
+                "SELECT id, created_at, text, mood FROM entries WHERE uuid = ?1",
+                ["mobile_3353c210-611a-4eec-ae28-7e35f107bb31"],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                },
+            )
+            .expect("mobile entry");
+        assert_eq!(created_at, "2026-07-21 13:24");
+        assert_eq!(text, "A mobile test");
+        assert_eq!(mood.as_deref(), Some("great"));
+        assert_eq!(
+            load_entry_tags(&connection, entry_id).expect("entry tags"),
+            vec!["coding".to_string()]
+        );
+        let (latitude, longitude, source) = connection
+            .query_row(
+                "SELECT latitude, longitude, source FROM plugin_entry_locations WHERE entry_uuid = ?1",
+                ["mobile_3353c210-611a-4eec-ae28-7e35f107bb31"],
+                |row| {
+                    Ok((
+                        row.get::<_, f64>(0)?,
+                        row.get::<_, f64>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .expect("mobile location");
+        assert_eq!(latitude, 69.69432754942983);
+        assert_eq!(longitude, 19.003339221916928);
+        assert_eq!(source, "mobile");
+    }
+
+    #[test]
+    fn mobile_note_acknowledgement_preserves_new_and_unknown_queue_items() {
+        let acknowledged = HashSet::from([
+            "3353c210-611a-4eec-ae28-7e35f107bb31".to_string(),
+            "51e83087-6054-456f-94f9-e06a76d2fbdc".to_string(),
+        ]);
+        let content = serde_json::to_string_pretty(&json!([
+            {
+                "client_id": "3353c210-611a-4eec-ae28-7e35f107bb31",
+                "text": "Imported"
+            },
+            {
+                "client_id": "new-during-sync",
+                "text": "Keep this"
+            },
+            {
+                "text": "Keep malformed items for diagnosis"
+            }
+        ]))
+        .expect("queue json");
+
+        let filtered = filter_acknowledged_mobile_notes(&content, &acknowledged)
+            .expect("filter queue")
+            .expect("queue changed");
+        let remaining: Vec<JsonValue> = serde_json::from_str(&filtered).expect("remaining queue");
+        assert_eq!(remaining.len(), 2);
+        assert_eq!(remaining[0]["client_id"], "new-during-sync");
+        assert!(remaining[1].get("client_id").is_none());
     }
 
     #[test]
