@@ -19,7 +19,7 @@ use serde::{
 use serde_json::{json, Map, Value as JsonValue};
 
 use crate::{
-    backup, db, entries,
+    backup, db, entries, location,
     models::{SyncRunRequest, SyncRunResponse},
 };
 
@@ -1035,7 +1035,19 @@ fn run_sync_with_backup_if_needed(db_path: &Path, sync_dir: &Path) -> Result<Syn
 
     let sync_dir = sync_dir.to_path_buf();
     let guarded = backup::with_database_backup_for_database(db_path, "sync.run", move |path| {
-        run_sync_with_retries(path, &sync_dir)
+        let mut response = run_sync_with_retries(path, &sync_dir)?;
+        let enriched = location::enrich_pending_mobile_locations(path)?;
+        if enriched > 0 {
+            response.exported_count = refresh_sync_files_from_database(path, &sync_dir)?;
+            let label = if enriched == 1 {
+                "1 mobile location enriched".to_string()
+            } else {
+                format!("{enriched} mobile locations enriched")
+            };
+            response.summary = append_summary_note(&response.summary, &label);
+            record_sync_summary_override(path, &response.completed_at, &response.summary)?;
+        }
+        Ok(response)
     })?;
     Ok(guarded.value)
 }
@@ -1045,6 +1057,9 @@ fn run_sync_without_backup_if_unchanged(
     sync_dir: &Path,
 ) -> Result<Option<SyncRunResponse>> {
     entries::ensure_entry_ids_for_database(db_path)?;
+    if location::has_pending_mobile_location_enrichment(db_path)? {
+        return Ok(None);
+    }
     let sync_file = sync_dir.join(MAIN_SYNC_FILE);
     let threads_sync_file = sync_dir.join(THREADS_SYNC_FILE);
     let ai_chat_sync_file = sync_dir.join(AI_CHATS_SYNC_FILE);
@@ -1099,6 +1114,20 @@ fn run_sync_without_backup_if_unchanged(
         summary,
         completed_at,
     }))
+}
+
+fn refresh_sync_files_from_database(db_path: &Path, sync_dir: &Path) -> Result<i64> {
+    let sync_file = sync_dir.join(MAIN_SYNC_FILE);
+    let threads_sync_file = sync_dir.join(THREADS_SYNC_FILE);
+    let ai_chat_sync_file = sync_dir.join(AI_CHATS_SYNC_FILE);
+    let current_main = read_main_payload(&sync_file)?;
+    let (main_payload, thread_payload, ai_payload) =
+        build_local_sync_payloads(db_path, current_main.extra, current_main.deleted_uuids)?;
+    let exported_count = main_payload.entries.len() as i64;
+    write_json_replace(&sync_file, &main_payload)?;
+    write_json_replace(&threads_sync_file, &thread_payload)?;
+    write_json_replace(&ai_chat_sync_file, &ai_payload)?;
+    Ok(exported_count)
 }
 
 fn build_local_sync_payloads(
@@ -4715,9 +4744,19 @@ mod tests {
             2
         );
 
-        let response =
-            run_sync_with_retries(&db_path, sync_dir.path()).expect("sync should complete");
+        location::set_test_auto_capture_fixture(Some(location::TestAutoCaptureFixture {
+            latitude: 0.0,
+            longitude: 0.0,
+            place_name: Some("Tromso, Norway".to_string()),
+            source: "mobile".to_string(),
+            weather_temp_c: Some(12.8),
+            weather_condition: Some("Partly cloudy".to_string()),
+        }));
+        let response = run_sync_with_backup_if_needed(&db_path, sync_dir.path())
+            .expect("sync should complete");
+        location::set_test_auto_capture_fixture(None);
         assert_eq!(response.imported_count, 2);
+        assert!(response.summary.contains("1 mobile location enriched"));
 
         let connection = Connection::open(&db_path).expect("open db");
         let (entry_id, created_at, text, mood) = connection
@@ -4741,22 +4780,51 @@ mod tests {
             load_entry_tags(&connection, entry_id).expect("entry tags"),
             vec!["coding".to_string()]
         );
-        let (latitude, longitude, source) = connection
-            .query_row(
-                "SELECT latitude, longitude, source FROM plugin_entry_locations WHERE entry_uuid = ?1",
-                ["mobile_3353c210-611a-4eec-ae28-7e35f107bb31"],
-                |row| {
-                    Ok((
-                        row.get::<_, f64>(0)?,
-                        row.get::<_, f64>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
-                },
-            )
-            .expect("mobile location");
+        let (latitude, longitude, place_name, source, temp_c, temp_f, condition, fetched_at) =
+            connection
+                .query_row(
+                    "SELECT latitude, longitude, place_name, source, weather_temp_c,
+                        weather_temp_f, weather_condition, weather_fetched_at
+                 FROM plugin_entry_locations WHERE entry_uuid = ?1",
+                    ["mobile_3353c210-611a-4eec-ae28-7e35f107bb31"],
+                    |row| {
+                        Ok((
+                            row.get::<_, f64>(0)?,
+                            row.get::<_, f64>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, Option<f64>>(4)?,
+                            row.get::<_, Option<f64>>(5)?,
+                            row.get::<_, Option<String>>(6)?,
+                            row.get::<_, Option<String>>(7)?,
+                        ))
+                    },
+                )
+                .expect("mobile location");
         assert_eq!(latitude, 69.69432754942983);
         assert_eq!(longitude, 19.003339221916928);
+        assert_eq!(place_name.as_deref(), Some("Tromso, Norway"));
         assert_eq!(source, "mobile");
+        assert_eq!(temp_c, Some(12.8));
+        assert_eq!(temp_f, Some(55.0));
+        assert_eq!(condition.as_deref(), Some("Partly cloudy"));
+        assert!(fetched_at.is_some());
+
+        let synced = read_main_payload(&sync_dir.path().join(MAIN_SYNC_FILE))
+            .expect("enriched sync payload");
+        let locations = parse_extra_payload::<LocationSyncPayload>(&synced.extra, "locations")
+            .expect("parse locations payload")
+            .expect("locations payload");
+        let synced_location = locations
+            .locations
+            .iter()
+            .find(|item| item.entry_uuid == "mobile_3353c210-611a-4eec-ae28-7e35f107bb31")
+            .expect("synced mobile location");
+        assert_eq!(
+            synced_location.place_name.as_deref(),
+            Some("Tromso, Norway")
+        );
+        assert_eq!(synced_location.weather_temp_c, Some(12.8));
     }
 
     #[test]
@@ -4815,5 +4883,82 @@ mod tests {
         assert_eq!(response.updated_count, 0);
         assert_eq!(response.deleted_count, 0);
         assert_eq!(backup_file_count(db_dir.path()), before);
+    }
+
+    #[test]
+    fn sync_unchanged_payload_backfills_pending_mobile_location() {
+        let db_dir = tempdir().expect("db tempdir");
+        let sync_dir = tempdir().expect("sync tempdir");
+        let db_path = db_dir.path().join("capsule.db");
+        create_sync_test_database(&db_path).expect("database");
+
+        let connection = Connection::open(&db_path).expect("open db");
+        ensure_location_sync_schema(&connection).expect("location sync schema");
+        connection
+            .execute(
+                "INSERT INTO entries
+                    (uuid, created_at, updated_at, text, text_plain, content_format,
+                     starred, pinned, hidden)
+                 VALUES (?1, ?2, ?2, ?3, ?3, 'plain', 0, 0, 0)",
+                params![
+                    "mobile_existing-note",
+                    "2026-07-21 13:24",
+                    "Previously imported mobile note"
+                ],
+            )
+            .expect("mobile entry");
+        connection
+            .execute(
+                "INSERT INTO plugin_entry_locations
+                    (entry_uuid, latitude, longitude, source, created_at)
+                 VALUES (?1, ?2, ?3, 'mobile', ?4)",
+                params![
+                    "mobile_existing-note",
+                    69.69432754942983,
+                    19.003339221916928,
+                    "2026-07-21 13:24"
+                ],
+            )
+            .expect("raw mobile location");
+        drop(connection);
+
+        let (main_payload, thread_payload, ai_payload) =
+            build_local_sync_payloads(&db_path, Map::new(), Vec::new())
+                .expect("local sync payloads");
+        write_json_replace(&sync_dir.path().join(MAIN_SYNC_FILE), &main_payload)
+            .expect("main sync file");
+        write_json_replace(&sync_dir.path().join(THREADS_SYNC_FILE), &thread_payload)
+            .expect("threads sync file");
+        write_json_replace(&sync_dir.path().join(AI_CHATS_SYNC_FILE), &ai_payload)
+            .expect("ai sync file");
+
+        location::set_test_auto_capture_fixture(Some(location::TestAutoCaptureFixture {
+            latitude: 0.0,
+            longitude: 0.0,
+            place_name: Some("Utsikten, Tromso, Norway".to_string()),
+            source: "mobile".to_string(),
+            weather_temp_c: Some(12.8),
+            weather_condition: Some("Partly cloudy".to_string()),
+        }));
+        let before = backup_file_count(db_dir.path());
+        let response = run_sync_with_backup_if_needed(&db_path, sync_dir.path())
+            .expect("sync should backfill location");
+        location::set_test_auto_capture_fixture(None);
+
+        assert!(response.summary.contains("1 mobile location enriched"));
+        assert_eq!(backup_file_count(db_dir.path()), before + 1);
+        let connection = Connection::open(&db_path).expect("open db");
+        let (place_name, source, weather_temp_c): (Option<String>, String, Option<f64>) =
+            connection
+                .query_row(
+                    "SELECT place_name, source, weather_temp_c
+                     FROM plugin_entry_locations WHERE entry_uuid = ?1",
+                    ["mobile_existing-note"],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .expect("enriched mobile location");
+        assert_eq!(place_name.as_deref(), Some("Utsikten, Tromso, Norway"));
+        assert_eq!(source, "mobile");
+        assert_eq!(weather_temp_c, Some(12.8));
     }
 }

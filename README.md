@@ -33,7 +33,7 @@ explicit capability-gated AI/sync surfaces:
   breaks, tags, mood, location, attachment count, and thread metadata when those
   tables are available,
   including stored weather condition, Celsius-first temperature, humidity, wind,
-  icon, source, and fetched timestamp.
+  icon, and fetched timestamp.
 - Backup-guarded entry creation and editing, with Capsule-compatible location
   and weather auto-capture for new entries.
 - Backup-guarded star, unstar, pin, unpin, hide, unhide, and confirmed delete
@@ -176,11 +176,15 @@ app. GitHub Gist sync resolves `CAPSULE_GITHUB_GIST_ID` and
 Manual or automatic sync pulls the three Capsule sync files plus an optional
 `mobile_notes.json` queue from the Gist before merging. Pending mobile notes
 preserve their timestamp, mood, tags, and coordinates and use `client_id` for
-idempotent imports. If a token is configured, the merged files are pushed back
-and only successfully processed mobile note IDs are removed from the latest
-queue; without a token the Gist link is pull-only and pending notes remain in the
-queue. If no sync folder is configured, Gist sync uses a local cache folder under
-the app path settings directory.
+idempotent imports. GPS coordinates are reverse-geocoded at street level, and
+Open-Meteo weather is captured for the note's saved local timestamp; incomplete
+location metadata is retried on later syncs. The stored `mobile` source remains
+available as provenance but is not shown in the entry's Location card. If a
+token is configured, the merged files are pushed back and only successfully
+processed mobile note IDs are removed from the latest queue; without a token the
+Gist link is pull-only and pending notes remain in the queue. If no sync folder
+is configured, Gist sync uses a local cache folder under the app path settings
+directory.
 Uploaded originals use Capsule's legacy image key layout
 `<hash-prefix>/<sha256>.<ext>` and thumbnails use
 `thumb/<hash-prefix>/<sha256>.jpg`, with attachment metadata stored in

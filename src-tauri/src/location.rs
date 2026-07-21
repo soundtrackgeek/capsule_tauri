@@ -46,6 +46,23 @@ struct LocationConfig {
     values: Map<String, JsonValue>,
 }
 
+#[derive(Debug, Clone)]
+struct PendingMobileLocation {
+    entry_uuid: String,
+    latitude: f64,
+    longitude: f64,
+    entry_created_at: String,
+    place_name: Option<String>,
+    place_details: Option<String>,
+    weather_temp_c: Option<f64>,
+    weather_temp_f: Option<f64>,
+    weather_condition: Option<String>,
+    weather_icon: Option<String>,
+    weather_humidity: Option<i64>,
+    weather_wind_kph: Option<f64>,
+    weather_fetched_at: Option<String>,
+}
+
 #[cfg(test)]
 #[derive(Debug, Clone)]
 pub(crate) struct TestAutoCaptureFixture {
@@ -67,6 +84,239 @@ pub(crate) fn set_test_auto_capture_fixture(fixture: Option<TestAutoCaptureFixtu
     TEST_AUTO_CAPTURE.with(|slot| {
         *slot.borrow_mut() = fixture;
     });
+}
+
+pub(crate) fn has_pending_mobile_location_enrichment(db_path: &Path) -> Result<bool> {
+    let connection = crate::db::open_read_only_connection(db_path)?;
+    if !table_exists(&connection, "plugin_entry_locations")? {
+        return Ok(false);
+    }
+
+    connection
+        .query_row(
+            "SELECT EXISTS (
+                SELECT 1
+                FROM plugin_entry_locations
+                WHERE LOWER(TRIM(source)) = 'mobile'
+                  AND (
+                    place_name IS NULL OR TRIM(place_name) = ''
+                    OR weather_temp_c IS NULL
+                    OR weather_condition IS NULL OR TRIM(weather_condition) = ''
+                    OR weather_fetched_at IS NULL OR TRIM(weather_fetched_at) = ''
+                  )
+            )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(Into::into)
+}
+
+pub(crate) fn enrich_pending_mobile_locations(db_path: &Path) -> Result<usize> {
+    let mut connection = crate::db::open_read_write_connection(db_path)?;
+    ensure_schema(&connection)?;
+    let candidates = pending_mobile_locations(&connection)?;
+    if candidates.is_empty() {
+        return Ok(0);
+    }
+
+    let config = LocationConfig::load(db_path);
+    let mut enriched = 0;
+    for candidate in candidates {
+        match enrich_mobile_location(&mut connection, &candidate, &config) {
+            Ok(true) => enriched += 1,
+            Ok(false) => {}
+            Err(error) => eprintln!(
+                "[Location] Failed to enrich mobile location for {}: {error}",
+                candidate.entry_uuid
+            ),
+        }
+    }
+    Ok(enriched)
+}
+
+fn pending_mobile_locations(connection: &Connection) -> Result<Vec<PendingMobileLocation>> {
+    let mut statement = connection.prepare(
+        "SELECT
+            pel.entry_uuid,
+            pel.latitude,
+            pel.longitude,
+            e.created_at,
+            pel.place_name,
+            pel.place_details,
+            pel.weather_temp_c,
+            pel.weather_temp_f,
+            pel.weather_condition,
+            pel.weather_icon,
+            pel.weather_humidity,
+            pel.weather_wind_kph,
+            pel.weather_fetched_at
+         FROM plugin_entry_locations pel
+         JOIN entries e ON e.uuid = pel.entry_uuid
+         WHERE LOWER(TRIM(pel.source)) = 'mobile'
+           AND (
+             pel.place_name IS NULL OR TRIM(pel.place_name) = ''
+             OR pel.weather_temp_c IS NULL
+             OR pel.weather_condition IS NULL OR TRIM(pel.weather_condition) = ''
+             OR pel.weather_fetched_at IS NULL OR TRIM(pel.weather_fetched_at) = ''
+           )",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(PendingMobileLocation {
+            entry_uuid: row.get(0)?,
+            latitude: row.get(1)?,
+            longitude: row.get(2)?,
+            entry_created_at: row.get(3)?,
+            place_name: row.get(4)?,
+            place_details: row.get(5)?,
+            weather_temp_c: row.get(6)?,
+            weather_temp_f: row.get(7)?,
+            weather_condition: row.get(8)?,
+            weather_icon: row.get(9)?,
+            weather_humidity: row.get(10)?,
+            weather_wind_kph: row.get(11)?,
+            weather_fetched_at: row.get(12)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn enrich_mobile_location(
+    connection: &mut Connection,
+    candidate: &PendingMobileLocation,
+    config: &LocationConfig,
+) -> Result<bool> {
+    let place_missing = is_blank(candidate.place_name.as_deref());
+    let weather_missing = candidate.weather_temp_c.is_none()
+        || is_blank(candidate.weather_condition.as_deref())
+        || is_blank(candidate.weather_fetched_at.as_deref());
+    let geocode = if place_missing {
+        resolve_mobile_place(connection, candidate.latitude, candidate.longitude, config)?
+    } else {
+        None
+    };
+    let weather = if weather_missing {
+        resolve_mobile_weather(
+            candidate.latitude,
+            candidate.longitude,
+            &candidate.entry_created_at,
+            config,
+        )
+    } else {
+        None
+    };
+
+    if geocode.is_none() && weather.is_none() {
+        return Ok(false);
+    }
+
+    let place_name = geocode
+        .as_ref()
+        .map(|value| value.place_name.clone())
+        .or_else(|| candidate.place_name.clone());
+    let place_details = geocode
+        .as_ref()
+        .and_then(|value| value.place_details.clone())
+        .or_else(|| candidate.place_details.clone());
+    let weather_fetched_at = weather
+        .as_ref()
+        .map(|_| Local::now().format("%Y-%m-%d %H:%M").to_string())
+        .or_else(|| candidate.weather_fetched_at.clone());
+    let created_at = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
+    let tx = connection.transaction()?;
+    tx.execute(
+        "UPDATE plugin_entry_locations
+         SET place_name = ?2,
+             place_details = ?3,
+             weather_temp_c = ?4,
+             weather_temp_f = ?5,
+             weather_condition = ?6,
+             weather_icon = ?7,
+             weather_humidity = ?8,
+             weather_wind_kph = ?9,
+             weather_fetched_at = ?10,
+             created_at = ?11
+         WHERE entry_uuid = ?1",
+        params![
+            candidate.entry_uuid,
+            place_name,
+            place_details,
+            weather
+                .as_ref()
+                .and_then(|value| value.temp_c)
+                .or(candidate.weather_temp_c),
+            weather
+                .as_ref()
+                .and_then(|value| value.temp_f)
+                .or(candidate.weather_temp_f),
+            weather
+                .as_ref()
+                .and_then(|value| value.condition.clone())
+                .or_else(|| candidate.weather_condition.clone()),
+            weather
+                .as_ref()
+                .and_then(|value| value.icon.clone())
+                .or_else(|| candidate.weather_icon.clone()),
+            weather
+                .as_ref()
+                .and_then(|value| value.humidity)
+                .or(candidate.weather_humidity),
+            weather
+                .as_ref()
+                .and_then(|value| value.wind_kph)
+                .or(candidate.weather_wind_kph),
+            weather_fetched_at,
+            created_at,
+        ],
+    )?;
+    tx.commit()?;
+    Ok(true)
+}
+
+fn resolve_mobile_place(
+    connection: &Connection,
+    latitude: f64,
+    longitude: f64,
+    config: &LocationConfig,
+) -> Result<Option<GeocodeData>> {
+    #[cfg(test)]
+    if let Some(fixture) = TEST_AUTO_CAPTURE.with(|slot| slot.borrow().clone()) {
+        return Ok(fixture.place_name.map(|place_name| GeocodeData {
+            place_name,
+            place_details: None,
+        }));
+    }
+
+    let (place_name, place_details) =
+        resolve_precise_place_name(connection, latitude, longitude, config)?;
+    Ok(place_name.map(|place_name| GeocodeData {
+        place_name,
+        place_details,
+    }))
+}
+
+fn resolve_mobile_weather(
+    latitude: f64,
+    longitude: f64,
+    entry_created_at: &str,
+    config: &LocationConfig,
+) -> Option<WeatherData> {
+    #[cfg(test)]
+    if let Some(fixture) = TEST_AUTO_CAPTURE.with(|slot| slot.borrow().clone()) {
+        return fixture.weather_temp_c.map(|temp_c| WeatherData {
+            temp_c: Some(temp_c),
+            temp_f: Some(round1(temp_c * 9.0 / 5.0 + 32.0)),
+            condition: fixture.weather_condition,
+            icon: None,
+            humidity: None,
+            wind_kph: None,
+        });
+    }
+
+    if let Some(target) = parse_entry_time(entry_created_at) {
+        return open_meteo_historical_weather(latitude, longitude, target);
+    }
+    get_weather(latitude, longitude, None, config)
 }
 
 pub(crate) fn auto_capture_location(db_path: &Path, entry_uuid: &str) -> Result<bool> {
@@ -330,6 +580,22 @@ fn table_columns(connection: &Connection, table_name: &str) -> Result<HashSet<St
     Ok(rows.collect::<rusqlite::Result<HashSet<_>>>()?)
 }
 
+fn table_exists(connection: &Connection, table_name: &str) -> Result<bool> {
+    connection
+        .query_row(
+            "SELECT EXISTS (
+                SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1
+            )",
+            [table_name],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(Into::into)
+}
+
+fn is_blank(value: Option<&str>) -> bool {
+    value.is_none_or(|value| value.trim().is_empty())
+}
+
 fn resolve_place_name(
     connection: &Connection,
     lat: f64,
@@ -341,6 +607,23 @@ fn resolve_place_name(
     }
 
     let Some(geocode) = reverse_geocode(lat, lon) else {
+        return Ok((None, None));
+    };
+    cache_geocode(connection, lat, lon, &geocode)?;
+    Ok((Some(geocode.place_name), geocode.place_details))
+}
+
+fn resolve_precise_place_name(
+    connection: &Connection,
+    lat: f64,
+    lon: f64,
+    config: &LocationConfig,
+) -> Result<(Option<String>, Option<String>)> {
+    if let Some(cached) = cached_geocode(connection, lat, lon, config)? {
+        return Ok((Some(cached.place_name), cached.place_details));
+    }
+
+    let Some(geocode) = reverse_geocode_at_zoom(lat, lon, 16, true) else {
         return Ok((None, None));
     };
     cache_geocode(connection, lat, lon, &geocode)?;
@@ -420,6 +703,10 @@ fn geocode_place(place_name: &str) -> Option<(f64, f64)> {
 }
 
 fn reverse_geocode(lat: f64, lon: f64) -> Option<GeocodeData> {
+    reverse_geocode_at_zoom(lat, lon, 10, false)
+}
+
+fn reverse_geocode_at_zoom(lat: f64, lon: f64, zoom: i64, precise: bool) -> Option<GeocodeData> {
     let client = http_client().ok()?;
     let url = url_with_params(
         &format!("{NOMINATIM_BASE_URL}/reverse"),
@@ -428,7 +715,8 @@ fn reverse_geocode(lat: f64, lon: f64) -> Option<GeocodeData> {
             ("lon", lon.to_string()),
             ("format", "json".to_string()),
             ("addressdetails", "1".to_string()),
-            ("zoom", "10".to_string()),
+            ("zoom", zoom.to_string()),
+            ("accept-language", "en".to_string()),
         ],
     )?;
     let response = client
@@ -448,7 +736,11 @@ fn reverse_geocode(lat: f64, lon: f64) -> Option<GeocodeData> {
         .get("address")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    let place_name = build_place_name(&address);
+    let place_name = if precise {
+        build_precise_place_name(&address)
+    } else {
+        build_place_name(&address)
+    };
     let place_details = json!({
         "place_name": place_name,
         "city": address_value(&address, &["city", "town", "village", "municipality"]),
@@ -908,6 +1200,31 @@ fn build_place_name(address: &JsonValue) -> String {
     }
 }
 
+fn build_precise_place_name(address: &JsonValue) -> String {
+    let mut parts = Vec::new();
+    if let Some(place) = address_value(address, &["road", "pedestrian", "neighbourhood", "suburb"])
+    {
+        push_unique_place_part(&mut parts, place);
+    }
+    if let Some(city) = address_value(address, &["city", "town", "village", "municipality"]) {
+        push_unique_place_part(&mut parts, city);
+    }
+    if let Some(country) = address.get("country").and_then(JsonValue::as_str) {
+        push_unique_place_part(&mut parts, country.to_string());
+    }
+    if parts.is_empty() {
+        build_place_name(address)
+    } else {
+        parts.join(", ")
+    }
+}
+
+fn push_unique_place_part(parts: &mut Vec<String>, value: String) {
+    if !parts.iter().any(|part| part.eq_ignore_ascii_case(&value)) {
+        parts.push(value);
+    }
+}
+
 fn address_value(address: &JsonValue, keys: &[&str]) -> Option<String> {
     keys.iter()
         .find_map(|key| address.get(*key).and_then(JsonValue::as_str))
@@ -1036,5 +1353,17 @@ mod tests {
             "country_code": "no"
         });
         assert_eq!(build_place_name(&address), "Tromso, Norway");
+
+        let address = json!({
+            "road": "Utsikten",
+            "suburb": "Stakkevollan",
+            "city": "Tromso",
+            "country": "Norway",
+            "country_code": "no"
+        });
+        assert_eq!(
+            build_precise_place_name(&address),
+            "Utsikten, Tromso, Norway"
+        );
     }
 }

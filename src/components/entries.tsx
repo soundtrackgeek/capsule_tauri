@@ -198,9 +198,9 @@ export function EntryDetail({
                 : "Wind n/a"}
             </p>
           )}
-          {(entry.location.weatherIcon || entry.location.weatherFetchedAt || entry.location.source) && (
+          {(entry.location.weatherIcon || entry.location.weatherFetchedAt) && (
             <p>
-              {[entry.location.weatherIcon, entry.location.weatherFetchedAt, entry.location.source]
+              {[entry.location.weatherIcon, entry.location.weatherFetchedAt]
                 .filter(Boolean)
                 .join(" / ")}
             </p>

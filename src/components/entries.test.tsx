@@ -103,6 +103,7 @@ describe("entry components", () => {
 
     expect(screen.getByRole("heading", { name: "Test entry" })).toBeInTheDocument();
     expect(screen.getByText("Tromso, Norway")).toBeInTheDocument();
+    expect(screen.queryByText("manual")).not.toBeInTheDocument();
 
     await user.click(screen.getByTitle("Star"));
     await user.click(screen.getByRole("button", { name: "Edit" }));

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.29.4 - 2026-07-21
+
+### Fixed
+
+- Fixed mobile Gist imports to reverse-geocode GPS coordinates at street level
+  and attach Open-Meteo weather for each note's saved timestamp, including
+  automatic retry/backfill for mobile locations imported without metadata.
+
+### Changed
+
+- Kept `mobile` location provenance in stored and synced data for future
+  analytics while removing the source label from the entry Location card.
+- Bumped the app version to 0.29.4.
+
 ## 0.29.3 - 2026-07-21
 
 ### Fixed
