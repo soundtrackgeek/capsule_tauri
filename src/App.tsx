@@ -70,6 +70,7 @@ import {
   createEntry,
   createBackup,
   createDebugBundle,
+  createMood,
   clearAiApiKey,
   createTemplate,
   deleteCapsuleConfigValue,
@@ -127,6 +128,7 @@ import {
   setPathSettings,
   suggestAiEntryMetadata,
   updateAiSettings,
+  updateMoodSentiment,
   starEntry,
   startAiChatStream,
   suggestAiMetadata,
@@ -6095,7 +6097,15 @@ function SettingsView({
     defaultLocationName: "",
   });
   const [tagDraft, setTagDraft] = useState({ from: "", to: "", source: "", target: "", deleteName: "" });
-  const [moodDraft, setMoodDraft] = useState({ from: "", to: "", deleteName: "" });
+  const [moodDraft, setMoodDraft] = useState({
+    createName: "",
+    createSentiment: "0",
+    editName: "",
+    editSentiment: "0",
+    from: "",
+    to: "",
+    deleteName: "",
+  });
   const [templateDraft, setTemplateDraft] = useState({
     slug: "",
     name: "",
@@ -6182,6 +6192,29 @@ function SettingsView({
       ? `Last checked ${formatDateTime(updateCheckedAt)}`
       : "Not checked yet";
   const canRunSyncFromSettings = Boolean(pathDraft.syncPath.trim() || pathDraft.githubGistId.trim());
+  const createMoodScore = Number(moodDraft.createSentiment);
+  const editMoodScore = Number(moodDraft.editSentiment);
+  const createMoodScoreValid =
+    moodDraft.createSentiment.trim() !== "" &&
+    Number.isFinite(createMoodScore) &&
+    createMoodScore >= -1 &&
+    createMoodScore <= 1;
+  const editMoodScoreValid =
+    moodDraft.editSentiment.trim() !== "" &&
+    Number.isFinite(editMoodScore) &&
+    editMoodScore >= -1 &&
+    editMoodScore <= 1;
+  const chooseMoodForSentiment = (name: string) => {
+    const selected = moodCatalog?.moods.find((mood) => mood.name === name);
+    setMoodDraft((draft) => ({
+      ...draft,
+      editName: name,
+      editSentiment:
+        selected?.sentimentScore === null || selected?.sentimentScore === undefined
+          ? "0"
+          : String(selected.sentimentScore),
+    }));
+  };
   const savePathSettingsDraft = () =>
     onSavePathSettings({
       databasePath: pathDraft.databasePath,
@@ -7110,21 +7143,178 @@ function SettingsView({
       </Panel>
 
       <Panel icon={<Sparkles size={20} />} title="Moods">
+        <p className="mood-manager-copy">
+          Build a reusable mood list and tune how each mood contributes to Analytics and the
+          Writing Calendar. Catalog changes sync with your other Capsule computers.
+        </p>
         <div className="catalog-cloud">
-          {(moodCatalog?.moods ?? []).slice(0, 28).map((mood) => (
-            <span className="mood-chip" key={mood.name}>
-              {mood.label} ({mood.entryCount})
-            </span>
+          {(moodCatalog?.moods ?? []).map((mood) => (
+            <button
+              aria-label={`Edit ${mood.label} sentiment`}
+              className={`mood-chip mood-chip--button${
+                moodDraft.editName === mood.name ? " mood-chip--selected" : ""
+              }`}
+              key={mood.name}
+              onClick={() => chooseMoodForSentiment(mood.name)}
+              title={`${mood.label}: ${formatMoodSentiment(mood.sentimentScore)} sentiment`}
+              type="button"
+            >
+              <span>
+                {mood.label} ({mood.entryCount})
+              </span>
+              <small>{formatMoodSentiment(mood.sentimentScore)}</small>
+            </button>
           ))}
         </div>
+        {(moodCatalog?.moods.length ?? 0) === 0 && (
+          <p className="empty-copy">No moods yet. Add the first reusable mood below.</p>
+        )}
+
+        <div className="mood-manager-grid">
+          <section className="mood-manager-card" aria-labelledby="add-mood-heading">
+            <h4 id="add-mood-heading">
+              <Plus size={16} />
+              Add mood
+            </h4>
+            <p>Create a mood even before it appears on an entry.</p>
+            <div className="mood-manager-form">
+              <label className="field">
+                <span>Mood name</span>
+                <input
+                  onChange={(event) =>
+                    setMoodDraft({ ...moodDraft, createName: event.target.value })
+                  }
+                  placeholder="e.g. reflective"
+                  value={moodDraft.createName}
+                />
+              </label>
+              <label className="field">
+                <span>Sentiment score</span>
+                <input
+                  aria-describedby="mood-score-help"
+                  max="1"
+                  min="-1"
+                  onChange={(event) =>
+                    setMoodDraft({ ...moodDraft, createSentiment: event.target.value })
+                  }
+                  step="0.01"
+                  type="number"
+                  value={moodDraft.createSentiment}
+                />
+              </label>
+              <button
+                className="secondary-button"
+                disabled={
+                  dataToolMutating || !moodDraft.createName.trim() || !createMoodScoreValid
+                }
+                onClick={() =>
+                  onRunMutation(async () => {
+                    const response = await createMood({
+                      name: moodDraft.createName,
+                      sentimentScore: createMoodScore,
+                    });
+                    const createdName = moodDraft.createName.trim().toLowerCase();
+                    setMoodDraft((draft) => ({
+                      ...draft,
+                      createName: "",
+                      createSentiment: "0",
+                      editName: createdName,
+                      editSentiment: String(createMoodScore),
+                    }));
+                    return `Added mood with backup: ${response.audit.backupPath}`;
+                  })
+                }
+                type="button"
+              >
+                <Plus size={17} />
+                Add
+              </button>
+            </div>
+          </section>
+
+          <section className="mood-manager-card" aria-labelledby="edit-sentiment-heading">
+            <h4 id="edit-sentiment-heading">
+              <Edit3 size={16} />
+              Edit sentiment
+            </h4>
+            <p>Select a mood chip or choose one from the list.</p>
+            <div className="mood-manager-form">
+              <label className="field">
+                <span>Mood</span>
+                <select
+                  onChange={(event) => chooseMoodForSentiment(event.target.value)}
+                  value={moodDraft.editName}
+                >
+                  <option value="">Select a mood</option>
+                  {(moodCatalog?.moods ?? []).map((mood) => (
+                    <option key={mood.name} value={mood.name}>
+                      {mood.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Sentiment score</span>
+                <input
+                  aria-describedby="mood-score-help"
+                  disabled={!moodDraft.editName}
+                  max="1"
+                  min="-1"
+                  onChange={(event) =>
+                    setMoodDraft({ ...moodDraft, editSentiment: event.target.value })
+                  }
+                  step="0.01"
+                  type="number"
+                  value={moodDraft.editSentiment}
+                />
+              </label>
+              <button
+                className="secondary-button"
+                disabled={
+                  dataToolMutating || !moodDraft.editName.trim() || !editMoodScoreValid
+                }
+                onClick={() =>
+                  onRunMutation(async () => {
+                    const response = await updateMoodSentiment({
+                      name: moodDraft.editName,
+                      sentimentScore: editMoodScore,
+                    });
+                    return `Updated mood sentiment with backup: ${response.audit.backupPath}`;
+                  })
+                }
+                type="button"
+              >
+                <Save size={17} />
+                Save
+              </button>
+            </div>
+          </section>
+        </div>
+        <p className="mood-score-help" id="mood-score-help">
+          −1 is very negative, 0 is neutral, and +1 is very positive.
+        </p>
+
         <div className="settings-form-grid">
           <label className="field">
             <span>Rename from</span>
-            <input onChange={(event) => setMoodDraft({ ...moodDraft, from: event.target.value })} value={moodDraft.from} />
+            <select
+              onChange={(event) => setMoodDraft({ ...moodDraft, from: event.target.value })}
+              value={moodDraft.from}
+            >
+              <option value="">Select a mood</option>
+              {(moodCatalog?.moods ?? []).map((mood) => (
+                <option key={mood.name} value={mood.name}>
+                  {mood.label}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="field">
             <span>Rename to</span>
-            <input onChange={(event) => setMoodDraft({ ...moodDraft, to: event.target.value })} value={moodDraft.to} />
+            <input
+              onChange={(event) => setMoodDraft({ ...moodDraft, to: event.target.value })}
+              value={moodDraft.to}
+            />
           </label>
           <button
             className="secondary-button"
@@ -7132,7 +7322,12 @@ function SettingsView({
             onClick={() =>
               onRunMutation(async () => {
                 const response = await renameMood({ from: moodDraft.from, to: moodDraft.to });
-                setMoodDraft({ ...moodDraft, from: "", to: "" });
+                setMoodDraft((draft) => ({
+                  ...draft,
+                  editName: draft.editName === moodDraft.from ? "" : draft.editName,
+                  from: "",
+                  to: "",
+                }));
                 return `Renamed mood with backup: ${response.audit.backupPath}`;
               })
             }
@@ -7143,8 +7338,20 @@ function SettingsView({
         </div>
         <div className="settings-form-grid settings-form-grid--delete">
           <label className="field">
-            <span>Clear mood</span>
-            <input onChange={(event) => setMoodDraft({ ...moodDraft, deleteName: event.target.value })} value={moodDraft.deleteName} />
+            <span>Delete mood</span>
+            <select
+              onChange={(event) =>
+                setMoodDraft({ ...moodDraft, deleteName: event.target.value })
+              }
+              value={moodDraft.deleteName}
+            >
+              <option value="">Select a mood</option>
+              {(moodCatalog?.moods ?? []).map((mood) => (
+                <option key={mood.name} value={mood.name}>
+                  {mood.label} ({mood.entryCount})
+                </option>
+              ))}
+            </select>
           </label>
           <button
             className="secondary-button"
@@ -7152,16 +7359,24 @@ function SettingsView({
             onClick={() =>
               onRunMutation(async () => {
                 const response = await deleteMood({ name: moodDraft.deleteName });
-                setMoodDraft({ ...moodDraft, deleteName: "" });
+                setMoodDraft((draft) => ({
+                  ...draft,
+                  deleteName: "",
+                  editName: draft.editName === moodDraft.deleteName ? "" : draft.editName,
+                }));
                 return `Cleared mood with backup: ${response.audit.backupPath}`;
               })
             }
             type="button"
           >
             <Trash2 size={17} />
-            Clear
+            Delete
           </button>
         </div>
+        <p className="mood-delete-help">
+          Deleting a mood clears it from matching entries and syncs that removal to other
+          computers.
+        </p>
       </Panel>
 
       <Panel icon={<BookOpen size={20} />} title="Template Library">

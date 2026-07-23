@@ -453,6 +453,8 @@ Core tables and concepts from the current codebase:
 - `library_prompts`
 - `sync_template_tombstones`
 - `sync_prompt_tombstones`
+- `mood_catalog`
+- `sync_mood_tombstones`
 - `ai_conversations`
 - `ai_conversation_messages`
 - `sync_ai_conversation_tombstones`

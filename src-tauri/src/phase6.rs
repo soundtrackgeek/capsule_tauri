@@ -1106,6 +1106,7 @@ fn sync_tombstone_tables() -> Vec<&'static str> {
         "sync_location_tombstones",
         "sync_template_tombstones",
         "sync_prompt_tombstones",
+        "sync_mood_tombstones",
         "sync_ai_conversation_tombstones",
     ]
 }

@@ -80,9 +80,11 @@ import type {
   LibraryTemplateUpdate,
   LocationConfigUpdateRequest,
   MoodCatalogResponse,
+  MoodCreateRequest,
   MoodDeleteRequest,
   MoodMutationResponse,
   MoodRenameRequest,
+  MoodSentimentUpdateRequest,
   PathSettingsResponse,
   PathSettingsUpdateRequest,
   RandomEntryFilters,
@@ -326,10 +328,10 @@ let mockTags: TagCatalogResponse = {
 
 let mockMoods: MoodCatalogResponse = {
   moods: [
-    { name: "calm", label: "Calm", entryCount: 1 },
-    { name: "excited", label: "Excited", entryCount: 1 },
-    { name: "focused", label: "Focused", entryCount: 1 },
-    { name: "happy", label: "Happy", entryCount: 1 },
+    { name: "calm", label: "Calm", entryCount: 1, sentimentScore: 0.0 },
+    { name: "excited", label: "Excited", entryCount: 1, sentimentScore: 1.0 },
+    { name: "focused", label: "Focused", entryCount: 1, sentimentScore: 0.0 },
+    { name: "happy", label: "Happy", entryCount: 1, sentimentScore: 1.0 },
   ],
   warnings: [],
 };
@@ -1645,6 +1647,68 @@ export async function listMoods(): Promise<MoodCatalogResponse> {
   }
 }
 
+export async function createMood(input: MoodCreateRequest): Promise<MoodMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<MoodMutationResponse>("create_mood", { input });
+    }
+
+    await pause(220);
+    const name = input.name.trim().toLowerCase();
+    if (!name) {
+      throw new Error("Name cannot be empty.");
+    }
+    if (!Number.isFinite(input.sentimentScore) || input.sentimentScore < -1 || input.sentimentScore > 1) {
+      throw new Error("Sentiment score must be a number between -1.0 and 1.0.");
+    }
+    if (mockMoods.moods.some((mood) => mood.name.toLowerCase() === name)) {
+      throw new Error(`Mood '${name}' already exists. Edit its sentiment instead.`);
+    }
+    mockMoods = rebuildMockMoodUsage([
+      ...mockMoods.moods,
+      {
+        name,
+        label: labelize(name),
+        entryCount: 0,
+        sentimentScore: input.sentimentScore,
+      },
+    ]);
+    return { moods: mockMoods.moods, audit: mockAudit("mood.create") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function updateMoodSentiment(
+  input: MoodSentimentUpdateRequest,
+): Promise<MoodMutationResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<MoodMutationResponse>("update_mood_sentiment", { input });
+    }
+
+    await pause(220);
+    const name = input.name.trim().toLowerCase();
+    if (!Number.isFinite(input.sentimentScore) || input.sentimentScore < -1 || input.sentimentScore > 1) {
+      throw new Error("Sentiment score must be a number between -1.0 and 1.0.");
+    }
+    if (!mockMoods.moods.some((mood) => mood.name.toLowerCase() === name)) {
+      throw new Error(`Mood '${name}' was not found.`);
+    }
+    mockMoods = {
+      ...mockMoods,
+      moods: mockMoods.moods.map((mood) =>
+        mood.name.toLowerCase() === name
+          ? { ...mood, sentimentScore: input.sentimentScore }
+          : mood,
+      ),
+    };
+    return { moods: mockMoods.moods, audit: mockAudit("mood.sentiment.update") };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
 export async function renameMood(input: MoodRenameRequest): Promise<MoodMutationResponse> {
   try {
     if (runningInTauri()) {
@@ -1654,12 +1718,18 @@ export async function renameMood(input: MoodRenameRequest): Promise<MoodMutation
     await pause(220);
     const from = input.from.trim().toLowerCase();
     const to = input.to.trim().toLowerCase();
+    const sourceMood = mockMoods.moods.find((mood) => mood.name.toLowerCase() === from);
+    const targetMood = mockMoods.moods.find((mood) => mood.name.toLowerCase() === to);
     mockEntries = mockEntries.map((entry) =>
       entry.mood?.toLowerCase() === from
         ? { ...entry, mood: to, moodInfo: { name: to, label: labelize(to) } }
         : entry,
     );
-    mockMoods = rebuildMockMoodUsage();
+    const seedMoods = mockMoods.moods.filter((mood) => mood.name.toLowerCase() !== from);
+    if (!targetMood && sourceMood) {
+      seedMoods.push({ ...sourceMood, name: to, label: labelize(to) });
+    }
+    mockMoods = rebuildMockMoodUsage(seedMoods);
     return { moods: mockMoods.moods, audit: mockAudit("mood.rename") };
   } catch (error) {
     throw normalizeError(error);
@@ -1679,7 +1749,9 @@ export async function deleteMood(input: MoodDeleteRequest): Promise<MoodMutation
         ? { ...entry, mood: null, moodInfo: { name: null, label: null } }
         : entry,
     );
-    mockMoods = rebuildMockMoodUsage();
+    mockMoods = rebuildMockMoodUsage(
+      mockMoods.moods.filter((mood) => mood.name.toLowerCase() !== name),
+    );
     return { moods: mockMoods.moods, audit: mockAudit("mood.delete") };
   } catch (error) {
     throw normalizeError(error);
@@ -4632,7 +4704,11 @@ function writingWordCount(value: string) {
 
 function moodSentimentScore(mood: string | null | undefined) {
   const normalized = mood?.trim().toLowerCase();
-  return normalized ? moodSentimentScores[normalized] ?? null : null;
+  if (!normalized) {
+    return null;
+  }
+  const catalogMood = mockMoods.moods.find((item) => item.name.toLowerCase() === normalized);
+  return catalogMood ? catalogMood.sentimentScore : moodSentimentScores[normalized] ?? null;
 }
 
 function mockStreak(entries: Entry[]) {
@@ -4874,18 +4950,26 @@ function rebuildMockTagUsage(seedTags: TagCatalogResponse["tags"] = mockTags.tag
   };
 }
 
-function rebuildMockMoodUsage(): MoodCatalogResponse {
-  const counts = new Map<string, number>();
+function rebuildMockMoodUsage(seedMoods: MoodCatalogResponse["moods"] = mockMoods.moods): MoodCatalogResponse {
+  const moodsByName = new Map(
+    seedMoods.map((mood) => [mood.name.toLowerCase(), { ...mood, entryCount: 0 }]),
+  );
   for (const entry of mockEntries) {
     if (!entry.mood) {
       continue;
     }
-    counts.set(entry.mood, (counts.get(entry.mood) ?? 0) + 1);
+    const name = entry.mood.toLowerCase();
+    const current = moodsByName.get(name) ?? {
+      name,
+      label: labelize(name),
+      entryCount: 0,
+      sentimentScore: moodSentimentScores[name] ?? null,
+    };
+    moodsByName.set(name, { ...current, entryCount: current.entryCount + 1 });
   }
   return {
     ...mockMoods,
-    moods: [...counts.entries()]
-      .map(([name, entryCount]) => ({ name, label: labelize(name), entryCount }))
+    moods: [...moodsByName.values()]
       .sort((left, right) => left.name.localeCompare(right.name)),
   };
 }

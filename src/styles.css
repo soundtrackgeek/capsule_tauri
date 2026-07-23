@@ -2564,6 +2564,142 @@ button.entry-card {
   gap: 7px;
 }
 
+.mood-manager-copy {
+  max-width: 780px;
+  margin: 0 0 14px;
+  color: #66756d;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.mood-chip--button {
+  border: 1px solid transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.mood-chip--button:hover {
+  border-color: #9d8069;
+}
+
+.mood-chip--button:focus-visible,
+.mood-chip--selected {
+  border-color: #543a27;
+  outline: 2px solid rgba(84, 58, 39, 0.2);
+  outline-offset: 2px;
+}
+
+.mood-chip--button small {
+  border-left: 1px solid currentColor;
+  padding-left: 6px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.72;
+}
+
+.mood-manager-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.mood-manager-card {
+  min-width: 0;
+  border: 1px solid #dfe5e0;
+  border-radius: 10px;
+  background: #f8faf8;
+  padding: 14px;
+}
+
+.mood-manager-card h4 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.mood-manager-card > p,
+.mood-score-help,
+.mood-delete-help {
+  color: #66756d;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.mood-manager-card > p {
+  margin: 5px 0 0;
+}
+
+.mood-manager-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px;
+  align-items: stretch;
+  margin-top: 12px;
+}
+
+.mood-manager-form .secondary-button {
+  justify-content: center;
+}
+
+.mood-score-help {
+  margin: 8px 0 0;
+}
+
+.mood-delete-help {
+  margin: 7px 0 0;
+}
+
+:root[data-theme="dark"] .mood-manager-copy,
+:root[data-theme="dark"] .mood-manager-card > p,
+:root[data-theme="dark"] .mood-score-help,
+:root[data-theme="dark"] .mood-delete-help {
+  color: #aab8ae;
+}
+
+:root[data-theme="dark"] .mood-manager-card {
+  border-color: #34433a;
+  background: #141a17;
+}
+
+:root[data-theme="dark"] .mood-chip--button:hover,
+:root[data-theme="dark"] .mood-chip--button:focus-visible,
+:root[data-theme="dark"] .mood-chip--selected {
+  border-color: #b9a28f;
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"])
+  .mood-manager-card {
+  border-color: var(--retro-card-border);
+  border-radius: 0;
+  background: var(--retro-control);
+  box-shadow: var(--retro-shadow);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"])
+  .mood-manager-copy,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"])
+  .mood-manager-card
+  > p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"])
+  .mood-score-help,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"])
+  .mood-delete-help {
+  color: var(--retro-muted);
+}
+
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"])
+  .mood-chip--button:hover,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"])
+  .mood-chip--button:focus-visible,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"])
+  .mood-chip--selected {
+  border-color: var(--retro-active-bg);
+  outline-color: var(--retro-active-bg);
+}
+
 .toolbar-panel {
   display: flex;
   align-items: end;
@@ -4689,6 +4825,8 @@ button.entry-card {
     .ai-secondary-grid,
     .phase6-grid,
     .phase6-grid--three,
+    .mood-manager-grid,
+    .mood-manager-form,
     .settings-form-grid,
     .ai-key-row,
     .ai-key-actions,

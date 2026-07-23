@@ -604,6 +604,7 @@ pub struct MoodUsage {
     pub name: String,
     pub label: String,
     pub entry_count: i64,
+    pub sentiment_score: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -618,6 +619,20 @@ pub struct MoodCatalogResponse {
 pub struct MoodRenameRequest {
     pub from: String,
     pub to: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoodCreateRequest {
+    pub name: String,
+    pub sentiment_score: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoodSentimentUpdateRequest {
+    pub name: String,
+    pub sentiment_score: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

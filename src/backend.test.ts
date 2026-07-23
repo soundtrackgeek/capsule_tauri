@@ -3,13 +3,16 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   cancelAiChatStream,
   clearAiApiKey,
+  createMood,
   deleteAiConversation,
+  deleteMood,
   getAiConversation,
   getAiProviderStatus,
   getAiSettings,
   getCapsuleConfig,
   getPathSettings,
   listAiConversations,
+  listMoods,
   previewAiChatContext,
   retryAiChatStream,
   setAiApiKey,
@@ -18,7 +21,35 @@ import {
   startAiChatStream,
   subscribeAiChatEvents,
   updateAiSettings,
+  updateMoodSentiment,
 } from "./backend";
+
+describe("mock mood catalog", () => {
+  test("creates a reusable mood and edits its sentiment", async () => {
+    const name = "reflective-test";
+    const existing = await listMoods();
+    if (existing.moods.some((mood) => mood.name === name)) {
+      await deleteMood({ name });
+    }
+
+    try {
+      const created = await createMood({ name, sentimentScore: 0.35 });
+      expect(created.moods).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name, entryCount: 0, sentimentScore: 0.35 }),
+        ]),
+      );
+
+      const updated = await updateMoodSentiment({ name, sentimentScore: 0.7 });
+      expect(updated.moods.find((mood) => mood.name === name)?.sentimentScore).toBe(0.7);
+    } finally {
+      const moods = await listMoods();
+      if (moods.moods.some((mood) => mood.name === name)) {
+        await deleteMood({ name });
+      }
+    }
+  });
+});
 
 describe("mock Windows startup setting", () => {
   afterEach(async () => {

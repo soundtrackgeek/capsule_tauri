@@ -82,7 +82,9 @@ explicit capability-gated AI/sync surfaces:
   sidebar-density and close-to-tray settings stored outside the journal
   database.
 - Tag rename, merge, and delete tools guarded by verified database backups.
-- Mood rename and clear tools guarded by verified database backups.
+- Backup-guarded mood management for creating reusable moods, editing sentiment
+  scores from -1.0 to +1.0, renaming moods while preserving sentiment, and
+  deleting moods from the catalog and matching entries.
 - Template and prompt library management for custom rows, with built-in rows
   limited to enable/disable actions.
 - Markdown and JSON exports for selected entries and current search result sets.
@@ -118,10 +120,12 @@ explicit capability-gated AI/sync surfaces:
   testing, debug log notes, and a ZIP diagnostics bundle for support reports.
 - Native Capsule-compatible shared-folder sync using `capsule_sync.json`,
   `capsule_threads_sync.json`, and `capsule_ai_chats_sync.json`, including entry,
-  image metadata, location, custom library, thread, AI chat, and tombstone
-  merging. Sync protocol v5 distinguishes omitted legacy metadata from explicit
-  clears, so an older client cannot erase titles, summaries, tags, moods, or
-  visibility flags merely because it does not export those fields.
+  image metadata, location, custom library, custom mood sentiments, thread, AI
+  chat, and tombstone merging. Sync protocol v6 adds last-write-wins mood catalog
+  rows and mood deletion tombstones while retaining v5's distinction between
+  omitted legacy metadata and explicit clears, so an older client cannot erase
+  titles, summaries, tags, moods, or visibility flags merely because it does not
+  export those fields.
 - Sync controls in Settings for reviewed manual runs, configurable automatic
   sync intervals, shared-folder paths, and per-user GitHub Gist ID/token links.
   The Sync page reports status, history, tombstone counts, and Gist pull/push
@@ -199,8 +203,10 @@ Cover Wall image path from Settings, then `local-assets/covers`.
 Cover Wall thumbnails are generated on demand and cached under the local app
 settings directory, for example `%APPDATA%\Capsule\cover_thumbnails` on
 Windows or `$HOME/.capsule/cover_thumbnails` on macOS.
-Mood sentiment scoring for Analytics and Calendar uses the bundled legacy mood
-scale in `src-tauri/mood_sentiment.json`.
+Mood sentiment scoring for Analytics and Calendar starts with the bundled legacy
+scale in `src-tauri/mood_sentiment.json`. Sentiment edits and newly created moods
+are stored in the journal database, override those defaults, and sync through
+the `moods` section of `capsule_sync.json`.
 
 Cloud AI Settings write non-secret defaults to Capsule `config.json` with a
 backup before every save: `cloud_provider`, `gemini_model`, `openai_model`,

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashMap, HashSet},
     env, fs,
     path::{Path, PathBuf},
 };
@@ -16,12 +16,12 @@ use crate::{
         ExportEntriesRequest, ExportEntriesResponse, ExportFormat, LibraryListResponse,
         LibraryPrompt, LibraryPromptInput, LibraryPromptMutationResponse, LibraryPromptUpdate,
         LibraryTemplate, LibraryTemplateInput, LibraryTemplateMutationResponse,
-        LibraryTemplateUpdate, LocationConfigUpdateRequest, MoodCatalogResponse, MoodDeleteRequest,
-        MoodMutationResponse, MoodRenameRequest, MoodUsage, PathSettingsResponse,
-        PathSettingsUpdateRequest, TagCatalogResponse, TagDeleteRequest, TagMergeRequest,
-        TagMutationResponse, TagRenameRequest, TagUsage,
+        LibraryTemplateUpdate, LocationConfigUpdateRequest, MoodCatalogResponse, MoodCreateRequest,
+        MoodDeleteRequest, MoodMutationResponse, MoodRenameRequest, MoodSentimentUpdateRequest,
+        MoodUsage, PathSettingsResponse, PathSettingsUpdateRequest, TagCatalogResponse,
+        TagDeleteRequest, TagMergeRequest, TagMutationResponse, TagRenameRequest, TagUsage,
     },
-    search,
+    mood_sentiment, search,
 };
 
 const CONFIG_BACKUP_PREFIX: &str = "config_backup_";
@@ -346,34 +346,81 @@ pub fn list_moods() -> Result<MoodCatalogResponse> {
 pub(crate) fn list_moods_for_database(db_path: &Path) -> Result<MoodCatalogResponse> {
     let connection = db::open_read_only_connection(db_path)?;
     let tables = detected_tables(&connection)?;
-    if !tables.contains("entries") {
-        return Ok(MoodCatalogResponse {
-            moods: Vec::new(),
-            warnings: vec!["The entries table was not found.".to_string()],
-        });
+    let mut warnings = Vec::new();
+    let mut entries_by_mood = BTreeMap::<String, (String, i64)>::new();
+    if tables.contains("entries") {
+        let mut statement = connection.prepare(
+            "SELECT mood, COUNT(*) AS entry_count
+             FROM entries
+             WHERE mood IS NOT NULL AND trim(mood) != ''
+             GROUP BY lower(trim(mood))
+             ORDER BY lower(trim(mood)) ASC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (name, count) = row?;
+            let normalized = name.trim().to_lowercase();
+            entries_by_mood.insert(normalized.clone(), (normalized, count));
+        }
+    } else {
+        warnings.push("The entries table was not found.".to_string());
     }
 
-    let mut statement = connection.prepare(
-        "SELECT mood, COUNT(*) AS entry_count
-         FROM entries
-         WHERE mood IS NOT NULL AND trim(mood) != ''
-         GROUP BY mood
-         ORDER BY lower(mood) ASC",
-    )?;
-    let moods = statement
-        .query_map([], |row| {
-            let name: String = row.get(0)?;
-            Ok(MoodUsage {
-                label: labelize(&name),
-                name,
-                entry_count: row.get(1)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let custom_scores = if tables.contains("mood_catalog") {
+        let mut statement = connection
+            .prepare("SELECT name, sentiment_score FROM mood_catalog ORDER BY lower(name) ASC")?;
+        let scores = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+            })?
+            .collect::<rusqlite::Result<HashMap<_, _>>>()?;
+        scores
+    } else {
+        HashMap::new()
+    };
+    for name in custom_scores.keys() {
+        entries_by_mood
+            .entry(name.to_lowercase())
+            .or_insert_with(|| (name.to_lowercase(), 0));
+    }
 
-    Ok(MoodCatalogResponse {
-        moods,
-        warnings: Vec::new(),
+    let moods = entries_by_mood
+        .into_values()
+        .map(|(name, entry_count)| MoodUsage {
+            sentiment_score: custom_scores
+                .get(&name)
+                .copied()
+                .or_else(|| mood_sentiment::score_for_mood(&name)),
+            label: labelize(&name),
+            name,
+            entry_count,
+        })
+        .collect();
+
+    Ok(MoodCatalogResponse { moods, warnings })
+}
+
+pub fn create_mood(input: MoodCreateRequest) -> Result<MoodMutationResponse> {
+    let guarded = backup::with_database_backup("mood.create", move |db_path| {
+        create_mood_inner(db_path, input)?;
+        list_moods_for_database(db_path).map(|response| response.moods)
+    })?;
+    Ok(MoodMutationResponse {
+        moods: guarded.value,
+        audit: guarded.audit,
+    })
+}
+
+pub fn update_mood_sentiment(input: MoodSentimentUpdateRequest) -> Result<MoodMutationResponse> {
+    let guarded = backup::with_database_backup("mood.sentiment.update", move |db_path| {
+        update_mood_sentiment_inner(db_path, input)?;
+        list_moods_for_database(db_path).map(|response| response.moods)
+    })?;
+    Ok(MoodMutationResponse {
+        moods: guarded.value,
+        audit: guarded.audit,
     })
 }
 
@@ -752,6 +799,57 @@ fn delete_tag_inner(db_path: &Path, input: TagDeleteRequest) -> Result<()> {
     Ok(())
 }
 
+fn create_mood_inner(db_path: &Path, input: MoodCreateRequest) -> Result<()> {
+    let name = normalize_catalog_name(&input.name)?;
+    let sentiment_score = validate_sentiment_score(input.sentiment_score)?;
+    let mut connection = db::open_read_write_connection(db_path)?;
+    let tx = connection.transaction()?;
+    ensure_mood_schema(&tx)?;
+    if mood_exists(&tx, &name)? {
+        return Err(anyhow!(
+            "Mood '{name}' already exists. Edit its sentiment instead."
+        ));
+    }
+    let now = current_timestamp_seconds();
+    tx.execute(
+        "INSERT INTO mood_catalog (name, sentiment_score, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?3)",
+        params![name, sentiment_score, now],
+    )?;
+    tx.execute(
+        "DELETE FROM sync_mood_tombstones WHERE lower(name) = lower(?1)",
+        [&name],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn update_mood_sentiment_inner(db_path: &Path, input: MoodSentimentUpdateRequest) -> Result<()> {
+    let name = normalize_catalog_name(&input.name)?;
+    let sentiment_score = validate_sentiment_score(input.sentiment_score)?;
+    let mut connection = db::open_read_write_connection(db_path)?;
+    let tx = connection.transaction()?;
+    ensure_mood_schema(&tx)?;
+    if !mood_exists(&tx, &name)? {
+        return Err(anyhow!("Mood '{name}' was not found."));
+    }
+    let now = current_timestamp_seconds();
+    tx.execute(
+        "INSERT INTO mood_catalog (name, sentiment_score, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?3)
+         ON CONFLICT(name) DO UPDATE SET
+             sentiment_score = excluded.sentiment_score,
+             updated_at = excluded.updated_at",
+        params![name, sentiment_score, now],
+    )?;
+    tx.execute(
+        "DELETE FROM sync_mood_tombstones WHERE lower(name) = lower(?1)",
+        [&name],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 fn rename_mood_inner(db_path: &Path, input: MoodRenameRequest) -> Result<()> {
     let from = normalize_catalog_name(&input.from)?;
     let to = normalize_catalog_name(&input.to)?;
@@ -761,13 +859,40 @@ fn rename_mood_inner(db_path: &Path, input: MoodRenameRequest) -> Result<()> {
     let mut connection = db::open_read_write_connection(db_path)?;
     let tx = connection.transaction()?;
     ensure_entries_table(&tx)?;
-    let changed = tx.execute(
-        "UPDATE entries SET mood = ?1, updated_at = ?2 WHERE lower(mood) = lower(?3)",
-        params![to, current_timestamp_seconds(), from],
-    )?;
-    if changed == 0 {
+    ensure_mood_schema(&tx)?;
+    if !mood_exists(&tx, &from)? {
         return Err(anyhow!("Mood '{from}' was not found."));
     }
+    let target_exists = mood_exists(&tx, &to)?;
+    let source_score = effective_mood_score(&tx, &from)?;
+    let now = current_timestamp_seconds();
+    tx.execute(
+        "UPDATE entries SET mood = ?1, updated_at = ?2 WHERE lower(mood) = lower(?3)",
+        params![to, now, from],
+    )?;
+    tx.execute(
+        "DELETE FROM mood_catalog WHERE lower(name) = lower(?1)",
+        [&from],
+    )?;
+    tx.execute(
+        "INSERT INTO sync_mood_tombstones (name, deleted_at)
+         VALUES (?1, ?2)
+         ON CONFLICT(name) DO UPDATE SET deleted_at = excluded.deleted_at",
+        params![from, now],
+    )?;
+    if !target_exists {
+        if let Some(sentiment_score) = source_score {
+            tx.execute(
+                "INSERT INTO mood_catalog (name, sentiment_score, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?3)",
+                params![to, sentiment_score, now],
+            )?;
+        }
+    }
+    tx.execute(
+        "DELETE FROM sync_mood_tombstones WHERE lower(name) = lower(?1)",
+        [&to],
+    )?;
     tx.commit()?;
     Ok(())
 }
@@ -777,13 +902,25 @@ fn delete_mood_inner(db_path: &Path, input: MoodDeleteRequest) -> Result<()> {
     let mut connection = db::open_read_write_connection(db_path)?;
     let tx = connection.transaction()?;
     ensure_entries_table(&tx)?;
-    let changed = tx.execute(
-        "UPDATE entries SET mood = NULL, updated_at = ?1 WHERE lower(mood) = lower(?2)",
-        params![current_timestamp_seconds(), name],
-    )?;
-    if changed == 0 {
+    ensure_mood_schema(&tx)?;
+    if !mood_exists(&tx, &name)? {
         return Err(anyhow!("Mood '{name}' was not found."));
     }
+    let now = current_timestamp_seconds();
+    tx.execute(
+        "UPDATE entries SET mood = NULL, updated_at = ?1 WHERE lower(mood) = lower(?2)",
+        params![now, name],
+    )?;
+    tx.execute(
+        "DELETE FROM mood_catalog WHERE lower(name) = lower(?1)",
+        [&name],
+    )?;
+    tx.execute(
+        "INSERT INTO sync_mood_tombstones (name, deleted_at)
+         VALUES (?1, ?2)
+         ON CONFLICT(name) DO UPDATE SET deleted_at = excluded.deleted_at",
+        params![name, now],
+    )?;
     tx.commit()?;
     Ok(())
 }
@@ -1126,6 +1263,57 @@ fn ensure_entries_table(connection: &Connection) -> Result<()> {
     }
 }
 
+fn ensure_mood_schema(connection: &Connection) -> Result<()> {
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS mood_catalog (
+            name TEXT PRIMARY KEY COLLATE NOCASE,
+            sentiment_score REAL NOT NULL CHECK (sentiment_score >= -1.0 AND sentiment_score <= 1.0),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sync_mood_tombstones (
+            name TEXT PRIMARY KEY COLLATE NOCASE,
+            deleted_at TEXT NOT NULL
+        );
+        ",
+    )?;
+    Ok(())
+}
+
+fn mood_exists(connection: &Connection, name: &str) -> Result<bool> {
+    let catalog_exists = connection
+        .query_row(
+            "SELECT 1 FROM mood_catalog WHERE lower(name) = lower(?1) LIMIT 1",
+            [name],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if catalog_exists || !detected_tables(connection)?.contains("entries") {
+        return Ok(catalog_exists);
+    }
+    Ok(connection
+        .query_row(
+            "SELECT 1 FROM entries WHERE lower(trim(mood)) = lower(?1) LIMIT 1",
+            [name],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+fn effective_mood_score(connection: &Connection, name: &str) -> Result<Option<f64>> {
+    let custom = connection
+        .query_row(
+            "SELECT sentiment_score FROM mood_catalog WHERE lower(name) = lower(?1)",
+            [name],
+            |row| row.get::<_, f64>(0),
+        )
+        .optional()?;
+    Ok(custom.or_else(|| mood_sentiment::score_for_mood(name)))
+}
+
 fn ensure_library_schema(connection: &Connection) -> Result<()> {
     connection.execute_batch(
         "
@@ -1360,6 +1548,16 @@ fn normalize_catalog_name(value: &str) -> Result<String> {
     normalize_required(value, "Name").map(|value| value.to_lowercase())
 }
 
+fn validate_sentiment_score(value: f64) -> Result<f64> {
+    if value.is_finite() && (-1.0..=1.0).contains(&value) {
+        Ok(value)
+    } else {
+        Err(anyhow!(
+            "Sentiment score must be a number between -1.0 and 1.0."
+        ))
+    }
+}
+
 fn normalize_string(value: Option<&str>) -> Option<String> {
     value
         .map(str::trim)
@@ -1403,7 +1601,8 @@ mod tests {
     use super::*;
     use crate::models::{
         LibraryPromptInput, LibraryPromptUpdate, LibraryTemplateInput, LibraryTemplateUpdate,
-        MoodDeleteRequest, MoodRenameRequest, TagMergeRequest, TagRenameRequest,
+        MoodCreateRequest, MoodDeleteRequest, MoodRenameRequest, MoodSentimentUpdateRequest,
+        TagMergeRequest, TagRenameRequest,
     };
     use rusqlite::Connection;
 
@@ -1492,15 +1691,31 @@ mod tests {
     }
 
     #[test]
-    fn mood_rename_and_delete_update_entry_values() {
+    fn mood_catalog_create_edit_rename_and_delete_preserves_sentiment() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let db_path = create_tools_fixture(temp_dir.path());
 
+        create_mood_inner(
+            &db_path,
+            MoodCreateRequest {
+                name: "Buoyant".to_string(),
+                sentiment_score: 0.45,
+            },
+        )
+        .expect("create mood");
+        update_mood_sentiment_inner(
+            &db_path,
+            MoodSentimentUpdateRequest {
+                name: "calm".to_string(),
+                sentiment_score: 0.6,
+            },
+        )
+        .expect("update sentiment");
         rename_mood_inner(
             &db_path,
             MoodRenameRequest {
-                from: "calm".to_string(),
-                to: "steady".to_string(),
+                from: "buoyant".to_string(),
+                to: "uplifted".to_string(),
             },
         )
         .expect("rename mood");
@@ -1513,8 +1728,29 @@ mod tests {
         .expect("delete mood");
 
         let moods = list_moods_for_database(&db_path).expect("moods").moods;
-        assert!(moods.iter().any(|mood| mood.name == "steady"));
+        let calm = moods
+            .iter()
+            .find(|mood| mood.name == "calm")
+            .expect("calm mood");
+        assert_eq!(calm.sentiment_score, Some(0.6));
+        let uplifted = moods
+            .iter()
+            .find(|mood| mood.name == "uplifted")
+            .expect("renamed custom mood");
+        assert_eq!(uplifted.entry_count, 0);
+        assert_eq!(uplifted.sentiment_score, Some(0.45));
         assert!(!moods.iter().any(|mood| mood.name == "focused"));
+
+        let connection = Connection::open(&db_path).expect("database");
+        let tombstones: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sync_mood_tombstones
+                 WHERE name IN ('buoyant', 'focused')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("mood tombstones");
+        assert_eq!(tombstones, 2);
     }
 
     #[test]

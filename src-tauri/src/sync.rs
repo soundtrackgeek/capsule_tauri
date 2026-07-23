@@ -31,7 +31,7 @@ const GITHUB_API_BASE: &str = "https://api.github.com";
 const GITHUB_API_VERSION: &str = "2026-03-10";
 const GITHUB_USER_AGENT: &str = "Capsule-Tauri";
 const GITHUB_SYNC_FILES: [&str; 3] = [MAIN_SYNC_FILE, THREADS_SYNC_FILE, AI_CHATS_SYNC_FILE];
-const MAIN_SYNC_VERSION: i64 = 5;
+const MAIN_SYNC_VERSION: i64 = 6;
 const SYNC_RETRY_LIMIT: usize = 3;
 const SYNC_HISTORY_RETENTION_LIMIT: i64 = 200;
 
@@ -384,6 +384,34 @@ struct LibraryPromptPayload {
 struct DeletedLibraryItem {
     #[serde(default)]
     slug: String,
+    #[serde(default)]
+    deleted_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct MoodSyncPayload {
+    #[serde(default)]
+    moods: Vec<MoodPayload>,
+    #[serde(default)]
+    deleted_moods: Vec<DeletedMood>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct MoodPayload {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    sentiment_score: f64,
+    #[serde(default)]
+    created_at: String,
+    #[serde(default)]
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+struct DeletedMood {
+    #[serde(default)]
+    name: String,
     #[serde(default)]
     deleted_at: String,
 }
@@ -1148,6 +1176,10 @@ fn build_local_sync_payloads(
         "library".to_string(),
         serde_json::to_value(build_library_payload(&connection)?)?,
     );
+    extra.insert(
+        "moods".to_string(),
+        serde_json::to_value(build_moods_payload(&connection)?)?,
+    );
     Ok((
         build_main_payload(&connection, extra, remote_deleted_uuids)?,
         build_threads_payload(&connection)?,
@@ -1201,6 +1233,7 @@ fn run_sync_once(db_path: &Path, sync_dir: &Path) -> Result<SyncAttempt> {
     let remote_locations =
         parse_extra_payload::<LocationSyncPayload>(&remote_main.extra, "locations")?;
     let remote_library = parse_extra_payload::<LibrarySyncPayload>(&remote_main.extra, "library")?;
+    let remote_moods = parse_extra_payload::<MoodSyncPayload>(&remote_main.extra, "moods")?;
 
     let mut counts = SyncCounts::default();
     let (main_payload, thread_payload, ai_payload) = {
@@ -1219,6 +1252,9 @@ fn run_sync_once(db_path: &Path, sync_dir: &Path) -> Result<SyncAttempt> {
         if let Some(payload) = remote_library.as_ref() {
             apply_library_payload(&tx, payload, &mut counts)?;
         }
+        if let Some(payload) = remote_moods.as_ref() {
+            apply_moods_payload(&tx, payload, &mut counts)?;
+        }
         apply_threads_payload(&tx, &remote_threads, &mut counts)?;
         apply_ai_chats_payload(&tx, &remote_ai_chats, &mut counts)?;
 
@@ -1234,6 +1270,10 @@ fn run_sync_once(db_path: &Path, sync_dir: &Path) -> Result<SyncAttempt> {
         extra.insert(
             "library".to_string(),
             serde_json::to_value(build_library_payload(&tx)?)?,
+        );
+        extra.insert(
+            "moods".to_string(),
+            serde_json::to_value(build_moods_payload(&tx)?)?,
         );
         let main_payload = build_main_payload(&tx, extra, remote_main.deleted_uuids)?;
         let thread_payload = build_threads_payload(&tx)?;
@@ -2901,6 +2941,170 @@ fn build_library_payload(connection: &Connection) -> Result<LibrarySyncPayload> 
     })
 }
 
+fn ensure_mood_sync_schema(connection: &Connection) -> Result<()> {
+    connection.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS mood_catalog (
+            name TEXT PRIMARY KEY COLLATE NOCASE,
+            sentiment_score REAL NOT NULL CHECK (sentiment_score >= -1.0 AND sentiment_score <= 1.0),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sync_mood_tombstones (
+            name TEXT PRIMARY KEY COLLATE NOCASE,
+            deleted_at TEXT NOT NULL
+        );
+        ",
+    )?;
+    Ok(())
+}
+
+fn apply_moods_payload(
+    connection: &Connection,
+    payload: &MoodSyncPayload,
+    counts: &mut SyncCounts,
+) -> Result<()> {
+    if payload.moods.is_empty() && payload.deleted_moods.is_empty() {
+        return Ok(());
+    }
+
+    ensure_mood_sync_schema(connection)?;
+    let now = current_timestamp_seconds();
+    let mut added = 0;
+    let mut updated = 0;
+    let mut removed = 0;
+    let mut entry_moods_cleared = 0;
+
+    for item in payload.moods.iter() {
+        let Some(name) = normalize_string(Some(item.name.clone())).map(|name| name.to_lowercase())
+        else {
+            continue;
+        };
+        if !item.sentiment_score.is_finite() || !(-1.0..=1.0).contains(&item.sentiment_score) {
+            continue;
+        }
+        let incoming_updated = normalized_timestamp(Some(&item.updated_at), &now);
+        let created_at = normalized_timestamp(Some(&item.created_at), &incoming_updated);
+        if mood_tombstone_at(connection, &name)?
+            .is_some_and(|deleted_at| deleted_at >= incoming_updated)
+        {
+            continue;
+        }
+
+        if let Some((local_created, local_updated)) = mood_catalog_row(connection, &name)? {
+            let local_updated = normalized_timestamp(Some(&local_updated), &local_created);
+            if incoming_updated < local_updated {
+                continue;
+            }
+            connection.execute(
+                "UPDATE mood_catalog
+                 SET sentiment_score = ?1, updated_at = ?2
+                 WHERE lower(name) = lower(?3)",
+                params![item.sentiment_score, incoming_updated, name],
+            )?;
+            updated += 1;
+        } else {
+            connection.execute(
+                "INSERT INTO mood_catalog (name, sentiment_score, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![name, item.sentiment_score, created_at, incoming_updated],
+            )?;
+            added += 1;
+        }
+        connection.execute(
+            "DELETE FROM sync_mood_tombstones WHERE lower(name) = lower(?1)",
+            [&name],
+        )?;
+    }
+
+    for item in payload.deleted_moods.iter() {
+        let Some(name) = normalize_string(Some(item.name.clone())).map(|name| name.to_lowercase())
+        else {
+            continue;
+        };
+        let deleted_at = normalized_timestamp(Some(&item.deleted_at), &now);
+        if let Some((local_created, local_updated)) = mood_catalog_row(connection, &name)? {
+            let local_updated = normalized_timestamp(Some(&local_updated), &local_created);
+            if deleted_at >= local_updated {
+                removed += connection.execute(
+                    "DELETE FROM mood_catalog WHERE lower(name) = lower(?1)",
+                    [&name],
+                )? as i64;
+            }
+        }
+        if table_exists(connection, "entries")? {
+            entry_moods_cleared += connection.execute(
+                "UPDATE entries
+                 SET mood = NULL, updated_at = ?1
+                 WHERE lower(trim(mood)) = lower(?2)
+                   AND COALESCE(NULLIF(updated_at, ''), created_at) <= ?1",
+                params![deleted_at, name],
+            )? as i64;
+        }
+        connection.execute(
+            "INSERT INTO sync_mood_tombstones (name, deleted_at)
+             VALUES (?1, ?2)
+             ON CONFLICT(name) DO UPDATE SET deleted_at = excluded.deleted_at
+             WHERE excluded.deleted_at >= sync_mood_tombstones.deleted_at",
+            params![name, deleted_at],
+        )?;
+    }
+
+    if added + updated + removed + entry_moods_cleared > 0 {
+        counts.parts.push(format!(
+            "moods: {added} added, {updated} updated, {removed} removed, {entry_moods_cleared} entry values cleared"
+        ));
+    }
+    Ok(())
+}
+
+fn build_moods_payload(connection: &Connection) -> Result<MoodSyncPayload> {
+    let moods = if table_exists(connection, "mood_catalog")? {
+        let mut statement = connection.prepare(
+            "SELECT name, sentiment_score, created_at, updated_at
+             FROM mood_catalog
+             ORDER BY lower(name) ASC",
+        )?;
+        let moods = statement
+            .query_map([], |row| {
+                Ok(MoodPayload {
+                    name: row.get(0)?,
+                    sentiment_score: row.get(1)?,
+                    created_at: row.get(2)?,
+                    updated_at: row.get(3)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        moods
+    } else {
+        Vec::new()
+    };
+
+    let deleted_moods = if table_exists(connection, "sync_mood_tombstones")? {
+        let mut statement = connection.prepare(
+            "SELECT name, deleted_at
+             FROM sync_mood_tombstones
+             ORDER BY deleted_at ASC, lower(name) ASC",
+        )?;
+        let deleted_moods = statement
+            .query_map([], |row| {
+                Ok(DeletedMood {
+                    name: row.get(0)?,
+                    deleted_at: row.get(1)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        deleted_moods
+    } else {
+        Vec::new()
+    };
+
+    Ok(MoodSyncPayload {
+        moods,
+        deleted_moods,
+    })
+}
+
 fn apply_threads_payload(
     connection: &Connection,
     payload: &ThreadSyncPayload,
@@ -3990,6 +4194,28 @@ fn location_tombstone_at(connection: &Connection, entry_uuid: &str) -> Result<Op
         .map_err(Into::into)
 }
 
+fn mood_catalog_row(connection: &Connection, name: &str) -> Result<Option<(String, String)>> {
+    connection
+        .query_row(
+            "SELECT created_at, updated_at FROM mood_catalog WHERE lower(name) = lower(?1)",
+            [name],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
+fn mood_tombstone_at(connection: &Connection, name: &str) -> Result<Option<String>> {
+    connection
+        .query_row(
+            "SELECT deleted_at FROM sync_mood_tombstones WHERE lower(name) = lower(?1)",
+            [name],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(Into::into)
+}
+
 fn library_template_row(
     connection: &Connection,
     slug: &str,
@@ -4855,6 +5081,109 @@ mod tests {
         assert_eq!(remaining.len(), 2);
         assert_eq!(remaining[0]["client_id"], "new-during-sync");
         assert!(remaining[1].get("client_id").is_none());
+    }
+
+    #[test]
+    fn sync_merges_mood_sentiments_and_tombstones() {
+        let db_dir = tempdir().expect("db tempdir");
+        let sync_dir = tempdir().expect("sync tempdir");
+        let db_path = db_dir.path().join("capsule.db");
+        create_sync_test_database(&db_path).expect("database");
+
+        let connection = Connection::open(&db_path).expect("database");
+        ensure_mood_sync_schema(&connection).expect("mood schema");
+        connection
+            .execute(
+                "INSERT INTO mood_catalog (name, sentiment_score, created_at, updated_at)
+                 VALUES ('calm', 0.1, '2026-07-20 09:00:00', '2026-07-20 09:00:00')",
+                [],
+            )
+            .expect("local mood");
+        connection
+            .execute(
+                "UPDATE entries
+                 SET mood = 'focused', updated_at = '2026-07-20 09:00:00'
+                 WHERE uuid = 'entry_remote_deleted'",
+                [],
+            )
+            .expect("local entry mood");
+        drop(connection);
+
+        let remote_payload = json!({
+            "version": MAIN_SYNC_VERSION,
+            "entries": [],
+            "deleted_uuids": [],
+            "moods": {
+                "moods": [
+                    {
+                        "name": "calm",
+                        "sentiment_score": 0.7,
+                        "created_at": "2026-07-20 09:00:00",
+                        "updated_at": "2026-07-22 09:00:00"
+                    },
+                    {
+                        "name": "buoyant",
+                        "sentiment_score": 0.45,
+                        "created_at": "2026-07-22 09:00:00",
+                        "updated_at": "2026-07-22 09:00:00"
+                    }
+                ],
+                "deleted_moods": [
+                    {
+                        "name": "focused",
+                        "deleted_at": "2026-07-22 09:00:00"
+                    }
+                ]
+            }
+        });
+        fs::write(
+            sync_dir.path().join(MAIN_SYNC_FILE),
+            serde_json::to_vec_pretty(&remote_payload).expect("json"),
+        )
+        .expect("sync file");
+
+        let response =
+            run_sync_with_retries(&db_path, sync_dir.path()).expect("sync should complete");
+        assert!(response.summary.contains("moods: 1 added, 1 updated"));
+        assert!(response.summary.contains("1 entry values cleared"));
+
+        let connection = Connection::open(&db_path).expect("database");
+        let calm_score: f64 = connection
+            .query_row(
+                "SELECT sentiment_score FROM mood_catalog WHERE name = 'calm'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("calm score");
+        assert_eq!(calm_score, 0.7);
+        let buoyant_score: f64 = connection
+            .query_row(
+                "SELECT sentiment_score FROM mood_catalog WHERE name = 'buoyant'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("buoyant score");
+        assert_eq!(buoyant_score, 0.45);
+        let focused_entry_mood: Option<String> = connection
+            .query_row(
+                "SELECT mood FROM entries WHERE uuid = 'entry_remote_deleted'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("focused entry");
+        assert!(focused_entry_mood.is_none());
+        drop(connection);
+
+        let synced =
+            read_main_payload(&sync_dir.path().join(MAIN_SYNC_FILE)).expect("synced payload");
+        let moods = parse_extra_payload::<MoodSyncPayload>(&synced.extra, "moods")
+            .expect("mood payload")
+            .expect("moods");
+        assert!(moods.moods.iter().any(|mood| mood.name == "buoyant"));
+        assert!(moods
+            .deleted_moods
+            .iter()
+            .any(|mood| mood.name == "focused"));
     }
 
     #[test]

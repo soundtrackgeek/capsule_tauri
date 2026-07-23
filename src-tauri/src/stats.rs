@@ -63,7 +63,8 @@ pub(crate) fn get_analytics_for_database(
     let (longest_streak_days, current_streak_days) = streaks(&active_dates);
     let (total_images, entries_with_images) = image_counts(&connection, &input)?;
     let entries_with_location = location_count(&connection, &input)?;
-    let mood_sentiment_summary = mood_sentiment_summary(&rows);
+    let mood_sentiments = mood_sentiment::scores_for_database(&connection)?;
+    let mood_sentiment_summary = mood_sentiment_summary(&rows, &mood_sentiments);
 
     Ok(AnalyticsResponse {
         overview: AnalyticsOverview {
@@ -82,7 +83,7 @@ pub(crate) fn get_analytics_for_database(
             longest_streak_days,
             current_streak_days,
         },
-        monthly_trend: monthly_trend(&rows),
+        monthly_trend: monthly_trend(&rows, &mood_sentiments),
         daily_trend: daily_trend(&rows),
         hourly_trend: hourly_trend(&rows),
         weekday_trend: weekday_trend(&rows),
@@ -1006,6 +1007,7 @@ pub(crate) fn get_writing_calendar_for_database(
     }
     let rows = load_entry_rows(&connection, &period)?;
     let image_counts = image_counts_by_date(&connection, &period)?;
+    let mood_sentiments = mood_sentiment::scores_for_database(&connection)?;
     let mut by_date: BTreeMap<String, WritingCalendarDay> = BTreeMap::new();
 
     for row in rows {
@@ -1024,7 +1026,7 @@ pub(crate) fn get_writing_calendar_for_database(
         day.entry_count += 1;
         day.word_count += word_count(&row.text) as i64;
         if let Some(mood) = row.mood.and_then(|value| normalize_string(Some(&value))) {
-            if let Some(score) = mood_sentiment::score_for_mood(&mood) {
+            if let Some(score) = mood_sentiment::score_from_catalog(&mood_sentiments, &mood) {
                 let current_sum =
                     day.average_mood_sentiment.unwrap_or(0.0) * day.mood_sentiment_count as f64;
                 day.mood_sentiment_count += 1;
@@ -1242,7 +1244,10 @@ fn breakdown_query(
         .context("failed to load analytics breakdown")
 }
 
-fn monthly_trend(rows: &[EntryStatsRow]) -> Vec<AnalyticsTrendPoint> {
+fn monthly_trend(
+    rows: &[EntryStatsRow],
+    mood_sentiments: &HashMap<String, f64>,
+) -> Vec<AnalyticsTrendPoint> {
     let mut by_month: BTreeMap<String, TrendAccumulator> = BTreeMap::new();
     for row in rows {
         let period = row.date.get(0..7).unwrap_or(&row.date).to_string();
@@ -1255,7 +1260,11 @@ fn monthly_trend(rows: &[EntryStatsRow]) -> Vec<AnalyticsTrendPoint> {
         });
         point.entry_count += 1;
         point.word_count += word_count(&row.text) as i64;
-        if let Some(score) = row.mood.as_deref().and_then(mood_sentiment::score_for_mood) {
+        if let Some(score) = row
+            .mood
+            .as_deref()
+            .and_then(|mood| mood_sentiment::score_from_catalog(mood_sentiments, mood))
+        {
             point.mood_sentiment_sum += score;
             point.mood_sentiment_count += 1;
         }
@@ -1587,10 +1596,13 @@ impl MoodSentimentSummary {
     }
 }
 
-fn mood_sentiment_summary(rows: &[EntryStatsRow]) -> MoodSentimentSummary {
+fn mood_sentiment_summary(
+    rows: &[EntryStatsRow],
+    mood_sentiments: &HashMap<String, f64>,
+) -> MoodSentimentSummary {
     rows.iter()
         .filter_map(|row| row.mood.as_deref())
-        .filter_map(mood_sentiment::score_for_mood)
+        .filter_map(|mood| mood_sentiment::score_from_catalog(mood_sentiments, mood))
         .fold(
             MoodSentimentSummary { sum: 0.0, count: 0 },
             |summary, score| MoodSentimentSummary {
@@ -1872,6 +1884,39 @@ mod tests {
             .expect("happy day");
         assert_eq!(happy_day.mood_sentiment_count, 1);
         assert_close(happy_day.average_mood_sentiment, 1.0);
+    }
+
+    #[test]
+    fn analytics_and_calendar_use_custom_mood_sentiments() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_stats_fixture(temp_dir.path());
+        let connection = Connection::open(&db_path).expect("database");
+        connection
+            .execute_batch(
+                "CREATE TABLE mood_catalog (
+                    name TEXT PRIMARY KEY COLLATE NOCASE,
+                    sentiment_score REAL NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                INSERT INTO mood_catalog (name, sentiment_score, created_at, updated_at)
+                VALUES ('focused', 0.5, '2026-07-23 10:00:00', '2026-07-23 10:00:00');",
+            )
+            .expect("custom mood");
+        drop(connection);
+
+        let analytics = get_analytics_for_database(&db_path, AnalyticsPeriodRequest::default())
+            .expect("analytics");
+        assert_close(analytics.overview.average_mood_sentiment, 2.0 / 3.0);
+        assert_close(analytics.monthly_trend[0].average_mood_sentiment, 0.75);
+
+        let calendar = get_writing_calendar_for_database(&db_path, Some(2026)).expect("calendar");
+        let focused_day = calendar
+            .days
+            .iter()
+            .find(|day| day.date == "2026-01-01")
+            .expect("focused day");
+        assert_close(focused_day.average_mood_sentiment, 0.5);
     }
 
     #[test]

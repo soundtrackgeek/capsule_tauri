@@ -446,6 +446,7 @@ export type MoodUsage = {
   name: string;
   label: string;
   entryCount: number;
+  sentimentScore: number | null;
 };
 
 export type MoodCatalogResponse = {
@@ -456,6 +457,16 @@ export type MoodCatalogResponse = {
 export type MoodRenameRequest = {
   from: string;
   to: string;
+};
+
+export type MoodCreateRequest = {
+  name: string;
+  sentimentScore: number;
+};
+
+export type MoodSentimentUpdateRequest = {
+  name: string;
+  sentimentScore: number;
 };
 
 export type MoodDeleteRequest = {

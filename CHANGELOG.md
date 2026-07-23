@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.31.0 - 2026-07-23
+
+### Added
+
+- Added reusable mood creation in Settings so a mood can exist before it is
+  assigned to an entry.
+- Added editable per-mood sentiment scores from -1.0 to +1.0, with the effective
+  score shown on each mood chip and used by Analytics and the Writing Calendar.
+- Added sync protocol v6 mood-catalog merging for shared folders and GitHub
+  Gists, including last-write-wins sentiment updates and deletion tombstones.
+
+### Changed
+
+- Updated mood rename and delete operations to preserve or remove catalog
+  sentiment metadata alongside matching entry values.
+- Bumped the app version to 0.31.0.
+
 ## 0.30.0 - 2026-07-23
 
 ### Added

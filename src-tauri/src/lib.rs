@@ -36,12 +36,13 @@ use models::{
     ImageUploadAttachRequest, ImageUploadResponse, ImageVariant, LibraryListResponse,
     LibraryPromptInput, LibraryPromptMutationResponse, LibraryPromptUpdate, LibraryTemplateInput,
     LibraryTemplateMutationResponse, LibraryTemplateUpdate, LocationConfigUpdateRequest,
-    MoodCatalogResponse, MoodDeleteRequest, MoodMutationResponse, MoodRenameRequest,
-    PathSettingsResponse, PathSettingsUpdateRequest, PluginOverviewResponse, QuestClaimRequest,
-    QuestClaimResponse, RandomEntryFilters, SearchRequest, SearchResponse, SyncOverviewResponse,
-    SyncRunRequest, SyncRunResponse, TagCatalogResponse, TagDeleteRequest, TagMergeRequest,
-    TagMutationResponse, TagRenameRequest, ThreadListResponse, ThreadMetadataUpdate,
-    ThreadMutationResponse, WrappedRequest, WrappedResponse, WritingCalendarResponse,
+    MoodCatalogResponse, MoodCreateRequest, MoodDeleteRequest, MoodMutationResponse,
+    MoodRenameRequest, MoodSentimentUpdateRequest, PathSettingsResponse, PathSettingsUpdateRequest,
+    PluginOverviewResponse, QuestClaimRequest, QuestClaimResponse, RandomEntryFilters,
+    SearchRequest, SearchResponse, SyncOverviewResponse, SyncRunRequest, SyncRunResponse,
+    TagCatalogResponse, TagDeleteRequest, TagMergeRequest, TagMutationResponse, TagRenameRequest,
+    ThreadListResponse, ThreadMetadataUpdate, ThreadMutationResponse, WrappedRequest,
+    WrappedResponse, WritingCalendarResponse,
 };
 use tauri::{
     menu::MenuBuilder,
@@ -623,6 +624,24 @@ async fn list_moods() -> Result<MoodCatalogResponse, String> {
 }
 
 #[tauri::command]
+async fn create_mood(input: MoodCreateRequest) -> Result<MoodMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || settings::create_mood(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn update_mood_sentiment(
+    input: MoodSentimentUpdateRequest,
+) -> Result<MoodMutationResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || settings::update_mood_sentiment(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn rename_mood(input: MoodRenameRequest) -> Result<MoodMutationResponse, String> {
     tauri::async_runtime::spawn_blocking(move || settings::rename_mood(input))
         .await
@@ -1057,6 +1076,8 @@ pub fn run() {
             merge_tag,
             delete_tag,
             list_moods,
+            create_mood,
+            update_mood_sentiment,
             rename_mood,
             delete_mood,
             list_library_items,

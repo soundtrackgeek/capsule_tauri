@@ -231,6 +231,49 @@ test("configures Cloud AI settings without exposing API keys", async ({ page }) 
   expect(browserErrors).toEqual([]);
 });
 
+test("adds a mood, edits its sentiment, and removes it", async ({ page }) => {
+  const browserErrors = trackBrowserErrors(page);
+  const moodName = `playwright-mood-${Date.now()}`;
+  const moodLabel = moodName
+    .split("-")
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+
+  await page.goto("/");
+  await page
+    .getByRole("navigation", { name: "Primary" })
+    .getByRole("button", { name: "Settings" })
+    .click();
+
+  const moodsPanel = page.locator(".panel").filter({
+    has: page.getByRole("heading", { name: "Moods", exact: true }),
+  });
+  const addMood = moodsPanel.getByRole("region", { name: "Add mood" });
+  await addMood.getByLabel("Mood name").fill(moodName);
+  await addMood.getByLabel("Sentiment score").fill("0.35");
+  await addMood.getByRole("button", { name: "Add", exact: true }).click();
+
+  await expect(page.getByRole("status")).toContainText("Added mood with backup");
+  const moodChip = moodsPanel.getByRole("button", {
+    name: `Edit ${moodLabel} sentiment`,
+  });
+  await expect(moodChip).toContainText("+0.35");
+
+  const editSentiment = moodsPanel.getByRole("region", { name: "Edit sentiment" });
+  await editSentiment.getByLabel("Sentiment score").fill("-0.25");
+  await editSentiment.getByRole("button", { name: "Save", exact: true }).click();
+
+  await expect(page.getByRole("status")).toContainText("Updated mood sentiment with backup");
+  await expect(moodChip).toContainText("-0.25");
+
+  await moodsPanel.getByLabel("Delete mood").selectOption(moodName);
+  await moodsPanel.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Cleared mood with backup");
+  await expect(moodChip).toHaveCount(0);
+
+  expect(browserErrors).toEqual([]);
+});
+
 test("uses the AI chat workspace with mock streaming and retry", async ({ page }) => {
   const browserErrors = trackBrowserErrors(page);
 
