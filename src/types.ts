@@ -1214,6 +1214,136 @@ export type AnalyticsResponse = {
   warnings: string[];
 };
 
+export type WrappedPeriod = "week" | "month" | "year";
+
+export type WrappedRange = {
+  from: string;
+  to: string;
+  dayCount: number;
+  label: string;
+};
+
+export type WrappedNavigation = {
+  latestAnchor: string;
+  latestLabel: string;
+  previousAnchor: string;
+  previousLabel: string;
+  nextAnchor: string | null;
+  nextLabel: string | null;
+  isLatest: boolean;
+};
+
+export type WrappedSummary = {
+  entries: number;
+  words: number;
+  activeDays: number;
+  avgWordsPerEntry: number;
+  avgEntriesPerActiveDay: number;
+  healthScore: number;
+  longestStreak: number;
+};
+
+export type WrappedMetricComparison = {
+  current: number;
+  previous: number;
+  delta: number;
+  pctChange: number | null;
+  direction: "up" | "down" | "flat";
+};
+
+export type WrappedHighlight = {
+  label: string;
+  count: number;
+  share?: number;
+  hour?: number;
+};
+
+export type WrappedBusiestDay = {
+  date: string;
+  entryCount: number;
+  wordCount: number;
+};
+
+export type WrappedLongestEntry = {
+  entryId: number;
+  uuid: string;
+  createdAt: string;
+  date: string;
+  wordCount: number;
+};
+
+export type WrappedMostTaggedEntry = {
+  entryId: number;
+  createdAt: string;
+  tagCount: number;
+};
+
+export type WrappedInsight = {
+  kind: "momentum" | "routine" | "mood" | "topic";
+  title: string;
+  body: string;
+};
+
+export type WrappedFunFact = {
+  kind: "busiest_day" | "longest_entry" | "most_tagged_entry" | "consistency";
+  title: string;
+  body: string;
+};
+
+export type WrappedActivityPoint = {
+  period: string;
+  entries: number;
+  words: number;
+};
+
+export type WrappedChartCountPoint = {
+  label: string;
+  count: number;
+};
+
+export type WrappedBadge = {
+  id: "best_notes_day" | "best_words_day" | "most_tags_in_post" | "longest_entry";
+  title: string;
+  value: string;
+  detail: string;
+};
+
+export type WrappedResponse = {
+  period: WrappedPeriod;
+  anchor: string;
+  title: string;
+  range: WrappedRange;
+  navigation: WrappedNavigation;
+  summary: WrappedSummary;
+  comparison: {
+    entries: WrappedMetricComparison;
+    words: WrappedMetricComparison;
+    activeDays: WrappedMetricComparison;
+    healthScore: WrappedMetricComparison;
+  };
+  highlights: {
+    topTag: WrappedHighlight | null;
+    topMood: WrappedHighlight | null;
+    topWeekday: WrappedHighlight | null;
+    topHour: WrappedHighlight | null;
+    topLocation: WrappedHighlight | null;
+  };
+  records: {
+    busiestDay: WrappedBusiestDay | null;
+    longestEntry: WrappedLongestEntry | null;
+    mostTaggedEntry: WrappedMostTaggedEntry | null;
+  };
+  insights: WrappedInsight[];
+  funFacts: WrappedFunFact[];
+  charts: {
+    activityGranularity: "day" | "month";
+    activity: WrappedActivityPoint[];
+    topTags: WrappedChartCountPoint[];
+    moodDistribution: WrappedChartCountPoint[];
+  };
+  personalBestBadges: WrappedBadge[];
+};
+
 export type WritingCalendarDay = {
   date: string;
   entryCount: number;

@@ -100,6 +100,8 @@ import type {
   ThreadListResponse,
   ThreadMetadataUpdate,
   ThreadMutationResponse,
+  WrappedPeriod,
+  WrappedResponse,
   WritingCalendarResponse,
 } from "./types";
 
@@ -2436,6 +2438,24 @@ export async function getAnalytics(
   }
 }
 
+export async function getWrapped(
+  period: WrappedPeriod,
+  anchor?: string,
+): Promise<WrappedResponse> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<WrappedResponse>("get_wrapped", {
+        input: { period, anchor: anchor || null },
+      });
+    }
+
+    await pause(180);
+    return buildMockWrapped(period, anchor);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
 export async function getWritingCalendar(year?: number): Promise<WritingCalendarResponse> {
   try {
     if (runningInTauri()) {
@@ -3054,6 +3074,614 @@ function buildMockAnalytics(input: AnalyticsPeriodRequest): AnalyticsResponse {
       .slice(0, 12),
     warnings: [],
   };
+}
+
+type MockWrappedWindow = {
+  period: WrappedPeriod;
+  anchor: string;
+  start: Date;
+  end: Date;
+  previousStart: Date;
+  previousEnd: Date;
+  label: string;
+  latestStart: Date;
+  latestEnd: Date;
+  nextStart: Date;
+  nextEnd: Date;
+};
+
+type MockWrappedDataset = Pick<
+  WrappedResponse,
+  "summary" | "highlights" | "records" | "charts"
+>;
+
+function buildMockWrapped(period: WrappedPeriod, anchor?: string): WrappedResponse {
+  const window = resolveMockWrappedWindow(period, anchor);
+  const current = buildMockWrappedDataset(window.start, window.end, period);
+  const previous = buildMockWrappedDataset(window.previousStart, window.previousEnd, period);
+  const isLatest = window.start.getTime() === window.latestStart.getTime();
+  const dayCount = Math.round((window.end.getTime() - window.start.getTime()) / 86_400_000) + 1;
+  const nextAnchor = isLatest ? null : mockWrappedAnchor(period, window.nextStart);
+  const nextLabel = isLatest
+    ? null
+    : mockWrappedPeriodLabel(period, window.nextStart, window.nextEnd);
+
+  return {
+    period,
+    anchor: window.anchor,
+    title: `Capsule Wrapped: ${window.label}`,
+    range: {
+      from: mockIsoDate(window.start),
+      to: mockIsoDate(window.end),
+      dayCount,
+      label: window.label,
+    },
+    navigation: {
+      latestAnchor: mockWrappedAnchor(period, window.latestStart),
+      latestLabel: mockWrappedPeriodLabel(period, window.latestStart, window.latestEnd),
+      previousAnchor: mockWrappedAnchor(period, window.previousStart),
+      previousLabel: mockWrappedPeriodLabel(period, window.previousStart, window.previousEnd),
+      nextAnchor,
+      nextLabel,
+      isLatest,
+    },
+    summary: current.summary,
+    comparison: {
+      entries: mockWrappedComparison(current.summary.entries, previous.summary.entries),
+      words: mockWrappedComparison(current.summary.words, previous.summary.words),
+      activeDays: mockWrappedComparison(current.summary.activeDays, previous.summary.activeDays),
+      healthScore: mockWrappedComparison(
+        current.summary.healthScore,
+        previous.summary.healthScore,
+      ),
+    },
+    highlights: current.highlights,
+    records: current.records,
+    insights: buildMockWrappedInsights(current, previous, period),
+    funFacts: buildMockWrappedFacts(current, dayCount),
+    charts: current.charts,
+    personalBestBadges: buildMockWrappedBadges(window.start, window.end),
+  };
+}
+
+function resolveMockWrappedWindow(
+  period: WrappedPeriod,
+  anchor?: string,
+): MockWrappedWindow {
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+  let latestStart: Date;
+  let start: Date;
+  let end: Date;
+  let previousStart: Date;
+  let previousEnd: Date;
+  let nextStart: Date;
+  let nextEnd: Date;
+
+  if (period === "week") {
+    const dayFromMonday = (today.getDay() + 6) % 7;
+    const currentWeekStart = mockAddDays(today, -dayFromMonday);
+    latestStart = mockAddDays(currentWeekStart, -7);
+    start = anchor ? mockDateFromIso(anchor) : latestStart;
+    end = mockAddDays(start, 6);
+    previousStart = mockAddDays(start, -7);
+    previousEnd = mockAddDays(start, -1);
+    nextStart = mockAddDays(start, 7);
+    nextEnd = mockAddDays(start, 13);
+  } else if (period === "month") {
+    const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1, 12);
+    latestStart = mockShiftMonth(currentMonthStart, -1);
+    start = anchor
+      ? new Date(Number(anchor.slice(0, 4)), Number(anchor.slice(5, 7)) - 1, 1, 12)
+      : latestStart;
+    end = mockLastDayOfMonth(start);
+    previousStart = mockShiftMonth(start, -1);
+    previousEnd = mockLastDayOfMonth(previousStart);
+    nextStart = mockShiftMonth(start, 1);
+    nextEnd = mockLastDayOfMonth(nextStart);
+  } else {
+    latestStart = new Date(today.getFullYear() - 1, 0, 1, 12);
+    start = new Date(anchor ? Number(anchor) : latestStart.getFullYear(), 0, 1, 12);
+    end = new Date(start.getFullYear(), 11, 31, 12);
+    previousStart = new Date(start.getFullYear() - 1, 0, 1, 12);
+    previousEnd = new Date(previousStart.getFullYear(), 11, 31, 12);
+    nextStart = new Date(start.getFullYear() + 1, 0, 1, 12);
+    nextEnd = new Date(nextStart.getFullYear(), 11, 31, 12);
+  }
+
+  const latestEnd =
+    period === "week"
+      ? mockAddDays(latestStart, 6)
+      : period === "month"
+        ? mockLastDayOfMonth(latestStart)
+        : new Date(latestStart.getFullYear(), 11, 31, 12);
+
+  return {
+    period,
+    anchor: mockWrappedAnchor(period, start),
+    start,
+    end,
+    previousStart,
+    previousEnd,
+    label: mockWrappedPeriodLabel(period, start, end),
+    latestStart,
+    latestEnd,
+    nextStart,
+    nextEnd,
+  };
+}
+
+function buildMockWrappedDataset(
+  start: Date,
+  end: Date,
+  period: WrappedPeriod,
+): MockWrappedDataset {
+  const from = mockIsoDate(start);
+  const to = mockIsoDate(end);
+  const entries = mockEntries.filter((entry) => {
+    const date = entry.createdAt.slice(0, 10);
+    return !entry.hidden && date >= from && date <= to;
+  });
+  const activeDates = [...new Set(entries.map((entry) => entry.createdAt.slice(0, 10)))].sort();
+  const totalWords = entries.reduce((sum, entry) => sum + writingWordCount(entry.textPlain), 0);
+  const longestStreak = mockWrappedLongestStreak(activeDates);
+  const tagCounts = new Map<string, number>();
+  const moodCounts = new Map<string, number>();
+  const locationCounts = new Map<string, number>();
+  const weekdayCounts = Array.from({ length: 7 }, () => 0);
+  const hourCounts = Array.from({ length: 24 }, () => 0);
+  const byDay = new Map<string, { entries: number; words: number }>();
+  const activityBuckets = new Map<string, { entries: number; words: number }>();
+
+  for (const entry of entries) {
+    const date = entry.createdAt.slice(0, 10);
+    const entryWords = writingWordCount(entry.textPlain);
+    const day = byDay.get(date) ?? { entries: 0, words: 0 };
+    day.entries += 1;
+    day.words += entryWords;
+    byDay.set(date, day);
+    const activityKey = period === "year" ? date.slice(0, 7) : date;
+    const activity = activityBuckets.get(activityKey) ?? { entries: 0, words: 0 };
+    activity.entries += 1;
+    activity.words += entryWords;
+    activityBuckets.set(activityKey, activity);
+    const created = mockDateFromIso(date);
+    weekdayCounts[(created.getDay() + 6) % 7] += 1;
+    const hour = Number(entry.createdAt.slice(11, 13));
+    if (Number.isInteger(hour) && hour >= 0 && hour <= 23) hourCounts[hour] += 1;
+    for (const tag of entry.tags) tagCounts.set(tag.name, (tagCounts.get(tag.name) ?? 0) + 1);
+    if (entry.mood) moodCounts.set(entry.mood, (moodCounts.get(entry.mood) ?? 0) + 1);
+    if (entry.location?.placeName) {
+      locationCounts.set(
+        entry.location.placeName,
+        (locationCounts.get(entry.location.placeName) ?? 0) + 1,
+      );
+    }
+  }
+
+  const sortedTags = mockSortedCounts(tagCounts);
+  const sortedMoods = mockSortedCounts(moodCounts);
+  const sortedLocations = mockSortedCounts(locationCounts);
+  const topWeekdayIndex = mockTopIndex(weekdayCounts);
+  const topHourIndex = mockTopIndex(hourCounts);
+  const weekdayNames = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+  ];
+  const busiestDay = [...byDay.entries()]
+    .sort(
+      ([leftDate, left], [rightDate, right]) =>
+        right.entries - left.entries ||
+        right.words - left.words ||
+        rightDate.localeCompare(leftDate),
+    )[0];
+  const longestEntry = [...entries].sort(
+    (left, right) =>
+      writingWordCount(right.textPlain) - writingWordCount(left.textPlain) ||
+      right.createdAt.localeCompare(left.createdAt) ||
+      right.id - left.id,
+  )[0];
+  const mostTaggedEntry = [...entries]
+    .filter((entry) => entry.tags.length > 0)
+    .sort(
+      (left, right) =>
+        right.tags.length - left.tags.length ||
+        right.createdAt.localeCompare(left.createdAt) ||
+        right.id - left.id,
+    )[0];
+
+  return {
+    summary: {
+      entries: entries.length,
+      words: totalWords,
+      activeDays: activeDates.length,
+      avgWordsPerEntry: entries.length ? mockRound(totalWords / entries.length, 2) : 0,
+      avgEntriesPerActiveDay: activeDates.length
+        ? mockRound(entries.length / activeDates.length, 2)
+        : 0,
+      healthScore: mockWrappedHealth(entries.length, longestStreak, activeDates.length),
+      longestStreak,
+    },
+    highlights: {
+      topTag: sortedTags[0]
+        ? {
+            ...sortedTags[0],
+            share: entries.length ? mockRound(sortedTags[0].count / entries.length, 3) : 0,
+          }
+        : null,
+      topMood: sortedMoods[0]
+        ? {
+            ...sortedMoods[0],
+            share: entries.length ? mockRound(sortedMoods[0].count / entries.length, 3) : 0,
+          }
+        : null,
+      topWeekday:
+        topWeekdayIndex === null
+          ? null
+          : {
+              label: weekdayNames[topWeekdayIndex],
+              count: weekdayCounts[topWeekdayIndex],
+            },
+      topHour:
+        topHourIndex === null
+          ? null
+          : {
+              label: `${String(topHourIndex).padStart(2, "0")}:00`,
+              count: hourCounts[topHourIndex],
+              hour: topHourIndex,
+            },
+      topLocation: sortedLocations[0] ?? null,
+    },
+    records: {
+      busiestDay: busiestDay
+        ? {
+            date: busiestDay[0],
+            entryCount: busiestDay[1].entries,
+            wordCount: busiestDay[1].words,
+          }
+        : null,
+      longestEntry: longestEntry
+        ? {
+            entryId: longestEntry.id,
+            uuid: longestEntry.uuid,
+            createdAt: longestEntry.createdAt,
+            date: longestEntry.createdAt.slice(0, 10),
+            wordCount: writingWordCount(longestEntry.textPlain),
+          }
+        : null,
+      mostTaggedEntry: mostTaggedEntry
+        ? {
+            entryId: mostTaggedEntry.id,
+            createdAt: mostTaggedEntry.createdAt,
+            tagCount: mostTaggedEntry.tags.length,
+          }
+        : null,
+    },
+    charts: {
+      activityGranularity: period === "year" ? "month" : "day",
+      activity: mockWrappedActivity(start, end, period, activityBuckets),
+      topTags: sortedTags.slice(0, 8),
+      moodDistribution: sortedMoods,
+    },
+  };
+}
+
+function buildMockWrappedInsights(
+  current: MockWrappedDataset,
+  previous: MockWrappedDataset,
+  period: WrappedPeriod,
+): WrappedResponse["insights"] {
+  const insights: WrappedResponse["insights"] = [];
+  if (current.summary.entries > 0) {
+    const delta = current.summary.entries - previous.summary.entries;
+    insights.push({
+      kind: "momentum",
+      title: "Momentum",
+      body:
+        previous.summary.entries === 0
+          ? `After a quiet previous ${period}, you filled this one with ${current.summary.entries} ${mockPlural(current.summary.entries, "entry")} and ${current.summary.words.toLocaleString()} words.`
+          : `You logged ${Math.abs(delta)} ${delta >= 0 ? "more" : "fewer"} ${mockPlural(Math.abs(delta), "entry")} than the previous ${period} (${current.summary.entries} vs ${previous.summary.entries}).`,
+    });
+  }
+  if (current.highlights.topWeekday || current.highlights.topHour) {
+    insights.push({
+      kind: "routine",
+      title: "Routine",
+      body:
+        current.highlights.topWeekday && current.highlights.topHour
+          ? `Your rhythm leaned toward ${current.highlights.topWeekday.label} around ${current.highlights.topHour.label}, when you showed up most often.`
+          : `${current.highlights.topWeekday?.label ?? current.highlights.topHour?.label} was your peak writing time this ${period}.`,
+    });
+  }
+  if (current.highlights.topMood) {
+    insights.push({
+      kind: "mood",
+      title: "Mood",
+      body: `'${current.highlights.topMood.label}' led your mood check-ins, showing up on ${current.highlights.topMood.count} ${mockPlural(current.highlights.topMood.count, "entry")}.`,
+    });
+  }
+  if (current.highlights.topTag) {
+    insights.push({
+      kind: "topic",
+      title: "Topic",
+      body: `The tag '${current.highlights.topTag.label}' kept resurfacing, attached to ${current.highlights.topTag.count} ${mockPlural(current.highlights.topTag.count, "entry")}.`,
+    });
+  }
+  return insights;
+}
+
+function buildMockWrappedFacts(
+  dataset: MockWrappedDataset,
+  dayCount: number,
+): WrappedResponse["funFacts"] {
+  const facts: WrappedResponse["funFacts"] = [];
+  if (dataset.records.busiestDay) {
+    const day = dataset.records.busiestDay;
+    facts.push({
+      kind: "busiest_day",
+      title: "Busiest Day",
+      body: `${mockDisplayDate(day.date)} packed in ${day.entryCount} ${mockPlural(day.entryCount, "entry")} and ${day.wordCount} words.`,
+    });
+  }
+  if (dataset.records.longestEntry) {
+    const entry = dataset.records.longestEntry;
+    facts.push({
+      kind: "longest_entry",
+      title: "Longest Entry",
+      body: `Your longest entry stretched to ${entry.wordCount} ${mockPlural(entry.wordCount, "word")} on ${mockDisplayDate(entry.date)}.`,
+    });
+  }
+  if (dataset.records.mostTaggedEntry) {
+    const entry = dataset.records.mostTaggedEntry;
+    facts.push({
+      kind: "most_tagged_entry",
+      title: "Most Tagged Entry",
+      body: `One entry carried ${entry.tagCount} ${mockPlural(entry.tagCount, "tag")} on ${mockDisplayDate(entry.createdAt.slice(0, 10))}.`,
+    });
+  }
+  if (dataset.summary.entries > 0) {
+    const consistency = dayCount
+      ? Math.round((dataset.summary.activeDays / dayCount) * 100)
+      : 0;
+    facts.push({
+      kind: "consistency",
+      title: "Consistency",
+      body: `You showed up on ${dataset.summary.activeDays} of ${dayCount} days (${consistency}%) and built a best run of ${dataset.summary.longestStreak} ${mockPlural(dataset.summary.longestStreak, "day")}.`,
+    });
+  }
+  return facts;
+}
+
+function buildMockWrappedBadges(
+  start: Date,
+  end: Date,
+): WrappedResponse["personalBestBadges"] {
+  const visibleEntries = mockEntries.filter((entry) => !entry.hidden);
+  const byDay = new Map<string, { entries: number; words: number }>();
+  for (const entry of visibleEntries) {
+    const date = entry.createdAt.slice(0, 10);
+    const bucket = byDay.get(date) ?? { entries: 0, words: 0 };
+    bucket.entries += 1;
+    bucket.words += writingWordCount(entry.textPlain);
+    byDay.set(date, bucket);
+  }
+  const bestNotes = [...byDay.entries()].sort(
+    ([leftDate, left], [rightDate, right]) =>
+      right.entries - left.entries ||
+      right.words - left.words ||
+      rightDate.localeCompare(leftDate),
+  )[0];
+  const bestWords = [...byDay.entries()].sort(
+    ([leftDate, left], [rightDate, right]) =>
+      right.words - left.words ||
+      right.entries - left.entries ||
+      rightDate.localeCompare(leftDate),
+  )[0];
+  const mostTagged = [...visibleEntries]
+    .filter((entry) => entry.tags.length > 0)
+    .sort(
+      (left, right) =>
+        right.tags.length - left.tags.length ||
+        right.createdAt.localeCompare(left.createdAt),
+    )[0];
+  const longest = [...visibleEntries].sort(
+    (left, right) =>
+      writingWordCount(right.textPlain) - writingWordCount(left.textPlain) ||
+      right.createdAt.localeCompare(left.createdAt),
+  )[0];
+  const from = mockIsoDate(start);
+  const to = mockIsoDate(end);
+  const inRange = (date: string) => date >= from && date <= to;
+  const badges: WrappedResponse["personalBestBadges"] = [];
+  if (bestNotes && inRange(bestNotes[0])) {
+    badges.push({
+      id: "best_notes_day",
+      title: "Lifetime Best Notes Day",
+      value: `${bestNotes[1].entries} ${mockPlural(bestNotes[1].entries, "entry")}`,
+      detail: mockDisplayDate(bestNotes[0]),
+    });
+  }
+  if (bestWords && inRange(bestWords[0])) {
+    badges.push({
+      id: "best_words_day",
+      title: "Lifetime Best Words Day",
+      value: `${bestWords[1].words} ${mockPlural(bestWords[1].words, "word")}`,
+      detail: mockDisplayDate(bestWords[0]),
+    });
+  }
+  if (mostTagged && inRange(mostTagged.createdAt.slice(0, 10))) {
+    badges.push({
+      id: "most_tags_in_post",
+      title: "Most Tags On One Entry",
+      value: `${mostTagged.tags.length} ${mockPlural(mostTagged.tags.length, "tag")}`,
+      detail: mockDisplayDate(mostTagged.createdAt.slice(0, 10)),
+    });
+  }
+  if (longest && inRange(longest.createdAt.slice(0, 10))) {
+    const words = writingWordCount(longest.textPlain);
+    badges.push({
+      id: "longest_entry",
+      title: "Longest Entry Ever",
+      value: `${words} ${mockPlural(words, "word")}`,
+      detail: mockDisplayDate(longest.createdAt.slice(0, 10)),
+    });
+  }
+  return badges;
+}
+
+function mockWrappedActivity(
+  start: Date,
+  end: Date,
+  period: WrappedPeriod,
+  buckets: Map<string, { entries: number; words: number }>,
+): WrappedResponse["charts"]["activity"] {
+  const points: WrappedResponse["charts"]["activity"] = [];
+  if (period === "year") {
+    let cursor = new Date(start.getFullYear(), start.getMonth(), 1, 12);
+    while (cursor <= end) {
+      const key = mockIsoDate(cursor).slice(0, 7);
+      const value = buckets.get(key) ?? { entries: 0, words: 0 };
+      points.push({ period: key, ...value });
+      cursor = mockShiftMonth(cursor, 1);
+    }
+  } else {
+    let cursor = new Date(start);
+    while (cursor <= end) {
+      const key = mockIsoDate(cursor);
+      const value = buckets.get(key) ?? { entries: 0, words: 0 };
+      points.push({ period: key, ...value });
+      cursor = mockAddDays(cursor, 1);
+    }
+  }
+  return points;
+}
+
+function mockWrappedComparison(
+  current: number,
+  previous: number,
+): WrappedResponse["comparison"]["entries"] {
+  const delta = current - previous;
+  return {
+    current,
+    previous,
+    delta,
+    pctChange: previous ? mockRound((delta / previous) * 100, 1) : null,
+    direction: delta > 0 ? "up" : delta < 0 ? "down" : "flat",
+  };
+}
+
+function mockWrappedHealth(entries: number, streak: number, activeDays: number) {
+  if (!entries) return 0;
+  return (
+    Math.min(30, Math.trunc((entries / 100) * 30)) +
+    Math.min(40, Math.trunc((streak / 30) * 40)) +
+    Math.min(30, Math.trunc((activeDays / 7) * 30))
+  );
+}
+
+function mockWrappedLongestStreak(dates: string[]) {
+  let longest = dates.length ? 1 : 0;
+  let running = longest;
+  for (let index = 1; index < dates.length; index += 1) {
+    running =
+      mockAddDays(mockDateFromIso(dates[index - 1]), 1).getTime() ===
+      mockDateFromIso(dates[index]).getTime()
+        ? running + 1
+        : 1;
+    longest = Math.max(longest, running);
+  }
+  return longest;
+}
+
+function mockTopIndex(values: number[]) {
+  let best: number | null = null;
+  values.forEach((value, index) => {
+    if (value > 0 && (best === null || value > values[best])) best = index;
+  });
+  return best;
+}
+
+function mockSortedCounts(values: Map<string, number>) {
+  return [...values.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort(
+      (left, right) =>
+        right.count - left.count ||
+        left.label.toLocaleLowerCase().localeCompare(right.label.toLocaleLowerCase()),
+    );
+}
+
+function mockWrappedAnchor(period: WrappedPeriod, date: Date) {
+  if (period === "week") return mockIsoDate(date);
+  if (period === "month") return mockIsoDate(date).slice(0, 7);
+  return String(date.getFullYear());
+}
+
+function mockWrappedPeriodLabel(period: WrappedPeriod, start: Date, end: Date) {
+  if (period === "month") {
+    return start.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  }
+  if (period === "year") return String(start.getFullYear());
+  const startMonth = start.toLocaleDateString(undefined, { month: "short" });
+  const endMonth = end.toLocaleDateString(undefined, { month: "short" });
+  if (start.getFullYear() === end.getFullYear()) {
+    return start.getMonth() === end.getMonth()
+      ? `${startMonth} ${start.getDate()} - ${end.getDate()}, ${start.getFullYear()}`
+      : `${startMonth} ${start.getDate()} - ${endMonth} ${end.getDate()}, ${start.getFullYear()}`;
+  }
+  return `${startMonth} ${start.getDate()}, ${start.getFullYear()} - ${endMonth} ${end.getDate()}, ${end.getFullYear()}`;
+}
+
+function mockDisplayDate(value: string) {
+  return mockDateFromIso(value).toLocaleDateString(undefined, {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+  });
+}
+
+function mockDateFromIso(value: string) {
+  return new Date(`${value.slice(0, 10)}T12:00:00`);
+}
+
+function mockIsoDate(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function mockAddDays(value: Date, days: number) {
+  const result = new Date(value);
+  result.setDate(result.getDate() + days);
+  result.setHours(12, 0, 0, 0);
+  return result;
+}
+
+function mockShiftMonth(value: Date, months: number) {
+  return new Date(value.getFullYear(), value.getMonth() + months, 1, 12);
+}
+
+function mockLastDayOfMonth(value: Date) {
+  return new Date(value.getFullYear(), value.getMonth() + 1, 0, 12);
+}
+
+function mockRound(value: number, places: number) {
+  const factor = 10 ** places;
+  return Math.round(value * factor) / factor;
+}
+
+function mockPlural(value: number, singular: string) {
+  if (value === 1) return singular;
+  const beforeY = singular.at(-2)?.toLowerCase();
+  return singular.endsWith("y") && beforeY && !"aeiou".includes(beforeY)
+    ? `${singular.slice(0, -1)}ies`
+    : `${singular}s`;
 }
 
 function buildMockCalendar(year: number): WritingCalendarResponse {

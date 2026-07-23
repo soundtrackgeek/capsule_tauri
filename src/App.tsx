@@ -9,6 +9,7 @@ import {
   Bot,
   Bug,
   CalendarDays,
+  CalendarRange,
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
@@ -81,6 +82,7 @@ import {
   disbandThread,
   exportEntries,
   getAnalytics,
+  getWrapped,
   getAiConversation,
   getAiOverview,
   getAiProviderStatus,
@@ -147,6 +149,7 @@ import {
   type AppUpdateProgress,
 } from "./backend";
 import { ActivityTrends, TrendBars, MoodTrendBars, BreakdownList } from "./components/analytics";
+import { WrappedView } from "./components/wrapped";
 import {
   DeleteEntryDialog,
   EntryAttachmentStrip,
@@ -220,6 +223,8 @@ import type {
   ThreadGroup,
   ThreadListResponse,
   ThreadMutationResponse,
+  WrappedPeriod,
+  WrappedResponse,
   WritingCalendarResponse,
 } from "./types";
 import "./styles.css";
@@ -233,6 +238,7 @@ type ActiveView =
   | "sync"
   | "images"
   | "analytics"
+  | "wrapped"
   | "calendar"
   | "covers"
   | "gamification"
@@ -363,6 +369,7 @@ const navItems: Array<{ id: ActiveView; label: string; icon: ReactNode }> = [
   { id: "sync", label: "Sync", icon: <Cloud size={18} /> },
   { id: "images", label: "Images", icon: <Paperclip size={18} /> },
   { id: "analytics", label: "Analytics", icon: <BarChart3 size={18} /> },
+  { id: "wrapped", label: "Wrapped", icon: <CalendarRange size={18} /> },
   { id: "calendar", label: "Calendar", icon: <CalendarDays size={18} /> },
   { id: "covers", label: "Cover Wall", icon: <Images size={18} /> },
   { id: "gamification", label: "Profile", icon: <Trophy size={18} /> },
@@ -706,6 +713,9 @@ function App() {
     useState<ImageUploadDraft>(emptyImageUploadDraft);
   const [analyticsPeriod, setAnalyticsPeriod] = useState<PeriodForm>({ since: "", until: "" });
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
+  const [wrappedPeriod, setWrappedPeriod] = useState<WrappedPeriod>("month");
+  const [wrappedAnchor, setWrappedAnchor] = useState<string | null>(null);
+  const [wrapped, setWrapped] = useState<WrappedResponse | null>(null);
   const [writingCalendarYear, setWritingCalendarYear] = useState(new Date().getFullYear());
   const [writingCalendar, setWritingCalendar] = useState<WritingCalendarResponse | null>(null);
   const [coverFilters, setCoverFilters] = useState<CoverWallFilters>({
@@ -761,6 +771,7 @@ function App() {
   const [composerImagesLoading, setComposerImagesLoading] = useState(false);
   const [composerAiSuggesting, setComposerAiSuggesting] = useState(false);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [wrappedLoading, setWrappedLoading] = useState(false);
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [coverLoading, setCoverLoading] = useState(false);
   const [coverDetailLoading, setCoverDetailLoading] = useState(false);
@@ -1081,6 +1092,25 @@ function App() {
       setAnalyticsLoading(false);
     }
   }, [builtAnalyticsPeriod, status?.readable]);
+
+  const loadWrapped = useCallback(async () => {
+    if (!status?.readable) {
+      setWrapped(null);
+      return;
+    }
+
+    setWrappedLoading(true);
+    setError(null);
+    try {
+      setWrapped(await getWrapped(wrappedPeriod, wrappedAnchor ?? undefined));
+    } catch (wrappedError) {
+      setError(
+        wrappedError instanceof Error ? wrappedError.message : "Unable to load Capsule Wrapped",
+      );
+    } finally {
+      setWrappedLoading(false);
+    }
+  }, [status?.readable, wrappedAnchor, wrappedPeriod]);
 
   const loadWritingCalendar = useCallback(async () => {
     if (!status?.readable) {
@@ -1444,6 +1474,12 @@ function App() {
       void loadAnalytics();
     }
   }, [activeView, loadAnalytics]);
+
+  useEffect(() => {
+    if (activeView === "wrapped") {
+      void loadWrapped();
+    }
+  }, [activeView, loadWrapped]);
 
   useEffect(() => {
     if (activeView === "calendar") {
@@ -2662,6 +2698,7 @@ function App() {
     sync: "Sync",
     images: "Images",
     analytics: "Analytics",
+    wrapped: "Wrapped",
     calendar: "Writing Calendar",
     covers: "Cover Wall",
     gamification: "Profile",
@@ -2746,8 +2783,8 @@ function App() {
             <button
               aria-label="Refresh"
               className="icon-button"
-              disabled={loading}
-              onClick={refresh}
+              disabled={loading || (activeView === "wrapped" && wrappedLoading)}
+              onClick={activeView === "wrapped" ? loadWrapped : refresh}
               title="Refresh"
               type="button"
             >
@@ -2948,6 +2985,22 @@ function App() {
             onRefresh={loadAnalytics}
             period={analyticsPeriod}
             setPeriod={setAnalyticsPeriod}
+            status={status}
+          />
+        )}
+
+        {activeView === "wrapped" && (
+          <WrappedView
+            loading={wrappedLoading}
+            onAnchorChange={setWrappedAnchor}
+            onPeriodChange={(nextPeriod) => {
+              setWrappedPeriod(nextPeriod);
+              setWrappedAnchor(null);
+            }}
+            onRefresh={loadWrapped}
+            onWrite={openNewEntry}
+            period={wrappedPeriod}
+            report={wrapped}
             status={status}
           />
         )}

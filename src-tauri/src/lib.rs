@@ -41,7 +41,7 @@ use models::{
     QuestClaimResponse, RandomEntryFilters, SearchRequest, SearchResponse, SyncOverviewResponse,
     SyncRunRequest, SyncRunResponse, TagCatalogResponse, TagDeleteRequest, TagMergeRequest,
     TagMutationResponse, TagRenameRequest, ThreadListResponse, ThreadMetadataUpdate,
-    ThreadMutationResponse, WritingCalendarResponse,
+    ThreadMutationResponse, WrappedRequest, WrappedResponse, WritingCalendarResponse,
 };
 use tauri::{
     menu::MenuBuilder,
@@ -348,6 +348,14 @@ async fn search_entries(input: SearchRequest) -> Result<SearchResponse, String> 
 #[tauri::command]
 async fn get_analytics(input: Option<AnalyticsPeriodRequest>) -> Result<AnalyticsResponse, String> {
     tauri::async_runtime::spawn_blocking(move || stats::get_analytics(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_wrapped(input: WrappedRequest) -> Result<WrappedResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || stats::get_wrapped(input))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())
@@ -1024,6 +1032,7 @@ pub fn run() {
             remove_image,
             search_entries,
             get_analytics,
+            get_wrapped,
             get_writing_calendar,
             list_cover_wall,
             get_cover_data_url,

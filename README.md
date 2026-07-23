@@ -96,6 +96,10 @@ explicit capability-gated AI/sync surfaces:
   frequency, words, first/last Capsule timing, hourly/weekday activity, and
   location activity with hover tooltips, plus monthly trend, mood sentiment trend,
   tag/mood/location breakdowns, weather breakdowns, top words, and streaks.
+- Capsule Wrapped retrospectives for the last completed week, month, or year,
+  with older/newer navigation, period-over-period metrics, deterministic
+  insights and fun facts, lifetime-best callouts, activity charts, top tags,
+  and mood distribution.
 - Writing Calendar heatmap for active days, words, images, mood metadata, and
   mood sentiment markers.
 - Cover Wall view backed by ignored local cover files under `local-assets/covers`

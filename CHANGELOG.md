@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.30.0 - 2026-07-23
+
+### Added
+
+- Added Capsule Wrapped with completed-week, completed-month, and
+  completed-year journal retrospectives, plus older/newer period navigation.
+- Added period comparisons, health and streak metrics, deterministic insights,
+  fun facts, lifetime-best callouts, activity charts, top tags, and mood
+  distribution.
+
+### Changed
+
+- Bumped the app version to 0.30.0.
+
 ## 0.29.4 - 2026-07-21
 
 ### Fixed

@@ -1670,6 +1670,187 @@ pub struct AnalyticsResponse {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedRequest {
+    pub period: String,
+    pub anchor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedRange {
+    pub from: String,
+    pub to: String,
+    pub day_count: i64,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedNavigation {
+    pub latest_anchor: String,
+    pub latest_label: String,
+    pub previous_anchor: String,
+    pub previous_label: String,
+    pub next_anchor: Option<String>,
+    pub next_label: Option<String>,
+    pub is_latest: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedSummary {
+    pub entries: i64,
+    pub words: i64,
+    pub active_days: i64,
+    pub avg_words_per_entry: f64,
+    pub avg_entries_per_active_day: f64,
+    pub health_score: i64,
+    pub longest_streak: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedMetricComparison {
+    pub current: i64,
+    pub previous: i64,
+    pub delta: i64,
+    pub pct_change: Option<f64>,
+    pub direction: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedComparison {
+    pub entries: WrappedMetricComparison,
+    pub words: WrappedMetricComparison,
+    pub active_days: WrappedMetricComparison,
+    pub health_score: WrappedMetricComparison,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedHighlight {
+    pub label: String,
+    pub count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub share: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hour: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedHighlights {
+    pub top_tag: Option<WrappedHighlight>,
+    pub top_mood: Option<WrappedHighlight>,
+    pub top_weekday: Option<WrappedHighlight>,
+    pub top_hour: Option<WrappedHighlight>,
+    pub top_location: Option<WrappedHighlight>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedBusiestDay {
+    pub date: String,
+    pub entry_count: i64,
+    pub word_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedLongestEntry {
+    pub entry_id: i64,
+    pub uuid: String,
+    pub created_at: String,
+    pub date: String,
+    pub word_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedMostTaggedEntry {
+    pub entry_id: i64,
+    pub created_at: String,
+    pub tag_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedRecords {
+    pub busiest_day: Option<WrappedBusiestDay>,
+    pub longest_entry: Option<WrappedLongestEntry>,
+    pub most_tagged_entry: Option<WrappedMostTaggedEntry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedInsight {
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedFunFact {
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedActivityPoint {
+    pub period: String,
+    pub entries: i64,
+    pub words: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedChartCountPoint {
+    pub label: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedCharts {
+    pub activity_granularity: String,
+    pub activity: Vec<WrappedActivityPoint>,
+    pub top_tags: Vec<WrappedChartCountPoint>,
+    pub mood_distribution: Vec<WrappedChartCountPoint>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedBadge {
+    pub id: String,
+    pub title: String,
+    pub value: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WrappedResponse {
+    pub period: String,
+    pub anchor: String,
+    pub title: String,
+    pub range: WrappedRange,
+    pub navigation: WrappedNavigation,
+    pub summary: WrappedSummary,
+    pub comparison: WrappedComparison,
+    pub highlights: WrappedHighlights,
+    pub records: WrappedRecords,
+    pub insights: Vec<WrappedInsight>,
+    pub fun_facts: Vec<WrappedFunFact>,
+    pub charts: WrappedCharts,
+    pub personal_best_badges: Vec<WrappedBadge>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WritingCalendarDay {

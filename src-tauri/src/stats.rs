@@ -13,7 +13,12 @@ use crate::{
         AnalyticsBreakdownItem, AnalyticsDailyTrendPoint, AnalyticsHourPoint, AnalyticsOverview,
         AnalyticsPeriodRequest, AnalyticsResponse, AnalyticsTrendPoint, AnalyticsWeekdayPoint,
         AnalyticsWritingWindow, AnalyticsWritingWindowDay, AnalyticsWritingWindowLongestDay,
-        AnalyticsWritingWindowSummary, WordCount, WritingCalendarDay, WritingCalendarResponse,
+        AnalyticsWritingWindowSummary, WordCount, WrappedActivityPoint, WrappedBadge,
+        WrappedBusiestDay, WrappedChartCountPoint, WrappedCharts, WrappedComparison,
+        WrappedFunFact, WrappedHighlight, WrappedHighlights, WrappedInsight, WrappedLongestEntry,
+        WrappedMetricComparison, WrappedMostTaggedEntry, WrappedNavigation, WrappedRange,
+        WrappedRecords, WrappedRequest, WrappedResponse, WrappedSummary, WritingCalendarDay,
+        WritingCalendarResponse,
     },
     mood_sentiment,
 };
@@ -22,6 +27,8 @@ const TOP_LIMIT: usize = 12;
 
 #[derive(Debug, Clone)]
 struct EntryStatsRow {
+    id: i64,
+    uuid: String,
     created_at: String,
     date: String,
     text: String,
@@ -88,6 +95,891 @@ pub(crate) fn get_analytics_for_database(
         top_words: top_words(&rows),
         warnings: Vec::new(),
     })
+}
+
+#[derive(Debug, Clone)]
+struct WrappedWindow {
+    period: String,
+    anchor: String,
+    start: NaiveDate,
+    end: NaiveDate,
+    previous_start: NaiveDate,
+    previous_end: NaiveDate,
+    label: String,
+    navigation: WrappedNavigation,
+}
+
+#[derive(Debug, Clone)]
+struct WrappedDataset {
+    summary: WrappedSummary,
+    highlights: WrappedHighlights,
+    records: WrappedRecords,
+    charts: WrappedCharts,
+}
+
+#[derive(Debug, Clone, Default)]
+struct WrappedDayBucket {
+    entries: i64,
+    words: i64,
+}
+
+pub fn get_wrapped(input: WrappedRequest) -> Result<WrappedResponse> {
+    get_wrapped_for_database(
+        &db::resolve_database_path(),
+        &input.period,
+        input.anchor.as_deref(),
+        Local::now().date_naive(),
+    )
+}
+
+pub(crate) fn get_wrapped_for_database(
+    db_path: &Path,
+    period: &str,
+    anchor: Option<&str>,
+    today: NaiveDate,
+) -> Result<WrappedResponse> {
+    let connection = db::open_read_only_connection(db_path)?;
+    if !table_exists(&connection, "entries")? {
+        return Err(anyhow!(
+            "The active database does not contain an entries table."
+        ));
+    }
+
+    let window = resolve_wrapped_window(period, anchor, today)?;
+    let granularity = if window.period == "year" {
+        "month"
+    } else {
+        "day"
+    };
+    let current = collect_wrapped_dataset(&connection, window.start, window.end, granularity)?;
+    let previous = collect_wrapped_dataset(
+        &connection,
+        window.previous_start,
+        window.previous_end,
+        granularity,
+    )?;
+    let day_count = (window.end - window.start).num_days() + 1;
+    let comparison = WrappedComparison {
+        entries: wrapped_metric_comparison(current.summary.entries, previous.summary.entries),
+        words: wrapped_metric_comparison(current.summary.words, previous.summary.words),
+        active_days: wrapped_metric_comparison(
+            current.summary.active_days,
+            previous.summary.active_days,
+        ),
+        health_score: wrapped_metric_comparison(
+            current.summary.health_score,
+            previous.summary.health_score,
+        ),
+    };
+    let personal_best_badges = wrapped_personal_best_badges(&connection, window.start, window.end)?;
+
+    Ok(WrappedResponse {
+        period: window.period.clone(),
+        anchor: window.anchor,
+        title: format!("Capsule Wrapped: {}", window.label),
+        range: WrappedRange {
+            from: window.start.to_string(),
+            to: window.end.to_string(),
+            day_count,
+            label: window.label,
+        },
+        navigation: window.navigation,
+        summary: current.summary.clone(),
+        comparison,
+        highlights: current.highlights.clone(),
+        records: current.records.clone(),
+        insights: wrapped_insights(&current, &previous, &window.period),
+        fun_facts: wrapped_fun_facts(&current, day_count),
+        charts: current.charts,
+        personal_best_badges,
+    })
+}
+
+fn resolve_wrapped_window(
+    period: &str,
+    anchor: Option<&str>,
+    today: NaiveDate,
+) -> Result<WrappedWindow> {
+    let period = period.trim().to_lowercase();
+    if !matches!(period.as_str(), "week" | "month" | "year") {
+        return Err(anyhow!("period must be one of: week, month, year"));
+    }
+
+    let (start, end, latest_start, latest_end, previous_start, previous_end, next_start, next_end) =
+        match period.as_str() {
+            "week" => {
+                let current_week_start =
+                    today - Duration::days(i64::from(today.weekday().num_days_from_monday()));
+                let latest_start = current_week_start - Duration::days(7);
+                let start = if let Some(value) = normalize_string(anchor) {
+                    NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+                        .context("Week anchor must be a Monday in YYYY-MM-DD format")?
+                } else {
+                    latest_start
+                };
+                if start.weekday().num_days_from_monday() != 0 {
+                    return Err(anyhow!("Week anchor must be a Monday in YYYY-MM-DD format"));
+                }
+                if start > latest_start {
+                    return Err(anyhow!("Week anchor must reference a completed week"));
+                }
+                (
+                    start,
+                    start + Duration::days(6),
+                    latest_start,
+                    latest_start + Duration::days(6),
+                    start - Duration::days(7),
+                    start - Duration::days(1),
+                    start + Duration::days(7),
+                    start + Duration::days(13),
+                )
+            }
+            "month" => {
+                let current_month_start = NaiveDate::from_ymd_opt(today.year(), today.month(), 1)
+                    .expect("current month must be valid");
+                let latest_start = shift_month_start(current_month_start, -1)?;
+                let start = if let Some(value) = normalize_string(anchor) {
+                    if value.len() != 7 {
+                        return Err(anyhow!("Month anchor must be in YYYY-MM format"));
+                    }
+                    NaiveDate::parse_from_str(&format!("{value}-01"), "%Y-%m-%d")
+                        .context("Month anchor must be in YYYY-MM format")?
+                } else {
+                    latest_start
+                };
+                if start > latest_start {
+                    return Err(anyhow!("Month anchor must reference a completed month"));
+                }
+                let previous_start = shift_month_start(start, -1)?;
+                let next_start = shift_month_start(start, 1)?;
+                (
+                    start,
+                    last_day_of_month(start)?,
+                    latest_start,
+                    last_day_of_month(latest_start)?,
+                    previous_start,
+                    last_day_of_month(previous_start)?,
+                    next_start,
+                    last_day_of_month(next_start)?,
+                )
+            }
+            _ => {
+                let latest_start = NaiveDate::from_ymd_opt(today.year() - 1, 1, 1)
+                    .ok_or_else(|| anyhow!("Unable to resolve the latest completed year"))?;
+                let start = if let Some(value) = normalize_string(anchor) {
+                    if value.len() != 4
+                        || !value.chars().all(|character| character.is_ascii_digit())
+                    {
+                        return Err(anyhow!("Year anchor must be in YYYY format"));
+                    }
+                    let year = value
+                        .parse::<i32>()
+                        .context("Year anchor must be in YYYY format")?;
+                    NaiveDate::from_ymd_opt(year, 1, 1)
+                        .ok_or_else(|| anyhow!("Year anchor must be a positive year"))?
+                } else {
+                    latest_start
+                };
+                if start > latest_start {
+                    return Err(anyhow!("Year anchor must reference a completed year"));
+                }
+                let previous_start = NaiveDate::from_ymd_opt(start.year() - 1, 1, 1)
+                    .ok_or_else(|| anyhow!("Unable to resolve the previous year"))?;
+                let next_start = NaiveDate::from_ymd_opt(start.year() + 1, 1, 1)
+                    .ok_or_else(|| anyhow!("Unable to resolve the next year"))?;
+                (
+                    start,
+                    NaiveDate::from_ymd_opt(start.year(), 12, 31).expect("valid year end"),
+                    latest_start,
+                    NaiveDate::from_ymd_opt(latest_start.year(), 12, 31)
+                        .expect("valid latest year end"),
+                    previous_start,
+                    NaiveDate::from_ymd_opt(previous_start.year(), 12, 31)
+                        .expect("valid previous year end"),
+                    next_start,
+                    NaiveDate::from_ymd_opt(next_start.year(), 12, 31)
+                        .expect("valid next year end"),
+                )
+            }
+        };
+
+    let anchor_value = wrapped_anchor(&period, start);
+    let latest_anchor = wrapped_anchor(&period, latest_start);
+    let is_latest = start == latest_start;
+    let next_anchor = (!is_latest).then(|| wrapped_anchor(&period, next_start));
+    let next_label = (!is_latest).then(|| wrapped_period_label(&period, next_start, next_end));
+
+    Ok(WrappedWindow {
+        period: period.clone(),
+        anchor: anchor_value,
+        start,
+        end,
+        previous_start,
+        previous_end,
+        label: wrapped_period_label(&period, start, end),
+        navigation: WrappedNavigation {
+            latest_anchor,
+            latest_label: wrapped_period_label(&period, latest_start, latest_end),
+            previous_anchor: wrapped_anchor(&period, previous_start),
+            previous_label: wrapped_period_label(&period, previous_start, previous_end),
+            next_anchor,
+            next_label,
+            is_latest,
+        },
+    })
+}
+
+fn collect_wrapped_dataset(
+    connection: &Connection,
+    start: NaiveDate,
+    end: NaiveDate,
+    granularity: &str,
+) -> Result<WrappedDataset> {
+    let period = AnalyticsPeriodRequest {
+        since: Some(start.to_string()),
+        until: Some(format!("{end} 23:59:59")),
+    };
+    let rows = load_entry_rows(connection, &period)?;
+    let total_entries = rows.len() as i64;
+    let total_words = rows
+        .iter()
+        .map(|row| word_count(&row.text) as i64)
+        .sum::<i64>();
+    let active_dates = rows
+        .iter()
+        .filter_map(|row| parse_date(&row.date))
+        .collect::<HashSet<_>>();
+    let active_days = active_dates.len() as i64;
+    let (longest_streak, _) = streaks(&active_dates);
+    let tags = tag_breakdown(connection, &period)?;
+    let moods = mood_breakdown(&rows);
+    let locations = location_breakdown(connection, &period)?;
+    let tag_counts_by_entry = tag_counts_by_entry(connection, &period)?;
+
+    let top_tag = tags.first().map(|item| WrappedHighlight {
+        label: item.label.clone(),
+        count: item.count,
+        share: Some(round_to(
+            if total_entries == 0 {
+                0.0
+            } else {
+                item.count as f64 / total_entries as f64
+            },
+            3,
+        )),
+        hour: None,
+    });
+    let mood_total = moods.iter().map(|item| item.count).sum::<i64>();
+    let top_mood = moods.first().map(|item| WrappedHighlight {
+        label: item.label.clone(),
+        count: item.count,
+        share: Some(round_to(
+            if mood_total == 0 {
+                0.0
+            } else {
+                item.count as f64 / mood_total as f64
+            },
+            3,
+        )),
+        hour: None,
+    });
+
+    let mut weekday_counts = [0_i64; 7];
+    let mut hour_counts = [0_i64; 24];
+    for row in &rows {
+        if let Some(date) = parse_date(&row.date) {
+            weekday_counts[date.weekday().num_days_from_monday() as usize] += 1;
+        }
+        if let Some(hour) = parse_hour(&row.created_at) {
+            hour_counts[hour as usize] += 1;
+        }
+    }
+    let top_weekday_index =
+        (0..7)
+            .filter(|index| weekday_counts[*index] > 0)
+            .max_by(|left, right| {
+                weekday_counts[*left]
+                    .cmp(&weekday_counts[*right])
+                    .then_with(|| right.cmp(left))
+            });
+    let top_hour_index = (0..24)
+        .filter(|index| hour_counts[*index] > 0)
+        .max_by(|left, right| {
+            hour_counts[*left]
+                .cmp(&hour_counts[*right])
+                .then_with(|| right.cmp(left))
+        });
+    let weekday_names = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ];
+    let top_weekday = top_weekday_index.map(|index| WrappedHighlight {
+        label: weekday_names[index].to_string(),
+        count: weekday_counts[index],
+        share: None,
+        hour: None,
+    });
+    let top_hour = top_hour_index.map(|index| WrappedHighlight {
+        label: format!("{index:02}:00"),
+        count: hour_counts[index],
+        share: None,
+        hour: Some(index as i64),
+    });
+    let top_location = locations.first().map(|item| WrappedHighlight {
+        label: item.label.clone(),
+        count: item.count,
+        share: None,
+        hour: None,
+    });
+
+    let mut by_day: BTreeMap<String, WrappedDayBucket> = BTreeMap::new();
+    let mut activity_buckets: BTreeMap<String, WrappedDayBucket> = BTreeMap::new();
+    for row in &rows {
+        let entry_words = word_count(&row.text) as i64;
+        let day = by_day.entry(row.date.clone()).or_default();
+        day.entries += 1;
+        day.words += entry_words;
+        let activity_key = if granularity == "month" {
+            row.date.get(0..7).unwrap_or(&row.date).to_string()
+        } else {
+            row.date.clone()
+        };
+        let activity = activity_buckets.entry(activity_key).or_default();
+        activity.entries += 1;
+        activity.words += entry_words;
+    }
+
+    let busiest_day = by_day
+        .iter()
+        .max_by(|(left_date, left), (right_date, right)| {
+            left.entries
+                .cmp(&right.entries)
+                .then_with(|| left.words.cmp(&right.words))
+                .then_with(|| left_date.cmp(right_date))
+        })
+        .map(|(date, bucket)| WrappedBusiestDay {
+            date: date.clone(),
+            entry_count: bucket.entries,
+            word_count: bucket.words,
+        });
+    let longest_entry = rows
+        .iter()
+        .max_by(|left, right| {
+            word_count(&left.text)
+                .cmp(&word_count(&right.text))
+                .then_with(|| left.created_at.cmp(&right.created_at))
+                .then_with(|| left.id.cmp(&right.id))
+        })
+        .map(|row| WrappedLongestEntry {
+            entry_id: row.id,
+            uuid: row.uuid.clone(),
+            created_at: row.created_at.clone(),
+            date: row.date.clone(),
+            word_count: word_count(&row.text) as i64,
+        });
+    let most_tagged_entry = rows
+        .iter()
+        .filter_map(|row| {
+            let tag_count = tag_counts_by_entry.get(&row.id).copied().unwrap_or(0);
+            (tag_count > 0).then_some((row, tag_count))
+        })
+        .max_by(|(left, left_count), (right, right_count)| {
+            left_count
+                .cmp(right_count)
+                .then_with(|| left.created_at.cmp(&right.created_at))
+                .then_with(|| left.id.cmp(&right.id))
+        })
+        .map(|(row, tag_count)| WrappedMostTaggedEntry {
+            entry_id: row.id,
+            created_at: row.created_at.clone(),
+            tag_count,
+        });
+
+    Ok(WrappedDataset {
+        summary: WrappedSummary {
+            entries: total_entries,
+            words: total_words,
+            active_days,
+            avg_words_per_entry: round_to(
+                if total_entries == 0 {
+                    0.0
+                } else {
+                    total_words as f64 / total_entries as f64
+                },
+                2,
+            ),
+            avg_entries_per_active_day: round_to(
+                if active_days == 0 {
+                    0.0
+                } else {
+                    total_entries as f64 / active_days as f64
+                },
+                2,
+            ),
+            health_score: wrapped_health_score(total_entries, longest_streak, active_days),
+            longest_streak,
+        },
+        highlights: WrappedHighlights {
+            top_tag,
+            top_mood,
+            top_weekday,
+            top_hour,
+            top_location,
+        },
+        records: WrappedRecords {
+            busiest_day,
+            longest_entry,
+            most_tagged_entry,
+        },
+        charts: WrappedCharts {
+            activity_granularity: granularity.to_string(),
+            activity: wrapped_activity_points(start, end, granularity, &activity_buckets)?,
+            top_tags: tags
+                .into_iter()
+                .take(8)
+                .map(|item| WrappedChartCountPoint {
+                    label: item.label,
+                    count: item.count,
+                })
+                .collect(),
+            mood_distribution: moods
+                .into_iter()
+                .map(|item| WrappedChartCountPoint {
+                    label: item.label,
+                    count: item.count,
+                })
+                .collect(),
+        },
+    })
+}
+
+fn wrapped_activity_points(
+    start: NaiveDate,
+    end: NaiveDate,
+    granularity: &str,
+    buckets: &BTreeMap<String, WrappedDayBucket>,
+) -> Result<Vec<WrappedActivityPoint>> {
+    let mut points = Vec::new();
+    if granularity == "month" {
+        let mut cursor = NaiveDate::from_ymd_opt(start.year(), start.month(), 1)
+            .expect("wrapped month start must be valid");
+        while cursor <= end {
+            let period = cursor.format("%Y-%m").to_string();
+            let bucket = buckets.get(&period).cloned().unwrap_or_default();
+            points.push(WrappedActivityPoint {
+                period,
+                entries: bucket.entries,
+                words: bucket.words,
+            });
+            cursor = shift_month_start(cursor, 1)?;
+        }
+    } else {
+        let mut cursor = start;
+        while cursor <= end {
+            let period = cursor.to_string();
+            let bucket = buckets.get(&period).cloned().unwrap_or_default();
+            points.push(WrappedActivityPoint {
+                period,
+                entries: bucket.entries,
+                words: bucket.words,
+            });
+            cursor += Duration::days(1);
+        }
+    }
+    Ok(points)
+}
+
+fn tag_counts_by_entry(
+    connection: &Connection,
+    period: &AnalyticsPeriodRequest,
+) -> Result<HashMap<i64, i64>> {
+    if !table_exists(connection, "tags")? || !table_exists(connection, "entry_tags")? {
+        return Ok(HashMap::new());
+    }
+    let filter = period_filter("e", period);
+    let sql = format!(
+        "SELECT e.id, COUNT(*)
+         FROM entry_tags et
+         JOIN entries e ON e.id = et.entry_id
+         {}
+         GROUP BY e.id",
+        filter.where_sql
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(filter.params), |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+    })?;
+    rows.collect::<rusqlite::Result<HashMap<_, _>>>()
+        .context("failed to count entry tags for wrapped")
+}
+
+fn wrapped_metric_comparison(current: i64, previous: i64) -> WrappedMetricComparison {
+    let delta = current - previous;
+    WrappedMetricComparison {
+        current,
+        previous,
+        delta,
+        pct_change: (previous != 0).then(|| round_to(delta as f64 / previous as f64 * 100.0, 1)),
+        direction: if delta > 0 {
+            "up"
+        } else if delta < 0 {
+            "down"
+        } else {
+            "flat"
+        }
+        .to_string(),
+    }
+}
+
+fn wrapped_insights(
+    current: &WrappedDataset,
+    previous: &WrappedDataset,
+    period: &str,
+) -> Vec<WrappedInsight> {
+    let mut insights = Vec::new();
+    let current_entries = current.summary.entries;
+    let previous_entries = previous.summary.entries;
+    let current_words = current.summary.words;
+    let previous_words = previous.summary.words;
+
+    if current_entries > 0 {
+        let body = if previous_entries > 0 && current_entries != previous_entries {
+            let delta = current_entries - previous_entries;
+            Some(format!(
+                "You logged {} {} {} than the previous {} ({} vs {}).",
+                delta.abs(),
+                if delta > 0 { "more" } else { "fewer" },
+                plural(delta.abs(), "entry"),
+                period,
+                current_entries,
+                previous_entries
+            ))
+        } else if previous_entries == 0 {
+            Some(format!(
+                "After a quiet previous {period}, you filled this one with {current_entries} {} and {current_words} words.",
+                plural(current_entries, "entry")
+            ))
+        } else if previous_words != current_words {
+            let delta = current_words - previous_words;
+            Some(format!(
+                "Your writing volume landed at {current_words} words, {} {} than the previous {period}.",
+                delta.abs(),
+                if delta > 0 { "more" } else { "fewer" }
+            ))
+        } else {
+            None
+        };
+        if let Some(body) = body {
+            insights.push(WrappedInsight {
+                kind: "momentum".to_string(),
+                title: "Momentum".to_string(),
+                body,
+            });
+        }
+    }
+
+    let routine_body = match (
+        current.highlights.top_weekday.as_ref(),
+        current.highlights.top_hour.as_ref(),
+    ) {
+        (Some(weekday), Some(hour)) => Some(format!(
+            "Your rhythm leaned toward {} around {}, when you showed up most often.",
+            weekday.label, hour.label
+        )),
+        (Some(weekday), None) => Some(format!(
+            "{} was your most active writing day this {period}.",
+            weekday.label
+        )),
+        (None, Some(hour)) => Some(format!(
+            "{} was your peak writing hour this {period}.",
+            hour.label
+        )),
+        (None, None) => None,
+    };
+    if let Some(body) = routine_body {
+        insights.push(WrappedInsight {
+            kind: "routine".to_string(),
+            title: "Routine".to_string(),
+            body,
+        });
+    }
+    if let Some(mood) = current.highlights.top_mood.as_ref() {
+        insights.push(WrappedInsight {
+            kind: "mood".to_string(),
+            title: "Mood".to_string(),
+            body: format!(
+                "'{}' led your mood check-ins, showing up on {} {}.",
+                mood.label,
+                mood.count,
+                plural(mood.count, "entry")
+            ),
+        });
+    }
+    if let Some(tag) = current.highlights.top_tag.as_ref() {
+        insights.push(WrappedInsight {
+            kind: "topic".to_string(),
+            title: "Topic".to_string(),
+            body: format!(
+                "The tag '{}' kept resurfacing, attached to {} {}.",
+                tag.label,
+                tag.count,
+                plural(tag.count, "entry")
+            ),
+        });
+    }
+    insights
+}
+
+fn wrapped_fun_facts(dataset: &WrappedDataset, day_count: i64) -> Vec<WrappedFunFact> {
+    let mut facts = Vec::new();
+    if let Some(day) = dataset.records.busiest_day.as_ref() {
+        facts.push(WrappedFunFact {
+            kind: "busiest_day".to_string(),
+            title: "Busiest Day".to_string(),
+            body: format!(
+                "{} packed in {} {} and {} words.",
+                wrapped_display_date(&day.date),
+                day.entry_count,
+                plural(day.entry_count, "entry"),
+                day.word_count
+            ),
+        });
+    }
+    if let Some(entry) = dataset.records.longest_entry.as_ref() {
+        facts.push(WrappedFunFact {
+            kind: "longest_entry".to_string(),
+            title: "Longest Entry".to_string(),
+            body: format!(
+                "Your longest entry stretched to {} {} on {}.",
+                entry.word_count,
+                plural(entry.word_count, "word"),
+                wrapped_display_date(&entry.date)
+            ),
+        });
+    }
+    if let Some(entry) = dataset.records.most_tagged_entry.as_ref() {
+        facts.push(WrappedFunFact {
+            kind: "most_tagged_entry".to_string(),
+            title: "Most Tagged Entry".to_string(),
+            body: format!(
+                "One entry carried {} {} on {}.",
+                entry.tag_count,
+                plural(entry.tag_count, "tag"),
+                wrapped_display_date(entry.created_at.get(0..10).unwrap_or(&entry.created_at))
+            ),
+        });
+    }
+    if dataset.summary.entries > 0 {
+        let consistency = if day_count == 0 {
+            0
+        } else {
+            (dataset.summary.active_days as f64 / day_count as f64 * 100.0).round() as i64
+        };
+        facts.push(WrappedFunFact {
+            kind: "consistency".to_string(),
+            title: "Consistency".to_string(),
+            body: format!(
+                "You showed up on {} of {} days ({}%) and built a best run of {} {}.",
+                dataset.summary.active_days,
+                day_count,
+                consistency,
+                dataset.summary.longest_streak,
+                plural(dataset.summary.longest_streak, "day")
+            ),
+        });
+    }
+    facts
+}
+
+fn wrapped_personal_best_badges(
+    connection: &Connection,
+    start: NaiveDate,
+    end: NaiveDate,
+) -> Result<Vec<WrappedBadge>> {
+    let period = AnalyticsPeriodRequest::default();
+    let rows = load_entry_rows(connection, &period)?;
+    let tag_counts = tag_counts_by_entry(connection, &period)?;
+    let mut by_day: BTreeMap<String, WrappedDayBucket> = BTreeMap::new();
+    for row in &rows {
+        let bucket = by_day.entry(row.date.clone()).or_default();
+        bucket.entries += 1;
+        bucket.words += word_count(&row.text) as i64;
+    }
+    let best_notes_day = by_day
+        .iter()
+        .max_by(|(left_date, left), (right_date, right)| {
+            left.entries
+                .cmp(&right.entries)
+                .then_with(|| left.words.cmp(&right.words))
+                .then_with(|| left_date.cmp(right_date))
+        });
+    let best_words_day = by_day
+        .iter()
+        .max_by(|(left_date, left), (right_date, right)| {
+            left.words
+                .cmp(&right.words)
+                .then_with(|| left.entries.cmp(&right.entries))
+                .then_with(|| left_date.cmp(right_date))
+        });
+    let most_tagged = rows
+        .iter()
+        .filter_map(|row| {
+            let count = tag_counts.get(&row.id).copied().unwrap_or(0);
+            (count > 0).then_some((row, count))
+        })
+        .max_by(|(left, left_count), (right, right_count)| {
+            left_count
+                .cmp(right_count)
+                .then_with(|| left.created_at.cmp(&right.created_at))
+                .then_with(|| left.id.cmp(&right.id))
+        });
+    let longest_entry = rows.iter().max_by(|left, right| {
+        word_count(&left.text)
+            .cmp(&word_count(&right.text))
+            .then_with(|| left.created_at.cmp(&right.created_at))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    let in_range = |value: &str| {
+        parse_date(value)
+            .map(|date| date >= start && date <= end)
+            .unwrap_or(false)
+    };
+    let mut badges = Vec::new();
+    if let Some((date, bucket)) = best_notes_day.filter(|(date, _)| in_range(date)) {
+        badges.push(WrappedBadge {
+            id: "best_notes_day".to_string(),
+            title: "Lifetime Best Notes Day".to_string(),
+            value: format!("{} {}", bucket.entries, plural(bucket.entries, "entry")),
+            detail: wrapped_display_date(date),
+        });
+    }
+    if let Some((date, bucket)) = best_words_day.filter(|(date, _)| in_range(date)) {
+        badges.push(WrappedBadge {
+            id: "best_words_day".to_string(),
+            title: "Lifetime Best Words Day".to_string(),
+            value: format!("{} {}", bucket.words, plural(bucket.words, "word")),
+            detail: wrapped_display_date(date),
+        });
+    }
+    if let Some((entry, count)) = most_tagged.filter(|(entry, _)| in_range(&entry.created_at)) {
+        badges.push(WrappedBadge {
+            id: "most_tags_in_post".to_string(),
+            title: "Most Tags On One Entry".to_string(),
+            value: format!("{count} {}", plural(count, "tag")),
+            detail: wrapped_display_date(&entry.date),
+        });
+    }
+    if let Some(entry) = longest_entry.filter(|entry| in_range(&entry.created_at)) {
+        let count = word_count(&entry.text) as i64;
+        badges.push(WrappedBadge {
+            id: "longest_entry".to_string(),
+            title: "Longest Entry Ever".to_string(),
+            value: format!("{count} {}", plural(count, "word")),
+            detail: wrapped_display_date(&entry.date),
+        });
+    }
+    Ok(badges)
+}
+
+fn wrapped_health_score(total_entries: i64, longest_streak: i64, active_days: i64) -> i64 {
+    if total_entries == 0 {
+        return 0;
+    }
+    let entry_score = ((total_entries as f64 / 100.0) * 30.0) as i64;
+    let streak_score = ((longest_streak as f64 / 30.0) * 40.0) as i64;
+    let activity_score = ((active_days as f64 / 7.0) * 30.0) as i64;
+    entry_score.min(30) + streak_score.min(40) + activity_score.min(30)
+}
+
+fn wrapped_anchor(period: &str, start: NaiveDate) -> String {
+    match period {
+        "week" => start.to_string(),
+        "month" => start.format("%Y-%m").to_string(),
+        _ => start.year().to_string(),
+    }
+}
+
+fn wrapped_period_label(period: &str, start: NaiveDate, end: NaiveDate) -> String {
+    match period {
+        "week" => wrapped_date_range(start, end),
+        "month" => start.format("%B %Y").to_string(),
+        _ => start.year().to_string(),
+    }
+}
+
+fn wrapped_date_range(start: NaiveDate, end: NaiveDate) -> String {
+    if start.year() == end.year() {
+        if start.month() == end.month() {
+            format!(
+                "{} {} - {}, {}",
+                start.format("%b"),
+                start.day(),
+                end.day(),
+                start.year()
+            )
+        } else {
+            format!(
+                "{} {} - {} {}, {}",
+                start.format("%b"),
+                start.day(),
+                end.format("%b"),
+                end.day(),
+                start.year()
+            )
+        }
+    } else {
+        format!(
+            "{} {}, {} - {} {}, {}",
+            start.format("%b"),
+            start.day(),
+            start.year(),
+            end.format("%b"),
+            end.day(),
+            end.year()
+        )
+    }
+}
+
+fn wrapped_display_date(value: &str) -> String {
+    parse_date(value)
+        .map(|date| date.format("%b %d, %Y").to_string())
+        .unwrap_or_else(|| value.to_string())
+}
+
+fn shift_month_start(value: NaiveDate, months: i32) -> Result<NaiveDate> {
+    let month_index = value.year() * 12 + value.month0() as i32 + months;
+    let year = month_index.div_euclid(12);
+    let month = month_index.rem_euclid(12) as u32 + 1;
+    NaiveDate::from_ymd_opt(year, month, 1)
+        .ok_or_else(|| anyhow!("Unable to resolve wrapped month"))
+}
+
+fn last_day_of_month(value: NaiveDate) -> Result<NaiveDate> {
+    Ok(shift_month_start(value, 1)? - Duration::days(1))
+}
+
+fn round_to(value: f64, places: i32) -> f64 {
+    let scale = 10_f64.powi(places);
+    (value * scale).round() / scale
+}
+
+fn plural(value: i64, singular: &str) -> String {
+    if value == 1 {
+        singular.to_string()
+    } else if let Some(stem) = singular.strip_suffix('y').filter(|stem| {
+        stem.chars()
+            .last()
+            .is_some_and(|letter| !"aeiou".contains(letter))
+    }) {
+        format!("{stem}ies")
+    } else {
+        format!("{singular}s")
+    }
 }
 
 pub fn get_writing_calendar(year: Option<i32>) -> Result<WritingCalendarResponse> {
@@ -174,7 +1066,9 @@ fn load_entry_rows(
 ) -> Result<Vec<EntryStatsRow>> {
     let filter = period_filter("e", period);
     let sql = format!(
-        "SELECT e.created_at,
+        "SELECT e.id,
+                e.uuid,
+                e.created_at,
                 substr(e.created_at, 1, 10) AS entry_date,
                 COALESCE(NULLIF(e.text_plain, ''), e.text, '') AS text_value,
                 e.mood
@@ -186,10 +1080,12 @@ fn load_entry_rows(
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(params_from_iter(filter.params), |row| {
         Ok(EntryStatsRow {
-            created_at: row.get(0)?,
-            date: row.get(1)?,
-            text: row.get(2)?,
-            mood: row.get(3)?,
+            id: row.get(0)?,
+            uuid: row.get(1)?,
+            created_at: row.get(2)?,
+            date: row.get(3)?,
+            text: row.get(4)?,
+            mood: row.get(5)?,
         })
     })?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -976,6 +1872,92 @@ mod tests {
             .expect("happy day");
         assert_eq!(happy_day.mood_sentiment_count, 1);
         assert_close(happy_day.average_mood_sentiment, 1.0);
+    }
+
+    #[test]
+    fn wrapped_builds_completed_month_stats_and_lifetime_callouts() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_stats_fixture(temp_dir.path());
+
+        let response = get_wrapped_for_database(
+            &db_path,
+            "month",
+            Some("2026-01"),
+            NaiveDate::from_ymd_opt(2026, 3, 15).expect("date"),
+        )
+        .expect("wrapped");
+
+        assert_eq!(response.anchor, "2026-01");
+        assert_eq!(response.range.label, "January 2026");
+        assert_eq!(response.range.day_count, 31);
+        assert_eq!(response.summary.entries, 3);
+        assert_eq!(response.summary.words, 9);
+        assert_eq!(response.summary.active_days, 2);
+        assert_eq!(response.highlights.top_tag.expect("top tag").label, "work");
+        assert_eq!(
+            response.records.busiest_day.expect("busiest day").date,
+            "2026-01-02"
+        );
+        assert_eq!(response.charts.activity.len(), 31);
+        assert_eq!(
+            response
+                .charts
+                .activity
+                .iter()
+                .find(|point| point.period == "2026-01-02")
+                .expect("activity point")
+                .entries,
+            2
+        );
+        assert_eq!(response.navigation.next_anchor.as_deref(), Some("2026-02"));
+        assert!(response
+            .personal_best_badges
+            .iter()
+            .any(|badge| badge.id == "best_notes_day"));
+        assert!(response
+            .personal_best_badges
+            .iter()
+            .any(|badge| badge.id == "best_words_day"));
+    }
+
+    #[test]
+    fn wrapped_uses_monthly_activity_for_completed_years() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_stats_fixture(temp_dir.path());
+
+        let response = get_wrapped_for_database(
+            &db_path,
+            "year",
+            None,
+            NaiveDate::from_ymd_opt(2027, 4, 10).expect("date"),
+        )
+        .expect("wrapped");
+
+        assert_eq!(response.anchor, "2026");
+        assert_eq!(response.charts.activity_granularity, "month");
+        assert_eq!(response.charts.activity.len(), 12);
+        assert_eq!(
+            response
+                .charts
+                .activity
+                .iter()
+                .find(|point| point.period == "2026-01")
+                .expect("january")
+                .entries,
+            3
+        );
+        assert_eq!(
+            response
+                .charts
+                .activity
+                .iter()
+                .find(|point| point.period == "2026-02")
+                .expect("february")
+                .entries,
+            1
+        );
+        assert!(response.navigation.is_latest);
+        assert!(response.navigation.next_anchor.is_none());
     }
 
     fn assert_close(actual: Option<f64>, expected: f64) {

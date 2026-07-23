@@ -132,4 +132,39 @@ describe("App Writer settings", () => {
     expect(await screen.findByText("Update installed. Restart Capsule to finish applying it.")).toBeVisible();
     expect(nativeConfirm).not.toHaveBeenCalled();
   });
+
+  test("opens Wrapped and browses completed periods", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Wrapped" }));
+
+    const latestHeading = await screen.findByRole("heading", {
+      name: /^Capsule Wrapped:/,
+    });
+    const latestTitle = latestHeading.textContent;
+    const newerButton = screen.getByRole("button", { name: "Newer" });
+    expect(newerButton).toBeDisabled();
+    expect(screen.getByRole("tab", { name: "Month" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Older" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: /^Capsule Wrapped:/ }).textContent,
+      ).not.toBe(latestTitle);
+    });
+    expect(screen.getByRole("button", { name: "Newer" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Year" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "Year" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      ),
+    );
+  });
 });
