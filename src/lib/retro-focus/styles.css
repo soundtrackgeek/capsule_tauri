@@ -1954,8 +1954,7 @@
   scrollbar-width: none;
 }
 
-.editor-pane__input::selection,
-textarea::selection {
+.editor-pane__input::selection {
   background: var(--selection-color);
 }
 

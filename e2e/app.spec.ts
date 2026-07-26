@@ -102,6 +102,49 @@ test("creates a journal entry through the composer", async ({ page }) => {
   expect(browserErrors).toEqual([]);
 });
 
+test("selects, copies, and pastes text in the entry composer", async ({ page }) => {
+  const browserErrors = trackBrowserErrors(page);
+  const text = "Clipboard-safe journal text.";
+
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/");
+  await page.getByRole("button", { name: /^New$/ }).click();
+
+  const entry = page
+    .getByRole("region", { name: "New entry" })
+    .getByRole("textbox", { name: "Entry" });
+  const selectionRuleSelectors = await page.evaluate(() =>
+    Array.from(document.styleSheets).flatMap((sheet) =>
+      Array.from(sheet.cssRules)
+        .map((rule) => ("selectorText" in rule ? rule.selectorText : null))
+        .filter((selector): selector is string => Boolean(selector?.includes("::selection"))),
+    ),
+  );
+
+  expect(selectionRuleSelectors).toContain(".editor-pane__input::selection");
+  expect(selectionRuleSelectors).not.toContain("textarea::selection");
+
+  await entry.fill(text);
+  await entry.press("ControlOrMeta+A");
+
+  expect(
+    await entry.evaluate((element) => {
+      const textarea = element as HTMLTextAreaElement;
+      return {
+        selectionStart: textarea.selectionStart,
+        selectionEnd: textarea.selectionEnd,
+      };
+    }),
+  ).toEqual({ selectionStart: 0, selectionEnd: text.length });
+
+  await entry.press("ControlOrMeta+C");
+  await entry.press("End");
+  await entry.press("ControlOrMeta+V");
+
+  await expect(entry).toHaveValue(`${text}${text}`);
+  expect(browserErrors).toEqual([]);
+});
+
 test("initializes Cloud AI and confirms metadata generation in the composer", async ({ page }) => {
   const browserErrors = trackBrowserErrors(page);
 

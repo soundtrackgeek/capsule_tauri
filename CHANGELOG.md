@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.33.1 - 2026-07-26
+
+### Fixed
+
+- Fixed text selection, copying, and pasting in New Entry and other multiline
+  fields by keeping the retro Writer selection styling scoped to its editor.
+
+### Changed
+
+- Bumped the app version to 0.33.1.
+
 ## 0.33.0 - 2026-07-26
 
 ### Added
