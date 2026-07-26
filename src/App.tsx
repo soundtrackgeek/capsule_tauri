@@ -63,6 +63,7 @@ import {
   attachImage,
   appendDebugLog,
   bulkDetachThreads,
+  bulkLinkThreads,
   claimQuest,
   checkForAppUpdate,
   cancelAiChatStream,
@@ -734,6 +735,7 @@ function App() {
   const [threadResponse, setThreadResponse] = useState<ThreadListResponse | null>(null);
   const [selectedThreadRoot, setSelectedThreadRoot] = useState<string | null>(null);
   const [threadDraft, setThreadDraft] = useState<ThreadMetadataDraft>(emptyThreadDraft);
+  const [threadEntryPickerOpen, setThreadEntryPickerOpen] = useState(false);
   const [composerMode, setComposerMode] = useState<ComposerMode>("create");
   const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
   const [composerDraft, setComposerDraft] = useState<ComposerDraft>(emptyComposerDraft);
@@ -2494,6 +2496,36 @@ function App() {
     [applyThreadMutationResponse],
   );
 
+  const handleLinkExistingThreadEntry = useCallback(
+    async (entry: Entry) => {
+      const parentEntry = selectedThread?.entries.at(-1);
+      if (!selectedThread || !parentEntry) {
+        throw new Error("Select a thread before adding an existing entry.");
+      }
+
+      setMutatingEntryUuid(entry.uuid);
+      setError(null);
+      setNotice(null);
+      try {
+        const response = await bulkLinkThreads({
+          parentUuid: parentEntry.uuid,
+          childUuids: [entry.uuid],
+        });
+        await applyThreadMutationResponse(response);
+        setNotice(`Added an existing entry with backup: ${response.audit.backupPath}`);
+        setThreadEntryPickerOpen(false);
+      } catch (threadError) {
+        const message =
+          threadError instanceof Error ? threadError.message : "Unable to add existing entry";
+        setError(message);
+        throw threadError;
+      } finally {
+        setMutatingEntryUuid(null);
+      }
+    },
+    [applyThreadMutationResponse, selectedThread],
+  );
+
   const handleDisbandThread = useCallback(
     async (thread: ThreadGroup) => {
       if (!window.confirm("Disband this thread and remove all continuation links?")) {
@@ -3065,6 +3097,7 @@ function App() {
             draft={threadDraft}
             loading={threadsLoading}
             mutatingEntryUuid={mutatingEntryUuid}
+            onAddExistingEntry={() => setThreadEntryPickerOpen(true)}
             onContinueEntry={openContinueEntry}
             onDetachEntry={handleDetachThreadEntry}
             onDisbandThread={handleDisbandThread}
@@ -3189,6 +3222,17 @@ function App() {
           entry={deleteCandidate}
           onCancel={() => setDeleteCandidate(null)}
           onConfirm={handleConfirmDeleteEntry}
+        />
+      )}
+
+      {threadEntryPickerOpen && selectedThread && selectedThread.entries.at(-1) && (
+        <ExistingThreadEntryDialog
+          key={selectedThread.rootUuid}
+          mutatingEntryUuid={mutatingEntryUuid}
+          onAttach={handleLinkExistingThreadEntry}
+          onCancel={() => setThreadEntryPickerOpen(false)}
+          parentEntry={selectedThread.entries.at(-1)!}
+          thread={selectedThread}
         />
       )}
 
@@ -4552,6 +4596,7 @@ type ThreadsViewProps = {
   onSelectThread: (rootUuid: string) => void;
   onSaveMetadata: (thread: ThreadGroup) => void;
   onDisbandThread: (thread: ThreadGroup) => void;
+  onAddExistingEntry: () => void;
   onEditEntry: (entry: Entry) => void;
   onContinueEntry: (entry: Entry) => void;
   onDetachEntry: (entry: Entry) => void;
@@ -4569,6 +4614,7 @@ function ThreadsView({
   onSelectThread,
   onSaveMetadata,
   onDisbandThread,
+  onAddExistingEntry,
   onEditEntry,
   onContinueEntry,
   onDetachEntry,
@@ -4647,6 +4693,14 @@ function ThreadsView({
               </div>
               <div className="thread-heading-actions">
                 <StatusPill tone="good">{selectedThread.entryCount} entries</StatusPill>
+                <button
+                  className="secondary-button"
+                  onClick={onAddExistingEntry}
+                  type="button"
+                >
+                  <Link2 size={17} />
+                  Add existing
+                </button>
                 <button
                   className="primary-button"
                   disabled={!continuationTarget}
@@ -8760,6 +8814,183 @@ function refreshAiConversationDetail(conversation: AIConversationDetail): AIConv
     lastMessageAt: latestTime,
     updatedAt: latestTime,
   };
+}
+
+type ExistingThreadEntryDialogProps = {
+  thread: ThreadGroup;
+  parentEntry: Entry;
+  mutatingEntryUuid: string | null;
+  onCancel: () => void;
+  onAttach: (entry: Entry) => Promise<void>;
+};
+
+function ExistingThreadEntryDialog({
+  thread,
+  parentEntry,
+  mutatingEntryUuid,
+  onCancel,
+  onAttach,
+}: ExistingThreadEntryDialogProps) {
+  const titleId = useId();
+  const [query, setQuery] = useState("");
+  const [entries, setEntries] = useState<Entry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [dialogError, setDialogError] = useState<string | null>(null);
+
+  const loadCandidates = useCallback(async (text: string) => {
+    setLoading(true);
+    setDialogError(null);
+    try {
+      const response = await listEntries({
+        text: text.trim() || undefined,
+        threaded: false,
+        limit: 100,
+        sort: "desc",
+      });
+      setEntries(response.entries.filter((entry) => !entry.thread));
+      setTotal(response.total);
+    } catch (candidateError) {
+      setEntries([]);
+      setTotal(0);
+      setDialogError(
+        candidateError instanceof Error
+          ? candidateError.message
+          : "Unable to load standalone entries",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCandidates("");
+  }, [loadCandidates]);
+
+  const handleAttach = async (entry: Entry) => {
+    setDialogError(null);
+    try {
+      await onAttach(entry);
+    } catch (attachError) {
+      setDialogError(
+        attachError instanceof Error ? attachError.message : "Unable to add existing entry",
+      );
+    }
+  };
+
+  const mutating = mutatingEntryUuid !== null;
+  const parentLabel =
+    parentEntry.title || parentEntry.textPlain.slice(0, 64) || parentEntry.uuid;
+
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <section
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="confirm-dialog existing-entry-dialog"
+        role="dialog"
+      >
+        <div className="confirm-dialog-header">
+          <div className="safety-mark" aria-hidden="true">
+            <Link2 size={22} />
+          </div>
+          <div>
+            <p className="eyebrow">{thread.title || "Selected thread"}</p>
+            <h3 id={titleId}>Add existing entry</h3>
+          </div>
+          <button
+            aria-label="Close existing entry picker"
+            className="icon-button icon-button--small"
+            disabled={mutating}
+            onClick={onCancel}
+            title="Close"
+            type="button"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <p className="existing-entry-intro">
+          Choose a standalone entry to continue from <strong>{parentLabel}</strong>. Entries already
+          attached to another thread are not shown.
+        </p>
+
+        <form
+          className="existing-entry-search"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void loadCandidates(query);
+          }}
+        >
+          <label className="field">
+            <span>Search entries</span>
+            <input
+              disabled={mutating}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Title, summary, or entry text"
+              type="search"
+              value={query}
+            />
+          </label>
+          <button className="secondary-button" disabled={loading || mutating} type="submit">
+            <Search size={16} />
+            Search
+          </button>
+        </form>
+
+        <div className="existing-entry-results-header">
+          <p className="eyebrow">Available entries</p>
+          <StatusPill tone="neutral">{loading ? "Loading" : `${total} found`}</StatusPill>
+        </div>
+
+        <div className="existing-entry-results" aria-live="polite">
+          {dialogError && (
+            <div className="banner banner--error" role="alert">
+              <TriangleAlert size={17} />
+              <span>{dialogError}</span>
+            </div>
+          )}
+          {loading && <SkeletonList />}
+          {!loading && !dialogError && entries.length === 0 && (
+            <div className="empty-state empty-state--compact">
+              {query.trim()
+                ? "No standalone entries match this search."
+                : "No standalone entries are available to add."}
+            </div>
+          )}
+          {!loading &&
+            entries.map((entry) => (
+              <article className="entry-mini existing-entry-option" key={entry.uuid}>
+                <div className="existing-entry-option-main">
+                  <div className="existing-entry-option-heading">
+                    <h4>{entry.title || entry.textPlain.slice(0, 84) || "Untitled entry"}</h4>
+                    <span>{formatDateTime(entry.createdAt)}</span>
+                  </div>
+                  <p>{entry.textPlain.slice(0, 150)}</p>
+                  <EntryMeta entry={entry} />
+                </div>
+                <button
+                  aria-label={`Add ${entry.title || "entry"} to thread`}
+                  className="secondary-button"
+                  disabled={mutating}
+                  onClick={() => void handleAttach(entry)}
+                  type="button"
+                >
+                  <Link2 size={16} />
+                  {mutatingEntryUuid === entry.uuid ? "Adding" : "Add"}
+                </button>
+              </article>
+            ))}
+        </div>
+
+        <div className="confirm-dialog-actions">
+          <button className="secondary-button" disabled={mutating} onClick={onCancel} type="button">
+            Cancel
+          </button>
+        </div>
+      </section>
+    </div>
+  );
 }
 
 type SyncViewProps = {

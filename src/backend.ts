@@ -5058,6 +5058,13 @@ function applyMockFilters(entries: Entry[], filters: EntryFilters) {
       if (filters.hasImages === false && entry.attachmentCount > 0) {
         return false;
       }
+      if (
+        filters.threaded !== undefined &&
+        filters.threaded !== null &&
+        Boolean(entry.thread) !== filters.threaded
+      ) {
+        return false;
+      }
       if (text) {
         const haystack = `${entry.textPlain} ${entry.title ?? ""} ${entry.summary ?? ""}`.toLowerCase();
         if (!haystack.includes(text)) {

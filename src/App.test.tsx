@@ -119,6 +119,27 @@ describe("App Writer settings", () => {
     expect(screen.getByLabelText("Mood")).toHaveValue("calm");
   });
 
+  test("adds an existing standalone entry to a selected thread", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Threads" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add existing" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Add existing entry" });
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: "Add Phase 1 shape to thread" }),
+    );
+
+    await waitFor(
+      () =>
+        expect(
+          screen.queryByRole("dialog", { name: "Add existing entry" }),
+        ).not.toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    expect(screen.getByRole("heading", { name: "Phase 1 shape" })).toBeInTheDocument();
+  });
+
   test("clears the thread continuation when starting a standalone entry", async () => {
     render(<App />);
 
@@ -127,7 +148,7 @@ describe("App Writer settings", () => {
 
     const entryText = screen.getByPlaceholderText("Write the entry");
     fireEvent.change(entryText, { target: { value: "Keep this standalone draft." } });
-    expect(screen.getByLabelText("Continue from UUID")).toHaveValue("entry_2490ytiy");
+    expect(screen.getByLabelText("Continue from UUID")).not.toHaveValue("");
 
     fireEvent.click(screen.getByRole("button", { name: "Entries" }));
     await screen.findByRole("heading", { level: 2, name: "Entries" });

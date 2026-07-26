@@ -171,6 +171,15 @@ body {
   background: #201918;
 }
 
+:root[data-theme="dark"] .existing-entry-dialog {
+  border-color: #34433a;
+  background: #1d2520;
+}
+
+:root[data-theme="dark"] .existing-entry-option-heading span {
+  color: #aab8ae;
+}
+
 :root[data-theme="dark"] .icon-button--danger {
   border-color: #503634;
   color: #ffb4a8;
@@ -3798,6 +3807,89 @@ button.entry-card {
   width: min(640px, 100%);
 }
 
+.existing-entry-dialog {
+  display: grid;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+  width: min(720px, 100%);
+  max-height: calc(100dvh - 44px);
+  border-color: #d7ded8;
+  background: #ffffff;
+}
+
+.existing-entry-intro {
+  margin: 0;
+}
+
+.existing-entry-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 16px;
+}
+
+.existing-entry-results-header,
+.existing-entry-option-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.existing-entry-results-header {
+  margin: 16px 0 10px;
+}
+
+.existing-entry-results-header p {
+  margin: 0;
+}
+
+.existing-entry-results {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 150px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.existing-entry-results .banner {
+  margin-bottom: 0;
+}
+
+.existing-entry-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+}
+
+.existing-entry-option-main {
+  min-width: 0;
+}
+
+.existing-entry-option-heading {
+  align-items: flex-start;
+}
+
+.existing-entry-option-heading h4 {
+  margin: 0;
+}
+
+.existing-entry-option-heading span {
+  flex: 0 0 auto;
+  color: #66756d;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.existing-entry-option p {
+  margin: 5px 0 9px;
+  color: #516158;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .safety-mark {
   display: grid;
   place-items: center;
@@ -4948,7 +5040,26 @@ button.entry-card {
   }
 
   .thread-heading-actions,
-  .thread-heading-actions .primary-button {
+  .thread-heading-actions .primary-button,
+  .thread-heading-actions .secondary-button {
+    width: 100%;
+  }
+
+  .dialog-backdrop {
+    padding: 12px;
+  }
+
+  .existing-entry-dialog {
+    max-height: calc(100dvh - 24px);
+  }
+
+  .existing-entry-search,
+  .existing-entry-option {
+    grid-template-columns: 1fr;
+  }
+
+  .existing-entry-search .secondary-button,
+  .existing-entry-option > .secondary-button {
     width: 100%;
   }
 

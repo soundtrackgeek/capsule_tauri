@@ -1157,6 +1157,7 @@ pub struct EntryFilters {
     pub hidden: Option<bool>,
     pub include_hidden: Option<bool>,
     pub has_images: Option<bool>,
+    pub threaded: Option<bool>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
     pub sort: Option<EntrySort>,

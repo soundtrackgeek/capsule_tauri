@@ -892,6 +892,7 @@ export type EntryFilters = {
   hidden?: boolean | null;
   includeHidden?: boolean;
   hasImages?: boolean | null;
+  threaded?: boolean | null;
   limit?: number;
   offset?: number;
   sort?: "asc" | "desc";

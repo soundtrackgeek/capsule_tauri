@@ -1612,6 +1612,22 @@ fn build_query(filters: &EntryFilters, tables: &HashSet<String>) -> QueryParts {
         }
     }
 
+    if let Some(threaded) = filters.threaded {
+        if tables.contains("entry_continuations") {
+            let prefix = if threaded { "" } else { "NOT " };
+            conditions.push(format!(
+                "{prefix}EXISTS (
+                    SELECT 1
+                    FROM entry_continuations ec
+                    WHERE ec.child_entry_uuid = e.uuid
+                       OR ec.parent_entry_uuid = e.uuid
+                )"
+            ));
+        } else if threaded {
+            conditions.push("1 = 0".to_string());
+        }
+    }
+
     let limit = filters.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let offset = filters.offset.unwrap_or(0).max(0);
     let sort = filters.sort.clone().unwrap_or(EntrySort::Desc);
@@ -2487,6 +2503,36 @@ mod tests {
             .entries
             .iter()
             .any(|entry| entry.uuid == "entry_hidden"));
+    }
+
+    #[test]
+    fn list_entries_filters_by_thread_membership() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_fixture_database(temp_dir.path());
+
+        let threaded = list_entries_for_database(
+            &db_path,
+            EntryFilters {
+                threaded: Some(true),
+                ..EntryFilters::default()
+            },
+        )
+        .expect("threaded entries");
+        assert_eq!(threaded.total, 3);
+        assert!(threaded.entries.iter().all(|entry| entry.thread.is_some()));
+
+        let standalone = list_entries_for_database(
+            &db_path,
+            EntryFilters {
+                include_hidden: Some(true),
+                threaded: Some(false),
+                ..EntryFilters::default()
+            },
+        )
+        .expect("standalone entries");
+        assert_eq!(standalone.total, 1);
+        assert_eq!(standalone.entries[0].uuid, "entry_hidden");
+        assert!(standalone.entries[0].thread.is_none());
     }
 
     #[test]

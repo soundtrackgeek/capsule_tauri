@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.33.0 - 2026-07-26
+
+### Added
+
+- Added an Add existing action to Threads with a searchable standalone-entry
+  picker that attaches the chosen entry after the current thread tail using the
+  existing backup-guarded and cycle-safe link mutation.
+
+### Changed
+
+- Added thread-membership filtering to entry queries so the picker can search
+  the full journal without offering entries that already belong to a thread.
+- Bumped the app version to 0.33.0.
+
 ## 0.32.1 - 2026-07-26
 
 ### Fixed

@@ -60,8 +60,9 @@ explicit capability-gated AI/sync surfaces:
   the same star, pin, edit, continue, delete, and hide/unhide actions used by the
   Entries view.
 - Thread groups built from Capsule continuation links with ordered entries,
-  latest activity, titles, summaries, and a direct action for adding an entry
-  after the end of the selected thread.
+  latest activity, titles, summaries, a direct action for adding a new entry,
+  and a searchable picker for attaching an existing standalone entry after the
+  end of the selected thread.
 - Backup-guarded thread title/summary updates, bulk link commands, leaf detach,
   and thread disband actions with cycle prevention.
 - Backup listing for Capsule-compatible backup files.
