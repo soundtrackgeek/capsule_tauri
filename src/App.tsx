@@ -1987,7 +1987,9 @@ function App() {
     setComposerImageDrafts([]);
     setComposerAiSuggestion(null);
     setComposerDraft((current) =>
-      composerMode === "create" && draftHasContent(current) ? current : emptyComposerDraft,
+      composerMode === "create" && draftHasContent(current)
+        ? { ...current, continueFromUuid: "" }
+        : emptyComposerDraft,
     );
     setActiveView("composer");
   }, [composerMode]);

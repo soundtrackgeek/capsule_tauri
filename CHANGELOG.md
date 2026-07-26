@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.32.1 - 2026-07-26
+
+### Fixed
+
+- Fixed standalone New Entry actions retaining a thread continuation UUID from
+  an abandoned Add entry flow. Unsaved draft content remains intact while the
+  thread link is cleared.
+
+### Changed
+
+- Bumped the app version to 0.32.1.
+
 ## 0.32.0 - 2026-07-26
 
 ### Added

@@ -119,6 +119,27 @@ describe("App Writer settings", () => {
     expect(screen.getByLabelText("Mood")).toHaveValue("calm");
   });
 
+  test("clears the thread continuation when starting a standalone entry", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Threads" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add entry" }));
+
+    const entryText = screen.getByPlaceholderText("Write the entry");
+    fireEvent.change(entryText, { target: { value: "Keep this standalone draft." } });
+    expect(screen.getByLabelText("Continue from UUID")).toHaveValue("entry_2490ytiy");
+
+    fireEvent.click(screen.getByRole("button", { name: "Entries" }));
+    await screen.findByRole("heading", { level: 2, name: "Entries" });
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
+
+    await screen.findByRole("heading", { level: 2, name: "New Entry" });
+    expect(screen.getByPlaceholderText("Write the entry")).toHaveValue(
+      "Keep this standalone draft.",
+    );
+    expect(screen.getByLabelText("Continue from UUID")).toHaveValue("");
+  });
+
   test("confirms update installation inside the app without opening a native prompt", async () => {
     window.history.replaceState({}, "", "/?mock-app-update=0.29.3");
     const nativeConfirm = vi.spyOn(window, "confirm");

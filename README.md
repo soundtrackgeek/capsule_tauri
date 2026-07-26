@@ -40,11 +40,11 @@ explicit capability-gated AI/sync surfaces:
   entry actions.
 - Full-page markdown composer with metadata fields, mood autocomplete,
   chip-style tag entry with autocomplete and Tab/Enter pill creation, save-time
-  entry dating, continuation UUID support, multi-select queued local image
-  attachments with thumbnail previews, writing stats, local draft recovery, and
-  apply-before-save AI title/summary generation through the selected cloud
-  provider and model, with provider readiness restored at startup and an in-app
-  first-use privacy confirmation.
+  entry dating, continuation UUID support that is cleared by an explicit New
+  action, multi-select queued local image attachments with thumbnail previews,
+  writing stats, local draft recovery, and apply-before-save AI title/summary
+  generation through the selected cloud provider and model, with provider
+  readiness restored at startup and an in-app first-use privacy confirmation.
 - Distraction-free Writer Mode with local display preferences, edit-entry save
   completion that returns future Writer launches to a fresh draft, optional
   frameless Retro CRT layouts from the old Capsule focus themes, and a global
