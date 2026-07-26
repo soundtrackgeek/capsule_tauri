@@ -108,6 +108,17 @@ describe("App Writer settings", () => {
     expect((screen.getByPlaceholderText("Write") as HTMLTextAreaElement).value).toBe("");
   });
 
+  test("adds an entry to the end of a selected thread", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Threads" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add entry" }));
+
+    await screen.findByRole("heading", { level: 2, name: "New Entry" });
+    expect(screen.getByLabelText("Continue from UUID")).toHaveValue("entry_2490ytiy");
+    expect(screen.getByLabelText("Mood")).toHaveValue("calm");
+  });
+
   test("confirms update installation inside the app without opening a native prompt", async () => {
     window.history.replaceState({}, "", "/?mock-app-update=0.29.3");
     const nativeConfirm = vi.spyOn(window, "confirm");

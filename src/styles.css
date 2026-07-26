@@ -1942,6 +1942,14 @@ button.entry-card {
   align-items: flex-start;
 }
 
+.thread-heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .thread-metadata-editor {
   display: grid;
   gap: 14px;
@@ -4934,6 +4942,16 @@ button.entry-card {
 }
 
 @media (max-width: 620px) {
+  .thread-detail-panel > .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .thread-heading-actions,
+  .thread-heading-actions .primary-button {
+    width: 100%;
+  }
+
   .wrapped-period-tabs {
     width: 100%;
   }

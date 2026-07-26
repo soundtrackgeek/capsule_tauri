@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.32.0 - 2026-07-26
+
+### Added
+
+- Added a prominent Add entry action to the selected thread so a new entry can
+  continue directly from the thread's current last entry, while retaining
+  per-entry continuation controls for branching from an earlier entry.
+
+### Changed
+
+- Bumped the app version to 0.32.0.
+
 ## 0.31.0 - 2026-07-23
 
 ### Added

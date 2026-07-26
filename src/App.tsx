@@ -4583,6 +4583,7 @@ function ThreadsView({
   }
 
   const threads = response?.threads ?? [];
+  const continuationTarget = selectedThread?.entries.at(-1) ?? null;
 
   return (
     <section className="threads-workspace" aria-label="Threads">
@@ -4642,7 +4643,19 @@ function ThreadsView({
                 <p className="eyebrow">{selectedThread.rootUuid}</p>
                 <h3>{selectedThread.title || "Untitled thread"}</h3>
               </div>
-              <StatusPill tone="good">{selectedThread.entryCount} entries</StatusPill>
+              <div className="thread-heading-actions">
+                <StatusPill tone="good">{selectedThread.entryCount} entries</StatusPill>
+                <button
+                  className="primary-button"
+                  disabled={!continuationTarget}
+                  onClick={() => continuationTarget && onContinueEntry(continuationTarget)}
+                  title="Continue from the last entry in this thread"
+                  type="button"
+                >
+                  <Plus size={17} />
+                  Add entry
+                </button>
+              </div>
             </div>
 
             <div className="thread-metadata-editor">
