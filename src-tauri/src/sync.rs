@@ -1243,6 +1243,7 @@ fn run_sync_once(db_path: &Path, sync_dir: &Path) -> Result<SyncAttempt> {
 
         apply_remote_entry_deletes(&tx, &remote_main.deleted_uuids, &mut counts)?;
         apply_remote_entries(&tx, &remote_main.entries, &mut counts)?;
+        entries::resequence_entry_ids(&tx)?;
         if let Some(payload) = remote_images.as_ref() {
             apply_images_payload(&tx, payload, &mut counts)?;
         }
@@ -4685,6 +4686,81 @@ mod tests {
             .deleted_uuids
             .iter()
             .any(|uuid| uuid == "entry_locally_deleted"));
+    }
+
+    #[test]
+    fn sync_backdated_entry_receives_chronological_number() {
+        let db_dir = tempdir().expect("db tempdir");
+        let sync_dir = tempdir().expect("sync tempdir");
+        let db_path = db_dir.path().join("capsule.db");
+        create_sync_test_database(&db_path).expect("database");
+        let connection = Connection::open(&db_path).expect("open db");
+        connection
+            .execute_batch(
+                "
+                INSERT INTO entries
+                    (uuid, created_at, updated_at, text, text_plain, content_format, starred, pinned, hidden)
+                VALUES ('entry_later', '2026-01-03 09:00', '2026-01-03 09:00',
+                        'Later row', 'Later row', 'plain', 0, 0, 0);
+                INSERT INTO tags (name) VALUES ('later');
+                INSERT INTO entry_tags (entry_id, tag_id) VALUES (2, 1);
+                INSERT INTO entries_fts(rowid, text)
+                SELECT id, text_plain FROM entries;
+                ",
+            )
+            .expect("later entry");
+        drop(connection);
+
+        let remote_payload = json!({
+            "version": 4,
+            "entries": [
+                {
+                    "uuid": "entry_between",
+                    "created_at": "2026-01-02 09:00",
+                    "updated_at": "2026-01-04 09:00",
+                    "text": "Synced between existing entries",
+                    "content_format": "plain",
+                    "tags": []
+                }
+            ],
+            "deleted_uuids": []
+        });
+        fs::write(
+            sync_dir.path().join(MAIN_SYNC_FILE),
+            serde_json::to_vec_pretty(&remote_payload).expect("json"),
+        )
+        .expect("sync file");
+
+        let response =
+            run_sync_with_retries(&db_path, sync_dir.path()).expect("sync should complete");
+        assert_eq!(response.imported_count, 1);
+
+        let connection = Connection::open(&db_path).expect("open db");
+        let ordered = connection
+            .prepare("SELECT id, uuid FROM entries ORDER BY id ASC")
+            .expect("ordered entries")
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .expect("entry rows")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("entries");
+        assert_eq!(
+            ordered,
+            vec![
+                (1, "entry_remote_deleted".to_string()),
+                (2, "entry_between".to_string()),
+                (3, "entry_later".to_string()),
+            ]
+        );
+        let moved_tag_entry_id = connection
+            .query_row(
+                "SELECT entry_id FROM entry_tags WHERE tag_id = 1",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("moved tag reference");
+        assert_eq!(moved_tag_entry_id, 3);
     }
 
     #[test]

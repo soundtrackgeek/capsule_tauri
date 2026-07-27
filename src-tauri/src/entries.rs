@@ -125,7 +125,6 @@ struct QueryParts {
 #[derive(Debug, Clone)]
 struct EntryIdColumnInfo {
     exists: bool,
-    primary_key: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -505,6 +504,7 @@ fn create_entry_inner(db_path: &Path, input: EntryCreate) -> Result<Entry> {
         set_entry_continuation(&tx, &uuid, Some(parent_uuid))?;
     }
     refresh_fts_for_entry(&tx, entry_id, &text_plain)?;
+    resequence_entry_ids(&tx)?;
     tx.commit()?;
 
     if let Err(error) = location::auto_capture_location(db_path, &uuid) {
@@ -1215,9 +1215,6 @@ fn entry_ids_need_repair(connection: &Connection) -> Result<bool> {
     if !info.exists {
         return Ok(true);
     }
-    if info.primary_key {
-        return Ok(false);
-    }
 
     let missing_count = connection.query_row(
         "SELECT COUNT(*) FROM entries WHERE id IS NULL OR CAST(id AS INTEGER) <= 0",
@@ -1240,14 +1237,19 @@ fn entry_ids_need_repair(connection: &Connection) -> Result<bool> {
         [],
         |row| row.get::<_, i64>(0),
     )?;
-    Ok(duplicate_count > 0)
+    if duplicate_count > 0 {
+        return Ok(true);
+    }
+
+    Ok(planned_entry_id_repair_rows(connection, true)?
+        .iter()
+        .any(|row| row.current_id != Some(row.repaired_id)))
 }
 
 fn repair_entry_ids(connection: &Connection) -> Result<()> {
     connection.execute_batch("BEGIN IMMEDIATE")?;
     let result = (|| -> Result<()> {
         let info = entry_id_column_info(connection)?;
-        let rows = planned_entry_id_repair_rows(connection, info.exists)?;
         let duplicate_id = duplicate_entry_id(connection)?;
         if let Some(id) = duplicate_id {
             return Err(anyhow!(
@@ -1258,27 +1260,7 @@ fn repair_entry_ids(connection: &Connection) -> Result<()> {
         if !info.exists {
             connection.execute("ALTER TABLE entries ADD COLUMN id INTEGER", [])?;
         }
-
-        let changed_rows = rows
-            .iter()
-            .filter(|row| row.current_id.unwrap_or(0) != row.repaired_id)
-            .cloned()
-            .collect::<Vec<_>>();
-
-        if changed_rows.is_empty() {
-            return Ok(());
-        }
-
-        update_entry_id_references(connection, &changed_rows)?;
-        for row in &changed_rows {
-            connection.execute(
-                "UPDATE entries SET id = ?1 WHERE rowid = ?2",
-                params![row.repaired_id, row.rowid],
-            )?;
-        }
-        rebuild_entries_fts(connection)?;
-        update_sqlite_sequence(connection)?;
-        Ok(())
+        resequence_entry_ids(connection)
     })();
 
     match result {
@@ -1298,9 +1280,17 @@ fn planned_entry_id_repair_rows(
     has_id_column: bool,
 ) -> Result<Vec<EntryIdRepairRow>> {
     let sql = if has_id_column {
-        "SELECT rowid, id FROM entries ORDER BY datetime(created_at) ASC, rowid ASC"
+        "SELECT rowid, id
+         FROM entries
+         ORDER BY datetime(created_at) ASC,
+                  COALESCE(NULLIF(uuid, ''), '') ASC,
+                  rowid ASC"
     } else {
-        "SELECT rowid, NULL AS id FROM entries ORDER BY datetime(created_at) ASC, rowid ASC"
+        "SELECT rowid, NULL AS id
+         FROM entries
+         ORDER BY datetime(created_at) ASC,
+                  COALESCE(NULLIF(uuid, ''), '') ASC,
+                  rowid ASC"
     };
     let mut statement = connection.prepare(sql)?;
     let source_rows = statement
@@ -1309,23 +1299,10 @@ fn planned_entry_id_repair_rows(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
-    let mut next_id = source_rows
-        .iter()
-        .filter_map(|(_, id)| (*id).filter(|value| *value > 0))
-        .max()
-        .unwrap_or(0)
-        + 1;
     let mut rows = Vec::with_capacity(source_rows.len());
-    for (rowid, raw_id) in source_rows {
+    for (index, (rowid, raw_id)) in source_rows.into_iter().enumerate() {
         let current_id = raw_id.filter(|id| *id > 0);
-        let repaired_id = match current_id {
-            Some(id) => id,
-            None => {
-                let id = next_id;
-                next_id += 1;
-                id
-            }
-        };
+        let repaired_id = i64::try_from(index + 1).context("too many entries to number")?;
         let reference_id = if has_id_column { raw_id } else { Some(rowid) };
         rows.push(EntryIdRepairRow {
             rowid,
@@ -1357,13 +1334,77 @@ fn duplicate_entry_id(connection: &Connection) -> Result<Option<i64>> {
         .map_err(Into::into)
 }
 
-fn update_entry_id_references(
-    connection: &Connection,
-    changed_rows: &[EntryIdRepairRow],
-) -> Result<()> {
-    update_entry_id_reference_table(connection, "entry_tags", "entry_id", changed_rows)?;
-    update_entry_id_reference_table(connection, "history", "entry_id", changed_rows)?;
-    update_entry_id_reference_table(connection, "embeddings", "entry_id", changed_rows)?;
+pub(crate) fn resequence_entry_ids(connection: &Connection) -> Result<()> {
+    if !entry_id_column_info(connection)?.exists {
+        return Err(anyhow!(
+            "Cannot resequence entry numbers because entries.id is missing."
+        ));
+    }
+    if let Some(id) = duplicate_entry_id(connection)? {
+        return Err(anyhow!(
+            "Cannot resequence entry numbers because entries.id value {id} is duplicated."
+        ));
+    }
+
+    let changed_rows = planned_entry_id_repair_rows(connection, true)?
+        .into_iter()
+        .filter(|row| row.current_id != Some(row.repaired_id))
+        .collect::<Vec<_>>();
+    if changed_rows.is_empty() {
+        update_sqlite_sequence(connection)?;
+        return Ok(());
+    }
+
+    connection.pragma_update(None, "defer_foreign_keys", "ON")?;
+    let minimum_id = connection.query_row(
+        "SELECT COALESCE(MIN(CAST(id AS INTEGER)), 0) FROM entries",
+        [],
+        |row| row.get::<_, i64>(0),
+    )?;
+    let mut next_temporary_id = minimum_id.min(0);
+    let mut temporary_rows = Vec::with_capacity(changed_rows.len());
+    for row in changed_rows {
+        next_temporary_id = next_temporary_id
+            .checked_sub(1)
+            .ok_or_else(|| anyhow!("Cannot allocate temporary entry numbers."))?;
+        temporary_rows.push((row, next_temporary_id));
+    }
+
+    let to_temporary = temporary_rows
+        .iter()
+        .filter_map(|(row, temporary_id)| {
+            row.reference_id
+                .map(|previous_id| (previous_id, *temporary_id))
+        })
+        .collect::<Vec<_>>();
+    update_entry_id_references(connection, &to_temporary)?;
+    for (row, temporary_id) in &temporary_rows {
+        connection.execute(
+            "UPDATE entries SET id = ?1 WHERE rowid = ?2",
+            params![temporary_id, row.rowid],
+        )?;
+    }
+
+    for (row, temporary_id) in &temporary_rows {
+        connection.execute(
+            "UPDATE entries SET id = ?1 WHERE id = ?2",
+            params![row.repaired_id, temporary_id],
+        )?;
+    }
+    let to_final = temporary_rows
+        .iter()
+        .map(|(row, temporary_id)| (*temporary_id, row.repaired_id))
+        .collect::<Vec<_>>();
+    update_entry_id_references(connection, &to_final)?;
+    rebuild_entries_fts(connection)?;
+    update_sqlite_sequence(connection)?;
+    Ok(())
+}
+
+fn update_entry_id_references(connection: &Connection, id_changes: &[(i64, i64)]) -> Result<()> {
+    update_entry_id_reference_table(connection, "entry_tags", "entry_id", id_changes)?;
+    update_entry_id_reference_table(connection, "history", "entry_id", id_changes)?;
+    update_entry_id_reference_table(connection, "embeddings", "entry_id", id_changes)?;
     Ok(())
 }
 
@@ -1371,9 +1412,9 @@ fn update_entry_id_reference_table(
     connection: &Connection,
     table: &str,
     column: &str,
-    changed_rows: &[EntryIdRepairRow],
+    id_changes: &[(i64, i64)],
 ) -> Result<()> {
-    if changed_rows.is_empty() || !table_exists(connection, table)? {
+    if id_changes.is_empty() || !table_exists(connection, table)? {
         return Ok(());
     }
     if !table_columns(connection, table)?.contains(column) {
@@ -1391,45 +1432,30 @@ fn update_entry_id_reference_table(
         _ => return Err(anyhow!("Unsupported entry ID repair column: {column}")),
     };
 
-    for row in changed_rows {
-        let Some(previous_reference) = row.reference_id else {
-            continue;
-        };
-        if previous_reference == row.repaired_id {
+    for (previous_id, next_id) in id_changes {
+        if previous_id == next_id {
             continue;
         }
         connection.execute(
             &format!("UPDATE {table} SET {column} = ?1 WHERE {column} = ?2"),
-            params![-row.repaired_id, previous_reference],
+            params![next_id, previous_id],
         )?;
     }
-    connection.execute(
-        &format!("UPDATE {table} SET {column} = -{column} WHERE {column} < 0"),
-        [],
-    )?;
     Ok(())
 }
 
 fn entry_id_column_info(connection: &Connection) -> Result<EntryIdColumnInfo> {
     let mut statement = connection.prepare("PRAGMA table_info(entries)")?;
-    let rows = statement.query_map([], |row| {
-        Ok((row.get::<_, String>(1)?, row.get::<_, i64>(5)?))
-    })?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
 
     for row in rows {
-        let (name, primary_key) = row?;
+        let name = row?;
         if name.eq_ignore_ascii_case("id") {
-            return Ok(EntryIdColumnInfo {
-                exists: true,
-                primary_key: primary_key > 0,
-            });
+            return Ok(EntryIdColumnInfo { exists: true });
         }
     }
 
-    Ok(EntryIdColumnInfo {
-        exists: false,
-        primary_key: false,
-    })
+    Ok(EntryIdColumnInfo { exists: false })
 }
 
 fn next_entry_id(connection: &Connection) -> Result<i64> {
@@ -2574,6 +2600,118 @@ mod tests {
         .expect("create entry");
 
         assert_eq!(response.entry.id, 5);
+    }
+
+    #[test]
+    fn create_backdated_entry_resequences_later_entries_and_references() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_fixture_database(temp_dir.path());
+        let connection = Connection::open(&db_path).expect("open db");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE embeddings (
+                    entry_id INTEGER NOT NULL,
+                    model_id INTEGER NOT NULL,
+                    embedding BLOB NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (entry_id, model_id)
+                );
+                INSERT INTO history
+                    (timestamp, operation_type, entry_id, old_data, undone)
+                VALUES ('2026-01-03 09:00', 'EDIT_TEXT', 3, '{}', 0);
+                INSERT INTO embeddings (entry_id, model_id, embedding, created_at)
+                VALUES (3, 1, X'00', '2026-01-03 09:00');
+                ",
+            )
+            .expect("reference fixtures");
+        drop(connection);
+
+        let response = create_entry_for_database(
+            &db_path,
+            EntryCreate {
+                text: "Inserted between existing entries".to_string(),
+                when: Some("2026-01-02T12:00".to_string()),
+                ..EntryCreate::default()
+            },
+        )
+        .expect("create backdated entry");
+
+        assert_eq!(response.entry.id, 3);
+        let connection = Connection::open(&db_path).expect("open db");
+        let ordered = connection
+            .prepare("SELECT id, uuid FROM entries ORDER BY id ASC")
+            .expect("ordered entries")
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .expect("entry rows")
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .expect("entries");
+        assert_eq!(ordered[0], (1, "entry_root".to_string()));
+        assert_eq!(ordered[1], (2, "entry_middle".to_string()));
+        assert_eq!(ordered[2].0, 3);
+        assert_eq!(ordered[3], (4, "entry_child".to_string()));
+        assert_eq!(ordered[4], (5, "entry_hidden".to_string()));
+
+        for table in ["entry_tags", "history", "embeddings"] {
+            let moved_entry_id = connection
+                .query_row(
+                    &format!("SELECT entry_id FROM {table} WHERE entry_id = 4 LIMIT 1"),
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("moved entry reference");
+            assert_eq!(moved_entry_id, 4);
+        }
+        let indexed_text = connection
+            .query_row("SELECT text FROM entries_fts WHERE rowid = 4", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .expect("reindexed child");
+        assert_eq!(indexed_text, "Child text");
+    }
+
+    #[test]
+    fn ensure_entry_ids_repairs_existing_chronological_mismatch() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_fixture_database(temp_dir.path());
+        let connection = Connection::open(&db_path).expect("open db");
+        connection
+            .execute(
+                "UPDATE entries SET created_at = '2026-01-01 12:00' WHERE uuid = 'entry_child'",
+                [],
+            )
+            .expect("backdate entry");
+        drop(connection);
+
+        ensure_entry_ids_for_database(&db_path).expect("resequence ids");
+
+        let connection = Connection::open(&db_path).expect("open db");
+        let child_id = connection
+            .query_row(
+                "SELECT id FROM entries WHERE uuid = 'entry_child'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("child id");
+        let middle_id = connection
+            .query_row(
+                "SELECT id FROM entries WHERE uuid = 'entry_middle'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("middle id");
+        let child_tag_id = connection
+            .query_row(
+                "SELECT entry_id FROM entry_tags WHERE tag_id = 2",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("child tag id");
+        assert_eq!(child_id, 2);
+        assert_eq!(middle_id, 3);
+        assert_eq!(child_tag_id, 2);
     }
 
     #[test]

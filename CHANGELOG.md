@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.33.2 - 2026-07-27
+
+### Fixed
+
+- Fixed entry numbers after backdated creation or sync imports by assigning
+  numbers in creation-timestamp order and shifting later entries and their tag,
+  history, embedding, and full-text-search references atomically.
+- Added backup-guarded repair for existing journals whose visible entry numbers
+  do not match chronological order.
+
+### Changed
+
+- Bumped the app version to 0.33.2.
+
 ## 0.33.1 - 2026-07-26
 
 ### Fixed

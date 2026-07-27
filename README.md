@@ -26,9 +26,10 @@ explicit capability-gated AI/sync surfaces:
 - Dashboard counts for total entries, total tags, current year, and current month.
 - Recent entries, pinned entries, and random entry panels with old-Capsule-style
   entry numbers.
-- Entries list with old-Capsule-style entry numbers, inline image thumbnails
-  that open full-size previews, and text, tag, mood, location, date, image,
-  hidden, and sort filters.
+- Entries list with chronological old-Capsule-style entry numbers, including
+  automatic backup-guarded resequencing when an older entry arrives through
+  sync, plus inline image thumbnails that open full-size previews and text,
+  tag, mood, location, date, image, hidden, and sort filters.
 - Entry detail view with entry number, full text that preserves authored line
   breaks, tags, mood, location, attachment count, and thread metadata when those
   tables are available,
