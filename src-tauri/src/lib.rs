@@ -1201,14 +1201,23 @@ fn update_app_icons<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     update_version: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let icon = load_app_icon(update_version.is_some())?;
+    let tray_icon = load_app_icon(update_version.is_some())?;
 
     if let Some(window) = app.get_webview_window("main") {
-        window.set_icon(icon.clone())?;
+        window.set_icon(load_app_icon(false)?)?;
+
+        #[cfg(windows)]
+        window.set_overlay_icon(update_version.map(|_| load_update_overlay_icon()))?;
+
+        #[cfg(target_os = "macos")]
+        window.set_badge_label(update_version.map(|_| "\u{2191}".to_string()))?;
+
+        #[cfg(target_os = "linux")]
+        window.set_badge_count(update_version.map(|_| 1))?;
     }
 
     if let Some(tray) = app.tray_by_id(TRAY_ICON_ID) {
-        tray.set_icon(Some(icon))?;
+        tray.set_icon(Some(tray_icon))?;
         let tooltip = update_version
             .map(|version| format!("Capsule - Update {version} available"))
             .unwrap_or_else(|| "Capsule".to_string());
@@ -1231,6 +1240,14 @@ fn load_app_icon(
         width,
         height,
     ))
+}
+
+#[cfg(windows)]
+fn load_update_overlay_icon() -> tauri::image::Image<'static> {
+    let mut icon_rgba = ::image::RgbaImage::from_pixel(32, 32, ::image::Rgba([0, 0, 0, 0]));
+    add_update_overlay_badge(&mut icon_rgba);
+    let (width, height) = icon_rgba.dimensions();
+    tauri::image::Image::new_owned(icon_rgba.into_raw(), width, height)
 }
 
 fn add_update_notification_badge(icon: &mut ::image::RgbaImage) {
@@ -1256,6 +1273,51 @@ fn add_update_notification_badge(icon: &mut ::image::RgbaImage) {
             } else if distance_squared <= outer_radius_squared {
                 icon.put_pixel(x, y, ::image::Rgba([255, 255, 255, 255]));
             }
+        }
+    }
+}
+
+#[cfg(any(windows, test))]
+fn add_update_overlay_badge(icon: &mut ::image::RgbaImage) {
+    let (width, height) = icon.dimensions();
+    let scale = width.min(height);
+    let center_x = width / 2;
+    let center_y = height / 2;
+    let outer_radius = (scale * 15 / 32).max(2);
+    let border_width = (scale * 2 / 32).max(1);
+    let inner_radius = outer_radius.saturating_sub(border_width);
+    let outer_radius_squared = i64::from(outer_radius).pow(2);
+    let inner_radius_squared = i64::from(inner_radius).pow(2);
+
+    for y in center_y.saturating_sub(outer_radius)..=(center_y + outer_radius).min(height - 1) {
+        for x in center_x.saturating_sub(outer_radius)..=(center_x + outer_radius).min(width - 1) {
+            let dx = i64::from(x) - i64::from(center_x);
+            let dy = i64::from(y) - i64::from(center_y);
+            let distance_squared = dx * dx + dy * dy;
+
+            if distance_squared <= inner_radius_squared {
+                icon.put_pixel(x, y, ::image::Rgba([239, 68, 68, 255]));
+            } else if distance_squared <= outer_radius_squared {
+                icon.put_pixel(x, y, ::image::Rgba([255, 255, 255, 255]));
+            }
+        }
+    }
+
+    let arrow_top = center_y.saturating_sub((scale * 8 / 32).max(2));
+    let arrow_bottom = (center_y + (scale * 8 / 32).max(2)).min(height - 1);
+    let head_height = (scale * 6 / 32).max(2);
+    let head_half_width = (scale * 6 / 32).max(2);
+    let shaft_half_width = (scale * 2 / 32).max(1);
+
+    for y in arrow_top..=arrow_bottom {
+        let half_width = if y <= arrow_top + head_height {
+            head_half_width * (y - arrow_top) / head_height
+        } else {
+            shaft_half_width
+        };
+
+        for x in center_x.saturating_sub(half_width)..=(center_x + half_width).min(width - 1) {
+            icon.put_pixel(x, y, ::image::Rgba([255, 255, 255, 255]));
         }
     }
 }
@@ -1313,6 +1375,18 @@ mod tests {
 
         assert_eq!(icon.get_pixel(27, 27), &::image::Rgba([239, 68, 68, 255]));
         assert_eq!(icon.get_pixel(27, 23), &::image::Rgba([255, 255, 255, 255]));
+        assert_eq!(icon.get_pixel(0, 0), &::image::Rgba([0, 0, 0, 0]));
+    }
+
+    #[test]
+    fn update_overlay_badge_adds_an_arrow_inside_a_red_circle() {
+        let mut icon = ::image::RgbaImage::from_pixel(32, 32, ::image::Rgba([0, 0, 0, 0]));
+
+        add_update_overlay_badge(&mut icon);
+
+        assert_eq!(icon.get_pixel(16, 1), &::image::Rgba([255, 255, 255, 255]));
+        assert_eq!(icon.get_pixel(5, 16), &::image::Rgba([239, 68, 68, 255]));
+        assert_eq!(icon.get_pixel(16, 16), &::image::Rgba([255, 255, 255, 255]));
         assert_eq!(icon.get_pixel(0, 0), &::image::Rgba([0, 0, 0, 0]));
     }
 }

@@ -18,8 +18,8 @@ explicit capability-gated AI/sync surfaces:
   plus a global `Ctrl+Alt+W` Writer shortcut, a Settings option to hide Capsule
   to the tray when the main window is closed, and a launch-at-sign-in option
   on Windows and macOS that launches Capsule directly into the tray at sign-in.
-  Available app updates add a small notification dot to both the taskbar and
-  system tray icons.
+  Available app updates add a native update badge to the taskbar or Dock icon
+  and a small notification dot to the system tray icon.
 - React + TypeScript + Vite frontend.
 - Browser-only mock backend for `npm run dev`.
 - Read-only database status for the active Capsule database.

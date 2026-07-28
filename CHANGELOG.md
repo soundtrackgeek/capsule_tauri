@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.33.3 - 2026-07-28
+
+### Fixed
+
+- Fixed the available-update indicator to use a native Windows taskbar overlay
+  instead of relying on a replaced window icon, with a platform-native Dock
+  badge on macOS and the existing notification dot retained in the system tray.
+
+### Changed
+
+- Bumped the app version to 0.33.3.
+
 ## 0.33.2 - 2026-07-27
 
 ### Fixed
