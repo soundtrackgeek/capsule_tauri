@@ -43,6 +43,7 @@ import type {
   ConfigMutationResponse,
   CoverWallRequest,
   CoverWallResponse,
+  DashboardBestOf,
   DatabaseStatus,
   DebugBundleResponse,
   DebugDiagnosticsResponse,
@@ -2508,6 +2509,107 @@ export async function getAnalytics(
   } catch (error) {
     throw normalizeError(error);
   }
+}
+
+export async function getDashboardBestOf(): Promise<DashboardBestOf> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<DashboardBestOf>("get_dashboard_best_of");
+    }
+
+    await pause(120);
+    return buildMockDashboardBestOf();
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+function buildMockDashboardBestOf(): DashboardBestOf {
+  const entries = mockEntries.filter((entry) => !entry.hidden);
+  const days = new Map<string, { entryCount: number; wordCount: number }>();
+  const months = new Map<string, { entryCount: number; wordCount: number }>();
+
+  for (const entry of entries) {
+    const date = entry.createdAt.slice(0, 10);
+    const period = date.slice(0, 7);
+    const wordCount = writingWordCount(entry.textPlain);
+    const day = days.get(date) ?? { entryCount: 0, wordCount: 0 };
+    const month = months.get(period) ?? { entryCount: 0, wordCount: 0 };
+    days.set(date, {
+      entryCount: day.entryCount + 1,
+      wordCount: day.wordCount + wordCount,
+    });
+    months.set(period, {
+      entryCount: month.entryCount + 1,
+      wordCount: month.wordCount + wordCount,
+    });
+  }
+
+  const dayRecords = [...days.entries()].map(([date, value]) => ({ date, ...value }));
+  const monthRecords = [...months.entries()].map(([period, value]) => ({ period, ...value }));
+  const entryRecord = (entry: Entry) => ({
+    entryId: entry.id,
+    uuid: entry.uuid,
+    createdAt: entry.createdAt,
+    date: entry.createdAt.slice(0, 10),
+    wordCount: writingWordCount(entry.textPlain),
+    tagCount: entry.tags.length,
+  });
+  const byLatestEntry = (left: Entry, right: Entry) =>
+    left.createdAt.localeCompare(right.createdAt) || left.id - right.id;
+
+  const longestEntry = [...entries]
+    .sort(
+      (left, right) =>
+        writingWordCount(left.textPlain) - writingWordCount(right.textPlain) ||
+        byLatestEntry(left, right),
+    )
+    .at(-1);
+  const mostTaggedEntry = entries
+    .filter((entry) => entry.tags.length > 0)
+    .sort((left, right) => left.tags.length - right.tags.length || byLatestEntry(left, right))
+    .at(-1);
+
+  return {
+    mostEntriesDay:
+      dayRecords
+        .sort(
+          (left, right) =>
+            left.entryCount - right.entryCount ||
+            left.wordCount - right.wordCount ||
+            left.date.localeCompare(right.date),
+        )
+        .at(-1) ?? null,
+    mostWordsDay:
+      dayRecords
+        .sort(
+          (left, right) =>
+            left.wordCount - right.wordCount ||
+            left.entryCount - right.entryCount ||
+            left.date.localeCompare(right.date),
+        )
+        .at(-1) ?? null,
+    mostTaggedEntry: mostTaggedEntry ? entryRecord(mostTaggedEntry) : null,
+    longestEntry: longestEntry ? entryRecord(longestEntry) : null,
+    mostEntriesMonth:
+      monthRecords
+        .sort(
+          (left, right) =>
+            left.entryCount - right.entryCount ||
+            left.wordCount - right.wordCount ||
+            left.period.localeCompare(right.period),
+        )
+        .at(-1) ?? null,
+    mostWordsMonth:
+      monthRecords
+        .sort(
+          (left, right) =>
+            left.wordCount - right.wordCount ||
+            left.entryCount - right.entryCount ||
+            left.period.localeCompare(right.period),
+        )
+        .at(-1) ?? null,
+  };
 }
 
 export async function getWrapped(

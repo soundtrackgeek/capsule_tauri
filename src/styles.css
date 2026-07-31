@@ -79,6 +79,9 @@ body {
 
 :root[data-theme="dark"] .detail-list dt,
 :root[data-theme="dark"] .metric dt,
+:root[data-theme="dark"] .dashboard-best-of__header p,
+:root[data-theme="dark"] .dashboard-best-of__label,
+:root[data-theme="dark"] .dashboard-best-of__detail,
 :root[data-theme="dark"] .field span,
 :root[data-theme="dark"] .check-row span,
 :root[data-theme="dark"] .cover-linked-entry-heading,
@@ -99,6 +102,7 @@ body {
 }
 
 :root[data-theme="dark"] .panel,
+:root[data-theme="dark"] .dashboard-best-of__card,
 :root[data-theme="dark"] .about-panel,
 :root[data-theme="dark"] .backup-view,
 :root[data-theme="dark"] .filters-panel,
@@ -425,6 +429,7 @@ body {
 }
 
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .metric,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .dashboard-best-of__card,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .entry-mini,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .backup-row,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .data-row,
@@ -541,6 +546,9 @@ body {
 }
 
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .brand p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .dashboard-best-of__header p,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .dashboard-best-of__label,
+:root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .dashboard-best-of__detail,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .muted,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .eyebrow,
 :root:is([data-theme="msdos"], [data-theme="commodore64"], [data-theme="spectrum"]) .entry-mini p,
@@ -1089,6 +1097,72 @@ button:active:not(:disabled) {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.dashboard-best-of {
+  margin-bottom: 24px;
+}
+
+.dashboard-best-of__header {
+  margin-bottom: 32px;
+}
+
+.dashboard-best-of__header h3,
+.dashboard-best-of__header p,
+.dashboard-best-of__card p {
+  margin: 0;
+}
+
+.dashboard-best-of__header h3 {
+  font-size: 23px;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.dashboard-best-of__header p {
+  margin-top: 5px;
+  color: #66756d;
+  font-size: 13px;
+}
+
+.dashboard-best-of__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.dashboard-best-of__card {
+  min-width: 0;
+  min-height: 123px;
+  border: 1px solid #d7ded8;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  padding: 19px 20px;
+  box-shadow: 0 18px 34px -30px rgba(24, 42, 32, 0.35);
+}
+
+.dashboard-best-of__label {
+  color: #66756d;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dashboard-best-of__card strong {
+  display: block;
+  margin-top: 13px;
+  font-size: clamp(23px, 2vw, 27px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+}
+
+.dashboard-best-of__detail {
+  margin-top: 9px !important;
+  color: #66756d;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .dashboard-grid,
@@ -5034,6 +5108,15 @@ button.entry-card {
 }
 
 @media (max-width: 620px) {
+  .dashboard-best-of__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-best-of__card {
+    min-height: 0;
+    padding: 16px;
+  }
+
   .thread-detail-panel > .section-heading {
     align-items: flex-start;
     flex-direction: column;

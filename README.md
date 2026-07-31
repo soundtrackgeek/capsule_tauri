@@ -23,7 +23,10 @@ explicit capability-gated AI/sync surfaces:
 - React + TypeScript + Vite frontend.
 - Browser-only mock backend for `npm run dev`.
 - Read-only database status for the active Capsule database.
-- Dashboard counts for total entries, total tags, current year, and current month.
+- Dashboard “Simply the Best!” cards for six all-time records—most capsules and
+  words in a day, most tags and words on one capsule, and biggest months by
+  capsules and words—plus counts for total entries, total tags, current year,
+  and current month.
 - Recent entries, pinned entries, and random entry panels with old-Capsule-style
   entry numbers.
 - Entries list with chronological old-Capsule-style entry numbers, including

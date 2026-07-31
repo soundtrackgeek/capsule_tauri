@@ -1122,6 +1122,36 @@ export type ImageMutationResponse = {
 
 export type ImageVariant = "thumb" | "full";
 
+export type DashboardBestDay = {
+  date: string;
+  entryCount: number;
+  wordCount: number;
+};
+
+export type DashboardBestEntry = {
+  entryId: number;
+  uuid: string;
+  createdAt: string;
+  date: string;
+  wordCount: number;
+  tagCount: number;
+};
+
+export type DashboardBestMonth = {
+  period: string;
+  entryCount: number;
+  wordCount: number;
+};
+
+export type DashboardBestOf = {
+  mostEntriesDay: DashboardBestDay | null;
+  mostWordsDay: DashboardBestDay | null;
+  mostTaggedEntry: DashboardBestEntry | null;
+  longestEntry: DashboardBestEntry | null;
+  mostEntriesMonth: DashboardBestMonth | null;
+  mostWordsMonth: DashboardBestMonth | null;
+};
+
 export type AnalyticsPeriodRequest = {
   since?: string | null;
   until?: string | null;

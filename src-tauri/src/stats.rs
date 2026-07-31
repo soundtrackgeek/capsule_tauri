@@ -13,12 +13,12 @@ use crate::{
         AnalyticsBreakdownItem, AnalyticsDailyTrendPoint, AnalyticsHourPoint, AnalyticsOverview,
         AnalyticsPeriodRequest, AnalyticsResponse, AnalyticsTrendPoint, AnalyticsWeekdayPoint,
         AnalyticsWritingWindow, AnalyticsWritingWindowDay, AnalyticsWritingWindowLongestDay,
-        AnalyticsWritingWindowSummary, WordCount, WrappedActivityPoint, WrappedBadge,
-        WrappedBusiestDay, WrappedChartCountPoint, WrappedCharts, WrappedComparison,
-        WrappedFunFact, WrappedHighlight, WrappedHighlights, WrappedInsight, WrappedLongestEntry,
-        WrappedMetricComparison, WrappedMostTaggedEntry, WrappedNavigation, WrappedRange,
-        WrappedRecords, WrappedRequest, WrappedResponse, WrappedSummary, WritingCalendarDay,
-        WritingCalendarResponse,
+        AnalyticsWritingWindowSummary, DashboardBestDay, DashboardBestEntry, DashboardBestMonth,
+        DashboardBestOf, WordCount, WrappedActivityPoint, WrappedBadge, WrappedBusiestDay,
+        WrappedChartCountPoint, WrappedCharts, WrappedComparison, WrappedFunFact, WrappedHighlight,
+        WrappedHighlights, WrappedInsight, WrappedLongestEntry, WrappedMetricComparison,
+        WrappedMostTaggedEntry, WrappedNavigation, WrappedRange, WrappedRecords, WrappedRequest,
+        WrappedResponse, WrappedSummary, WritingCalendarDay, WritingCalendarResponse,
     },
     mood_sentiment,
 };
@@ -37,6 +37,143 @@ struct EntryStatsRow {
 
 pub fn get_analytics(input: Option<AnalyticsPeriodRequest>) -> Result<AnalyticsResponse> {
     get_analytics_for_database(&db::resolve_database_path(), input.unwrap_or_default())
+}
+
+pub fn get_dashboard_best_of() -> Result<DashboardBestOf> {
+    get_dashboard_best_of_for_database(&db::resolve_database_path())
+}
+
+pub(crate) fn get_dashboard_best_of_for_database(db_path: &Path) -> Result<DashboardBestOf> {
+    let connection = db::open_read_only_connection(db_path)?;
+    if !table_exists(&connection, "entries")? {
+        return Err(anyhow!(
+            "The active database does not contain an entries table."
+        ));
+    }
+
+    let period = AnalyticsPeriodRequest::default();
+    let rows = load_entry_rows(&connection, &period)?;
+    let tag_counts_by_entry = tag_counts_by_entry(&connection, &period)?;
+    Ok(dashboard_best_of(&rows, &tag_counts_by_entry))
+}
+
+fn dashboard_best_of(
+    rows: &[EntryStatsRow],
+    tag_counts_by_entry: &HashMap<i64, i64>,
+) -> DashboardBestOf {
+    let mut days: BTreeMap<String, WrappedDayBucket> = BTreeMap::new();
+    let mut months: BTreeMap<String, WrappedDayBucket> = BTreeMap::new();
+
+    for row in rows {
+        let words = word_count(&row.text) as i64;
+        let day = days.entry(row.date.clone()).or_default();
+        day.entries += 1;
+        day.words += words;
+
+        if let Some(month) = row.date.get(0..7) {
+            let month = months.entry(month.to_string()).or_default();
+            month.entries += 1;
+            month.words += words;
+        }
+    }
+
+    let most_entries_day = days
+        .iter()
+        .max_by(|(left_date, left), (right_date, right)| {
+            left.entries
+                .cmp(&right.entries)
+                .then_with(|| left.words.cmp(&right.words))
+                .then_with(|| left_date.cmp(right_date))
+        })
+        .map(|(date, bucket)| DashboardBestDay {
+            date: date.clone(),
+            entry_count: bucket.entries,
+            word_count: bucket.words,
+        });
+    let most_words_day = days
+        .iter()
+        .max_by(|(left_date, left), (right_date, right)| {
+            left.words
+                .cmp(&right.words)
+                .then_with(|| left.entries.cmp(&right.entries))
+                .then_with(|| left_date.cmp(right_date))
+        })
+        .map(|(date, bucket)| DashboardBestDay {
+            date: date.clone(),
+            entry_count: bucket.entries,
+            word_count: bucket.words,
+        });
+    let longest_entry = rows
+        .iter()
+        .max_by(|left, right| {
+            word_count(&left.text)
+                .cmp(&word_count(&right.text))
+                .then_with(|| left.created_at.cmp(&right.created_at))
+                .then_with(|| left.id.cmp(&right.id))
+        })
+        .map(|row| dashboard_best_entry(row, tag_counts_by_entry));
+    let most_tagged_entry = rows
+        .iter()
+        .filter(|row| tag_counts_by_entry.get(&row.id).copied().unwrap_or(0) > 0)
+        .max_by(|left, right| {
+            tag_counts_by_entry
+                .get(&left.id)
+                .copied()
+                .unwrap_or(0)
+                .cmp(&tag_counts_by_entry.get(&right.id).copied().unwrap_or(0))
+                .then_with(|| left.created_at.cmp(&right.created_at))
+                .then_with(|| left.id.cmp(&right.id))
+        })
+        .map(|row| dashboard_best_entry(row, tag_counts_by_entry));
+    let most_entries_month = months
+        .iter()
+        .max_by(|(left_period, left), (right_period, right)| {
+            left.entries
+                .cmp(&right.entries)
+                .then_with(|| left.words.cmp(&right.words))
+                .then_with(|| left_period.cmp(right_period))
+        })
+        .map(|(period, bucket)| DashboardBestMonth {
+            period: period.clone(),
+            entry_count: bucket.entries,
+            word_count: bucket.words,
+        });
+    let most_words_month = months
+        .iter()
+        .max_by(|(left_period, left), (right_period, right)| {
+            left.words
+                .cmp(&right.words)
+                .then_with(|| left.entries.cmp(&right.entries))
+                .then_with(|| left_period.cmp(right_period))
+        })
+        .map(|(period, bucket)| DashboardBestMonth {
+            period: period.clone(),
+            entry_count: bucket.entries,
+            word_count: bucket.words,
+        });
+
+    DashboardBestOf {
+        most_entries_day,
+        most_words_day,
+        most_tagged_entry,
+        longest_entry,
+        most_entries_month,
+        most_words_month,
+    }
+}
+
+fn dashboard_best_entry(
+    row: &EntryStatsRow,
+    tag_counts_by_entry: &HashMap<i64, i64>,
+) -> DashboardBestEntry {
+    DashboardBestEntry {
+        entry_id: row.id,
+        uuid: row.uuid.clone(),
+        created_at: row.created_at.clone(),
+        date: row.date.clone(),
+        word_count: word_count(&row.text) as i64,
+        tag_count: tag_counts_by_entry.get(&row.id).copied().unwrap_or(0),
+    }
 }
 
 pub(crate) fn get_analytics_for_database(
@@ -1864,6 +2001,39 @@ mod tests {
         assert_eq!(response.monthly_trend[0].period, "2026-01");
         assert_eq!(response.monthly_trend[0].mood_sentiment_count, 2);
         assert_close(response.monthly_trend[0].average_mood_sentiment, 0.5);
+    }
+
+    #[test]
+    fn dashboard_best_of_uses_all_time_visible_entries() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_stats_fixture(temp_dir.path());
+
+        let response = get_dashboard_best_of_for_database(&db_path).expect("dashboard best of");
+
+        let most_entries_day = response.most_entries_day.expect("most entries day");
+        assert_eq!(most_entries_day.date, "2026-01-02");
+        assert_eq!(most_entries_day.entry_count, 2);
+        assert_eq!(most_entries_day.word_count, 6);
+
+        let most_words_day = response.most_words_day.expect("most words day");
+        assert_eq!(most_words_day.date, "2026-01-02");
+        assert_eq!(most_words_day.word_count, 6);
+
+        let most_tagged_entry = response.most_tagged_entry.expect("most tagged entry");
+        assert_eq!(most_tagged_entry.entry_id, 3);
+        assert_eq!(most_tagged_entry.tag_count, 1);
+
+        let longest_entry = response.longest_entry.expect("longest entry");
+        assert_eq!(longest_entry.entry_id, 4);
+        assert_eq!(longest_entry.word_count, 3);
+
+        let most_entries_month = response.most_entries_month.expect("most entries month");
+        assert_eq!(most_entries_month.period, "2026-01");
+        assert_eq!(most_entries_month.entry_count, 3);
+
+        let most_words_month = response.most_words_month.expect("most words month");
+        assert_eq!(most_words_month.period, "2026-01");
+        assert_eq!(most_words_month.word_count, 9);
     }
 
     #[test]

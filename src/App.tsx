@@ -92,6 +92,7 @@ import {
   getAppVersion,
   getCapsuleConfig,
   getDatabaseStatus,
+  getDashboardBestOf,
   getDebugDiagnostics,
   getGamificationOverview,
   getEntry,
@@ -194,6 +195,7 @@ import type {
   AnalyticsResponse,
   CoverWallRequest,
   CoverWallResponse,
+  DashboardBestOf,
   DatabaseStatus,
   DebugBundleResponse,
   DebugCheck,
@@ -688,6 +690,7 @@ function App() {
     currentYear: null,
     currentMonth: null,
   });
+  const [dashboardBestOf, setDashboardBestOf] = useState<DashboardBestOf | null>(null);
   const [entryFilters, setEntryFilters] = useState<EntryFilterForm>(defaultEntryFilters);
   const [entryLimit, setEntryLimit] = useState(40);
   const [entryResponse, setEntryResponse] = useState<EntryListResponse | null>(null);
@@ -1280,7 +1283,7 @@ function App() {
         const now = new Date();
         const yearStart = `${now.getFullYear()}-01-01`;
         const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-        const [recent, pinned, random, yearEntries, monthEntries, nextTags, nextMoods] = await Promise.all([
+        const [recent, pinned, random, yearEntries, monthEntries, nextTags, nextMoods, bestOf] = await Promise.all([
           listEntries({ limit: 6, sort: "desc" }),
           listEntries({ pinned: true, limit: 6, sort: "desc" }),
           getRandomEntry({ includeHidden: false }),
@@ -1288,6 +1291,7 @@ function App() {
           listEntries({ since: monthStart, limit: 1 }),
           listTags(),
           listMoods(),
+          getDashboardBestOf(),
         ]);
 
         setRecentEntries(recent.entries);
@@ -1295,6 +1299,7 @@ function App() {
         setRandomEntry(random);
         setTagCatalog(nextTags);
         setMoodCatalog(nextMoods);
+        setDashboardBestOf(bestOf);
         setDashboardCounts({
           currentYear: yearEntries.total,
           currentMonth: monthEntries.total,
@@ -1305,6 +1310,7 @@ function App() {
         setRandomEntry(null);
         setTagCatalog(null);
         setMoodCatalog(null);
+        setDashboardBestOf(null);
         setDashboardCounts({ currentYear: null, currentMonth: null });
       }
     } catch (refreshError) {
@@ -2894,6 +2900,7 @@ function App() {
           <DashboardView
             backups={backups}
             backupDirectory={backupDirectory}
+            bestOf={dashboardBestOf}
             counts={dashboardCounts}
             loading={loading}
             onRandomRefresh={handleRandomRefresh}
@@ -3278,6 +3285,7 @@ type DashboardViewProps = {
   statusTone: "good" | "warn" | "neutral";
   backups: BackupInfo[];
   backupDirectory: string;
+  bestOf: DashboardBestOf | null;
   recentEntries: Entry[];
   pinnedEntries: Entry[];
   randomEntry: Entry | null;
@@ -3291,6 +3299,7 @@ function DashboardView({
   statusTone,
   backups,
   backupDirectory,
+  bestOf,
   recentEntries,
   pinnedEntries,
   randomEntry,
@@ -3300,6 +3309,8 @@ function DashboardView({
 }: DashboardViewProps) {
   return (
     <section className="dashboard" aria-label="Journal dashboard">
+      <DashboardBestOfSection bestOf={bestOf} loading={loading} />
+
       <div className="metric-strip">
         <Metric label="Entries" value={status?.entryCount ?? "Unknown"} />
         <Metric label="Tags" value={status?.tagCount ?? "Unknown"} />
@@ -3374,6 +3385,125 @@ function DashboardView({
       </div>
     </section>
   );
+}
+
+function DashboardBestOfSection({
+  bestOf,
+  loading,
+}: {
+  bestOf: DashboardBestOf | null;
+  loading: boolean;
+}) {
+  const loadingValue = loading && !bestOf ? "Loading…" : "No record yet";
+  const emptyDetail =
+    loading && !bestOf
+      ? "Gathering your all-time records."
+      : "Write a capsule to set this record.";
+  const records = [
+    {
+      label: "Most capsules in a day",
+      value: bestOf?.mostEntriesDay
+        ? `${formatDashboardNumber(bestOf.mostEntriesDay.entryCount)} ${pluralizeDashboard(bestOf.mostEntriesDay.entryCount, "capsule")}`
+        : loadingValue,
+      detail: bestOf?.mostEntriesDay
+        ? `on ${formatDashboardDate(bestOf.mostEntriesDay.date)}`
+        : emptyDetail,
+    },
+    {
+      label: "Most words in a day",
+      value: bestOf?.mostWordsDay
+        ? `${formatDashboardNumber(bestOf.mostWordsDay.wordCount)} ${pluralizeDashboard(bestOf.mostWordsDay.wordCount, "word")}`
+        : loadingValue,
+      detail: bestOf?.mostWordsDay
+        ? `${formatDashboardNumber(bestOf.mostWordsDay.entryCount)} ${pluralizeDashboard(bestOf.mostWordsDay.entryCount, "capsule")} on ${formatDashboardDate(bestOf.mostWordsDay.date)}`
+        : emptyDetail,
+    },
+    {
+      label: "Most tags on one capsule",
+      value: bestOf?.mostTaggedEntry
+        ? `${formatDashboardNumber(bestOf.mostTaggedEntry.tagCount)} ${pluralizeDashboard(bestOf.mostTaggedEntry.tagCount, "tag")}`
+        : loadingValue,
+      detail: bestOf?.mostTaggedEntry
+        ? `Entry #${bestOf.mostTaggedEntry.entryId} on ${formatDashboardDate(bestOf.mostTaggedEntry.date)}`
+        : emptyDetail,
+    },
+    {
+      label: "Longest capsule",
+      value: bestOf?.longestEntry
+        ? `${formatDashboardNumber(bestOf.longestEntry.wordCount)} ${pluralizeDashboard(bestOf.longestEntry.wordCount, "word")}`
+        : loadingValue,
+      detail: bestOf?.longestEntry
+        ? `Entry #${bestOf.longestEntry.entryId} on ${formatDashboardDate(bestOf.longestEntry.date)}`
+        : emptyDetail,
+    },
+    {
+      label: "Biggest month by capsules",
+      value: bestOf?.mostEntriesMonth
+        ? `${formatDashboardNumber(bestOf.mostEntriesMonth.entryCount)} ${pluralizeDashboard(bestOf.mostEntriesMonth.entryCount, "capsule")}`
+        : loadingValue,
+      detail: bestOf?.mostEntriesMonth
+        ? formatDashboardMonth(bestOf.mostEntriesMonth.period)
+        : emptyDetail,
+    },
+    {
+      label: "Biggest month by words",
+      value: bestOf?.mostWordsMonth
+        ? `${formatDashboardNumber(bestOf.mostWordsMonth.wordCount)} ${pluralizeDashboard(bestOf.mostWordsMonth.wordCount, "word")}`
+        : loadingValue,
+      detail: bestOf?.mostWordsMonth
+        ? formatDashboardMonth(bestOf.mostWordsMonth.period)
+        : emptyDetail,
+    },
+  ];
+
+  return (
+    <section className="dashboard-best-of" aria-labelledby="dashboard-best-of-title">
+      <header className="dashboard-best-of__header">
+        <h3 id="dashboard-best-of-title">Simply the Best!</h3>
+        <p>Your all-time journal records, all in one place.</p>
+      </header>
+      <div className="dashboard-best-of__grid">
+        {records.map((record) => (
+          <article className="dashboard-best-of__card" key={record.label}>
+            <p className="dashboard-best-of__label">{record.label}</p>
+            <strong>{record.value}</strong>
+            <p className="dashboard-best-of__detail">{record.detail}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function formatDashboardNumber(value: number) {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
+}
+
+function pluralizeDashboard(value: number, singular: string) {
+  return value === 1 ? singular : `${singular}s`;
+}
+
+function formatDashboardDate(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(year, month - 1, day));
+}
+
+function formatDashboardMonth(value: string) {
+  const [year, month] = value.split("-").map(Number);
+  if (!year || !month) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("en-GB", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(year, month - 1, 1));
 }
 
 type EntriesViewProps = {

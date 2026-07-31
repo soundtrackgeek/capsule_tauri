@@ -1556,6 +1556,44 @@ pub enum ImageVariant {
     Full,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardBestDay {
+    pub date: String,
+    pub entry_count: i64,
+    pub word_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardBestEntry {
+    pub entry_id: i64,
+    pub uuid: String,
+    pub created_at: String,
+    pub date: String,
+    pub word_count: i64,
+    pub tag_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardBestMonth {
+    pub period: String,
+    pub entry_count: i64,
+    pub word_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardBestOf {
+    pub most_entries_day: Option<DashboardBestDay>,
+    pub most_words_day: Option<DashboardBestDay>,
+    pub most_tagged_entry: Option<DashboardBestEntry>,
+    pub longest_entry: Option<DashboardBestEntry>,
+    pub most_entries_month: Option<DashboardBestMonth>,
+    pub most_words_month: Option<DashboardBestMonth>,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalyticsPeriodRequest {

@@ -27,7 +27,7 @@ use models::{
     AnalyticsPeriodRequest, AnalyticsResponse, BackupCreateRequest, BackupCreateResponse,
     BackupListResponse, BackupRestorePreview, BackupRestorePreviewRequest, BackupRestoreRequest,
     BackupRestoreResponse, BulkThreadDetachRequest, BulkThreadLinkRequest, CapsuleConfigResponse,
-    ConfigMutationResponse, CoverWallRequest, CoverWallResponse, DatabaseStatus,
+    ConfigMutationResponse, CoverWallRequest, CoverWallResponse, DashboardBestOf, DatabaseStatus,
     DebugBundleResponse, DebugDiagnosticsResponse, DebugLogRequest, DebugLogResponse,
     DeleteAiConversationResponse, DeleteEntryResponse, Entry, EntryCreate, EntryFilters,
     EntryHistoryResponse, EntryListResponse, EntryMutationResponse, EntryUpdate,
@@ -349,6 +349,14 @@ async fn search_entries(input: SearchRequest) -> Result<SearchResponse, String> 
 #[tauri::command]
 async fn get_analytics(input: Option<AnalyticsPeriodRequest>) -> Result<AnalyticsResponse, String> {
     tauri::async_runtime::spawn_blocking(move || stats::get_analytics(input))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn get_dashboard_best_of() -> Result<DashboardBestOf, String> {
+    tauri::async_runtime::spawn_blocking(stats::get_dashboard_best_of)
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())
@@ -1050,6 +1058,7 @@ pub fn run() {
             upload_and_attach_images,
             remove_image,
             search_entries,
+            get_dashboard_best_of,
             get_analytics,
             get_wrapped,
             get_writing_calendar,

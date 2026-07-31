@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.34.0 - 2026-07-31
+
+### Added
+
+- Added a responsive “Simply the Best!” section at the top of the Dashboard
+  with six all-time journal records for daily capsules and words, per-capsule
+  tags and words, and monthly capsules and words.
+
+### Changed
+
+- Bumped the app version to 0.34.0.
+
 ## 0.33.3 - 2026-07-28
 
 ### Fixed

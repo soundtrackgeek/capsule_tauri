@@ -35,6 +35,19 @@ describe("App Writer settings", () => {
     window.history.replaceState({}, "", "/");
   });
 
+  test("shows six all-time journal records at the top of the Dashboard", async () => {
+    render(<App />);
+
+    const bestOf = await screen.findByRole("region", { name: "Simply the Best!" });
+    expect(within(bestOf).getAllByRole("article")).toHaveLength(6);
+    expect(within(bestOf).getByText("Most capsules in a day")).toBeInTheDocument();
+    expect(within(bestOf).getByText("Most words in a day")).toBeInTheDocument();
+    expect(within(bestOf).getByText("Most tags on one capsule")).toBeInTheDocument();
+    expect(within(bestOf).getByText("Longest capsule")).toBeInTheDocument();
+    expect(within(bestOf).getByText("Biggest month by capsules")).toBeInTheDocument();
+    expect(within(bestOf).getByText("Biggest month by words")).toBeInTheDocument();
+  });
+
   test("restores and persists Retro CRT display preferences", async () => {
     window.localStorage.setItem(
       writerSettingsStorageKey,
