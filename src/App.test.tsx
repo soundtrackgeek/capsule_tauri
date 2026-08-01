@@ -46,6 +46,11 @@ describe("App Writer settings", () => {
     expect(within(bestOf).getByText("Longest capsule")).toBeInTheDocument();
     expect(within(bestOf).getByText("Biggest month by capsules")).toBeInTheDocument();
     expect(within(bestOf).getByText("Biggest month by words")).toBeInTheDocument();
+    const totalWordsLabel = screen.getByText("Total words");
+    await waitFor(() => {
+      expect(totalWordsLabel.nextElementSibling).not.toHaveTextContent("Unknown");
+    });
+    expect(screen.queryByText("This year")).not.toBeInTheDocument();
   });
 
   test("restores and persists Retro CRT display preferences", async () => {

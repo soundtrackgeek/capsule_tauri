@@ -54,12 +54,14 @@ pub(crate) fn get_dashboard_best_of_for_database(db_path: &Path) -> Result<Dashb
     let period = AnalyticsPeriodRequest::default();
     let rows = load_entry_rows(&connection, &period)?;
     let tag_counts_by_entry = tag_counts_by_entry(&connection, &period)?;
-    Ok(dashboard_best_of(&rows, &tag_counts_by_entry))
+    let total_words = load_total_word_count(&connection)?;
+    Ok(dashboard_best_of(&rows, &tag_counts_by_entry, total_words))
 }
 
 fn dashboard_best_of(
     rows: &[EntryStatsRow],
     tag_counts_by_entry: &HashMap<i64, i64>,
+    total_words: i64,
 ) -> DashboardBestOf {
     let mut days: BTreeMap<String, WrappedDayBucket> = BTreeMap::new();
     let mut months: BTreeMap<String, WrappedDayBucket> = BTreeMap::new();
@@ -153,6 +155,7 @@ fn dashboard_best_of(
         });
 
     DashboardBestOf {
+        total_words,
         most_entries_day,
         most_words_day,
         most_tagged_entry,
@@ -160,6 +163,21 @@ fn dashboard_best_of(
         most_entries_month,
         most_words_month,
     }
+}
+
+fn load_total_word_count(connection: &Connection) -> Result<i64> {
+    let mut statement = connection.prepare(
+        "SELECT COALESCE(NULLIF(text_plain, ''), text, '')
+         FROM entries",
+    )?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()?
+        .into_iter()
+        .try_fold(0_i64, |total, text| {
+            total
+                .checked_add(word_count(&text) as i64)
+                .ok_or_else(|| anyhow!("Total word count exceeds the supported range"))
+        })
 }
 
 fn dashboard_best_entry(
@@ -2009,6 +2027,8 @@ mod tests {
         let db_path = create_stats_fixture(temp_dir.path());
 
         let response = get_dashboard_best_of_for_database(&db_path).expect("dashboard best of");
+
+        assert_eq!(response.total_words, 13);
 
         let most_entries_day = response.most_entries_day.expect("most entries day");
         assert_eq!(most_entries_day.date, "2026-01-02");

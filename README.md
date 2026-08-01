@@ -25,8 +25,8 @@ explicit capability-gated AI/sync surfaces:
 - Read-only database status for the active Capsule database.
 - Dashboard “Simply the Best!” cards for six all-time records—most capsules and
   words in a day, most tags and words on one capsule, and biggest months by
-  capsules and words—plus counts for total entries, total tags, current year,
-  and current month.
+  capsules and words—plus counts for total entries, total tags, total words
+  across every entry, and current-month entries.
 - Recent entries, pinned entries, and random entry panels with old-Capsule-style
   entry numbers.
 - Entries list with chronological old-Capsule-style entry numbers, including

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.34.1 - 2026-08-01
+
+### Changed
+
+- Replaced the Dashboard's current-year entry count with a lifetime word count
+  across all entries, including hidden entries.
+- Bumped the app version to 0.34.1.
+
 ## 0.34.0 - 2026-07-31
 
 ### Added

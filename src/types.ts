@@ -1144,6 +1144,7 @@ export type DashboardBestMonth = {
 };
 
 export type DashboardBestOf = {
+  totalWords: number;
   mostEntriesDay: DashboardBestDay | null;
   mostWordsDay: DashboardBestDay | null;
   mostTaggedEntry: DashboardBestEntry | null;

@@ -291,7 +291,7 @@ type ThreadMetadataDraft = {
 };
 
 type DashboardCounts = {
-  currentYear: number | null;
+  totalWords: number | null;
   currentMonth: number | null;
 };
 
@@ -687,7 +687,7 @@ function App() {
   const [pinnedEntries, setPinnedEntries] = useState<Entry[]>([]);
   const [randomEntry, setRandomEntry] = useState<Entry | null>(null);
   const [dashboardCounts, setDashboardCounts] = useState<DashboardCounts>({
-    currentYear: null,
+    totalWords: null,
     currentMonth: null,
   });
   const [dashboardBestOf, setDashboardBestOf] = useState<DashboardBestOf | null>(null);
@@ -1281,13 +1281,11 @@ function App() {
 
       if (nextStatus.readable) {
         const now = new Date();
-        const yearStart = `${now.getFullYear()}-01-01`;
         const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-        const [recent, pinned, random, yearEntries, monthEntries, nextTags, nextMoods, bestOf] = await Promise.all([
+        const [recent, pinned, random, monthEntries, nextTags, nextMoods, bestOf] = await Promise.all([
           listEntries({ limit: 6, sort: "desc" }),
           listEntries({ pinned: true, limit: 6, sort: "desc" }),
           getRandomEntry({ includeHidden: false }),
-          listEntries({ since: yearStart, limit: 1 }),
           listEntries({ since: monthStart, limit: 1 }),
           listTags(),
           listMoods(),
@@ -1301,7 +1299,7 @@ function App() {
         setMoodCatalog(nextMoods);
         setDashboardBestOf(bestOf);
         setDashboardCounts({
-          currentYear: yearEntries.total,
+          totalWords: bestOf.totalWords,
           currentMonth: monthEntries.total,
         });
       } else {
@@ -1311,7 +1309,7 @@ function App() {
         setTagCatalog(null);
         setMoodCatalog(null);
         setDashboardBestOf(null);
-        setDashboardCounts({ currentYear: null, currentMonth: null });
+        setDashboardCounts({ totalWords: null, currentMonth: null });
       }
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : "Unable to refresh");
@@ -3314,7 +3312,10 @@ function DashboardView({
       <div className="metric-strip">
         <Metric label="Entries" value={status?.entryCount ?? "Unknown"} />
         <Metric label="Tags" value={status?.tagCount ?? "Unknown"} />
-        <Metric label="This year" value={counts.currentYear ?? "Unknown"} />
+        <Metric
+          label="Total words"
+          value={counts.totalWords === null ? "Unknown" : formatDashboardNumber(counts.totalWords)}
+        />
         <Metric label="This month" value={counts.currentMonth ?? "Unknown"} />
       </div>
 

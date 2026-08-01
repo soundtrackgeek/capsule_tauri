@@ -2526,6 +2526,10 @@ export async function getDashboardBestOf(): Promise<DashboardBestOf> {
 
 function buildMockDashboardBestOf(): DashboardBestOf {
   const entries = mockEntries.filter((entry) => !entry.hidden);
+  const totalWords = mockEntries.reduce(
+    (sum, entry) => sum + writingWordCount(entry.textPlain),
+    0,
+  );
   const days = new Map<string, { entryCount: number; wordCount: number }>();
   const months = new Map<string, { entryCount: number; wordCount: number }>();
 
@@ -2571,6 +2575,7 @@ function buildMockDashboardBestOf(): DashboardBestOf {
     .at(-1);
 
   return {
+    totalWords,
     mostEntriesDay:
       dayRecords
         .sort(

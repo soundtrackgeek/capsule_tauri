@@ -1586,6 +1586,7 @@ pub struct DashboardBestMonth {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DashboardBestOf {
+    pub total_words: i64,
     pub most_entries_day: Option<DashboardBestDay>,
     pub most_words_day: Option<DashboardBestDay>,
     pub most_tagged_entry: Option<DashboardBestEntry>,
