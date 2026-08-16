@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import App from "./App";
+import { getPathSettings, setPathSettings } from "./backend";
 
 const writerSettingsStorageKey = "capsule-tauri-writer-settings-v1";
 
@@ -29,10 +30,15 @@ function installLocalStorageMock() {
 }
 
 describe("App Writer settings", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     installLocalStorageMock();
     window.localStorage.clear();
     window.history.replaceState({}, "", "/");
+    await setPathSettings({
+      wordTargetEnabled: false,
+      wordTarget: 500,
+      gauntletModeEnabled: false,
+    });
   });
 
   test("shows six all-time journal records at the top of the Dashboard", async () => {
@@ -145,6 +151,54 @@ describe("App Writer settings", () => {
 
     await screen.findByText("New");
     expect((screen.getByPlaceholderText("Write") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  test("shows live word targets and blocks saving in Gauntlet mode", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await screen.findByText(/path_settings\.json/);
+
+    const enableTargets = await screen.findByLabelText("Enable word targets");
+    fireEvent.click(enableTargets);
+    fireEvent.change(screen.getByLabelText("Word target"), { target: { value: "5" } });
+    fireEvent.click(screen.getByLabelText("Gauntlet mode"));
+    const saveWritingSettings = screen.getByRole("button", { name: "Save writing settings" });
+    fireEvent.click(saveWritingSettings);
+
+    await screen.findByText(/Saved local settings:/);
+    await waitFor(() => expect(saveWritingSettings).toBeEnabled());
+    expect(await getPathSettings()).toMatchObject({
+      wordTargetEnabled: true,
+      wordTarget: 5,
+      gauntletModeEnabled: true,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "New Entry" }));
+
+    const composerText = await screen.findByPlaceholderText("Write the entry");
+    expect(screen.getByText("0 / 5 words · Gauntlet")).toBeInTheDocument();
+
+    fireEvent.change(composerText, { target: { value: "one two three four" } });
+    expect(screen.getByText("4 / 5 words · Gauntlet")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    fireEvent.keyDown(window, { ctrlKey: true, key: "s" });
+    expect(await screen.findByText(/Gauntlet mode requires 5 words/)).toBeInTheDocument();
+
+    const writerButtons = screen.getAllByRole("button", { name: "Writer" });
+    fireEvent.click(writerButtons[writerButtons.length - 1]);
+
+    expect(await screen.findByText("4 / 5 words · Gauntlet")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText("Write"), {
+      target: { value: "one two three four five" },
+    });
+    expect(screen.getByText("5 / 5 words · Gauntlet")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    await waitFor(() =>
+      expect(screen.queryByText(/Gauntlet mode requires 5 words/)).not.toBeInTheDocument(),
+    );
   });
 
   test("adds an entry to the end of a selected thread", async () => {

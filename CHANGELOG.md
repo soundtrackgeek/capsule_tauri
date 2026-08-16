@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.36.0 - 2026-08-16
+
+### Added
+
+- Added optional configurable entry word targets with a subtle real-time
+  progress line in the full composer and standard or Retro Writer Mode.
+- Added Gauntlet mode, which prevents button and keyboard-shortcut saves until
+  the configured word target is reached.
+
+### Changed
+
+- Bumped the app version to 0.36.0.
+
 ## 0.35.0 - 2026-08-16
 
 ### Added

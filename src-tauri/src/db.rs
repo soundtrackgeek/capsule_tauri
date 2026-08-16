@@ -19,6 +19,8 @@ const PATH_SETTINGS_ENV: &str = "CAPSULE_PATH_SETTINGS_PATH";
 const BACKUP_DIRECTORY_ENV: &str = "CAPSULE_BACKUP_DIR";
 pub const DEFAULT_BACKUP_RETENTION_COUNT: usize = 5;
 pub const MAX_BACKUP_RETENTION_COUNT: usize = 1000;
+pub const DEFAULT_WORD_TARGET: usize = 500;
+pub const MAX_WORD_TARGET: usize = 100_000;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +37,9 @@ pub struct LocalPathSettings {
     pub auto_sync_interval_minutes: Option<i64>,
     pub minimize_to_tray_on_close: Option<bool>,
     pub debug_menu_enabled: Option<bool>,
+    pub word_target_enabled: Option<bool>,
+    pub word_target: Option<usize>,
+    pub gauntlet_mode_enabled: Option<bool>,
     pub show_window_after_update_restart: Option<bool>,
 }
 
@@ -443,6 +448,9 @@ impl LocalPathSettings {
         self.auto_sync_interval_minutes = self
             .auto_sync_interval_minutes
             .map(|minutes| minutes.clamp(1, 24 * 60));
+        self.word_target = self
+            .word_target
+            .map(|target| target.clamp(1, MAX_WORD_TARGET));
     }
 }
 
@@ -567,5 +575,24 @@ mod tests {
             !consume_show_window_after_update_restart_at_path(&settings_path)
                 .expect("consume empty request")
         );
+    }
+
+    #[test]
+    fn word_target_settings_round_trip_and_normalize() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let settings_path = temp_dir.path().join("path_settings.json");
+        let settings = LocalPathSettings {
+            word_target_enabled: Some(true),
+            word_target: Some(MAX_WORD_TARGET + 1),
+            gauntlet_mode_enabled: Some(true),
+            ..LocalPathSettings::default()
+        };
+
+        write_local_path_settings_to_path(&settings_path, &settings).expect("write settings");
+        let stored = read_local_path_settings_from_path(&settings_path).expect("read settings");
+
+        assert_eq!(stored.word_target_enabled, Some(true));
+        assert_eq!(stored.word_target, Some(MAX_WORD_TARGET));
+        assert_eq!(stored.gauntlet_mode_enabled, Some(true));
     }
 }

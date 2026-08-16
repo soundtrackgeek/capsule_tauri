@@ -116,6 +116,9 @@ export type PathSettingsResponse = {
   minimizeToTrayOnClose: boolean;
   startWithWindows: boolean;
   debugMenuEnabled: boolean;
+  wordTargetEnabled: boolean;
+  wordTarget: number;
+  gauntletModeEnabled: boolean;
   settingsPath: string;
   warnings: string[];
 };
@@ -135,6 +138,9 @@ export type PathSettingsUpdateRequest = {
   minimizeToTrayOnClose?: boolean | null;
   startWithWindows?: boolean | null;
   debugMenuEnabled?: boolean | null;
+  wordTargetEnabled?: boolean | null;
+  wordTarget?: number | null;
+  gauntletModeEnabled?: boolean | null;
 };
 
 export type AICloudProvider = "openai" | "gemini" | "openrouter";

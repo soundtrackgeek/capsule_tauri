@@ -185,6 +185,9 @@ pub struct PathSettingsResponse {
     pub minimize_to_tray_on_close: bool,
     pub start_with_windows: bool,
     pub debug_menu_enabled: bool,
+    pub word_target_enabled: bool,
+    pub word_target: usize,
+    pub gauntlet_mode_enabled: bool,
     pub settings_path: String,
     pub warnings: Vec<String>,
 }
@@ -206,6 +209,9 @@ pub struct PathSettingsUpdateRequest {
     pub minimize_to_tray_on_close: Option<bool>,
     pub start_with_windows: Option<bool>,
     pub debug_menu_enabled: Option<bool>,
+    pub word_target_enabled: Option<bool>,
+    pub word_target: Option<usize>,
+    pub gauntlet_mode_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]

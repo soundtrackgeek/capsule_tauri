@@ -184,6 +184,11 @@ pub fn get_path_settings() -> Result<PathSettingsResponse> {
         minimize_to_tray_on_close: local_settings.minimize_to_tray_on_close.unwrap_or(false),
         start_with_windows: false,
         debug_menu_enabled: local_settings.debug_menu_enabled.unwrap_or(false),
+        word_target_enabled: local_settings.word_target_enabled.unwrap_or(false),
+        word_target: local_settings
+            .word_target
+            .unwrap_or(db::DEFAULT_WORD_TARGET),
+        gauntlet_mode_enabled: local_settings.gauntlet_mode_enabled.unwrap_or(false),
         settings_path: db::path_to_string(&db::local_path_settings_path()),
         warnings,
     })
@@ -211,6 +216,11 @@ pub fn set_path_settings(input: PathSettingsUpdateRequest) -> Result<PathSetting
         .map(|minutes| minutes.clamp(1, 24 * 60));
     settings.minimize_to_tray_on_close = input.minimize_to_tray_on_close;
     settings.debug_menu_enabled = input.debug_menu_enabled;
+    settings.word_target_enabled = input.word_target_enabled;
+    settings.word_target = input
+        .word_target
+        .map(|target| target.clamp(1, db::MAX_WORD_TARGET));
+    settings.gauntlet_mode_enabled = input.gauntlet_mode_enabled;
 
     if let Some(path) = settings.image_media_root.as_deref() {
         fs::create_dir_all(path).with_context(|| format!("failed to create image path {path}"))?;

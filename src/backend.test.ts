@@ -65,6 +65,31 @@ describe("mock Windows startup setting", () => {
   });
 });
 
+describe("mock word target settings", () => {
+  afterEach(async () => {
+    await setPathSettings({
+      wordTargetEnabled: false,
+      wordTarget: 500,
+      gauntletModeEnabled: false,
+    });
+  });
+
+  test("persists word targets and clamps invalid target sizes", async () => {
+    const enabled = await setPathSettings({
+      wordTargetEnabled: true,
+      wordTarget: 0,
+      gauntletModeEnabled: true,
+    });
+
+    expect(enabled).toMatchObject({
+      wordTargetEnabled: true,
+      wordTarget: 1,
+      gauntletModeEnabled: true,
+    });
+    expect(await getPathSettings()).toMatchObject(enabled);
+  });
+});
+
 async function resetAiSettings() {
   await updateAiSettings({
     cloudProvider: "gemini",

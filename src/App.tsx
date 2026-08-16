@@ -476,6 +476,8 @@ const writerFontSizeMin = 16;
 const writerFontSizeMax = 28;
 const writerLineSpacingMin = 1.3;
 const writerLineSpacingMax = 2.2;
+const defaultWordTarget = 500;
+const maxWordTarget = 100_000;
 const draftStorageKey = "capsule-tauri-composer-draft-v1";
 const uiSettingsStorageKey = "capsule-tauri-ui-settings-v1";
 const writerSettingsStorageKey = "capsule-tauri-writer-settings-v1";
@@ -808,6 +810,24 @@ function App() {
     return status.warnings.length > 0 ? "neutral" : "good";
   }, [status]);
   const debugMenuEnabled = pathSettings?.debugMenuEnabled ?? false;
+  const wordTargetEnabled = pathSettings?.wordTargetEnabled ?? false;
+  const wordTarget = Math.max(1, pathSettings?.wordTarget ?? defaultWordTarget);
+  const gauntletModeEnabled =
+    wordTargetEnabled && (pathSettings?.gauntletModeEnabled ?? false);
+  const handleComposerDraftChange = useCallback(
+    (next: ComposerDraft) => {
+      if (next.text !== composerDraft.text) {
+        setComposerAiSuggestion(null);
+      }
+      if (gauntletModeEnabled && countWords(next.text) >= wordTarget) {
+        setError((current) =>
+          current?.startsWith("Gauntlet mode requires") ? null : current,
+        );
+      }
+      setComposerDraft(next);
+    },
+    [composerDraft.text, gauntletModeEnabled, wordTarget],
+  );
   const visibleNavItems = useMemo(
     () => navItems.filter((item) => item.id !== "debug" || debugMenuEnabled),
     [debugMenuEnabled],
@@ -2330,6 +2350,17 @@ function App() {
       return;
     }
 
+    const currentWordCount = countWords(composerDraft.text);
+    if (gauntletModeEnabled && currentWordCount < wordTarget) {
+      const remaining = wordTarget - currentWordCount;
+      setError(
+        `Gauntlet mode requires ${wordTarget} words. Write ${remaining} more ${
+          remaining === 1 ? "word" : "words"
+        } before saving.`,
+      );
+      return;
+    }
+
     setSavingEntry(true);
     setError(null);
     setNotice(null);
@@ -2406,7 +2437,9 @@ function App() {
     composerDraft,
     composerMode,
     editingEntry,
+    gauntletModeEnabled,
     resetComposerToNewEntry,
+    wordTarget,
   ]);
 
   const handleEntryAction = useCallback(
@@ -2757,12 +2790,15 @@ function App() {
         error={error}
         mode={composerMode}
         notice={notice}
-        onChange={setComposerDraft}
+        onChange={handleComposerDraftChange}
         onExit={() => setActiveView("composer")}
         onSave={handleSaveEntry}
         saving={savingEntry}
         settings={writerSettings}
         setSettings={setWriterSettings}
+        wordTarget={wordTarget}
+        wordTargetEnabled={wordTargetEnabled}
+        gauntletModeEnabled={gauntletModeEnabled}
       />
     );
   }
@@ -3136,12 +3172,7 @@ function App() {
             onBrowseImagePath={handleBrowseImagePath}
             onCancel={() => setActiveView("entries")}
             onChangeImageDraft={handleChangeComposerImageDraft}
-            onChange={(next) => {
-              if (next.text !== composerDraft.text) {
-                setComposerAiSuggestion(null);
-              }
-              setComposerDraft(next);
-            }}
+            onChange={handleComposerDraftChange}
             onOpenWriter={() => setActiveView("writer")}
             onRemoveExistingImage={handleRemoveComposerImage}
             onRemoveImageDraft={handleRemoveComposerImageDraft}
@@ -3150,6 +3181,9 @@ function App() {
             saving={savingEntry}
             status={status}
             tagCatalog={tagCatalog}
+            wordTarget={wordTarget}
+            wordTargetEnabled={wordTargetEnabled}
+            gauntletModeEnabled={gauntletModeEnabled}
           />
         )}
 
@@ -4946,6 +4980,49 @@ function ThreadsView({
   );
 }
 
+type WordTargetProgressProps = {
+  id: string;
+  wordCount: number;
+  target: number;
+  gauntletModeEnabled: boolean;
+  className?: string;
+};
+
+function WordTargetProgress({
+  id,
+  wordCount,
+  target,
+  gauntletModeEnabled,
+  className,
+}: WordTargetProgressProps) {
+  const percentage = Math.min(100, (wordCount / target) * 100);
+  const complete = wordCount >= target;
+
+  return (
+    <div
+      className={["word-target-progress", complete ? "word-target-progress--complete" : "", className]
+        .filter(Boolean)
+        .join(" ")}
+      id={id}
+    >
+      <div
+        aria-label={`Word target: ${wordCount} of ${target} words`}
+        aria-valuemax={target}
+        aria-valuemin={0}
+        aria-valuenow={Math.min(wordCount, target)}
+        className="word-target-progress__track"
+        role="progressbar"
+      >
+        <span className="word-target-progress__bar" style={{ width: `${percentage}%` }} />
+      </div>
+      <span className="word-target-progress__count">
+        {wordCount.toLocaleString()} / {target.toLocaleString()} words
+        {gauntletModeEnabled ? " · Gauntlet" : ""}
+      </span>
+    </div>
+  );
+}
+
 type ComposerViewProps = {
   status: DatabaseStatus | null;
   mode: ComposerMode;
@@ -4973,6 +5050,9 @@ type ComposerViewProps = {
   aiSuggesting: boolean;
   imagesLoading: boolean;
   imagesMutating: boolean;
+  wordTargetEnabled: boolean;
+  wordTarget: number;
+  gauntletModeEnabled: boolean;
 };
 
 function ComposerView({
@@ -5002,6 +5082,9 @@ function ComposerView({
   aiSuggesting,
   imagesLoading,
   imagesMutating,
+  wordTargetEnabled,
+  wordTarget,
+  gauntletModeEnabled,
 }: ComposerViewProps) {
   const [composerTagCatalog, setComposerTagCatalog] = useState<TagCatalogResponse | null>(tagCatalog);
   const [composerMoodCatalog, setComposerMoodCatalog] = useState<MoodCatalogResponse | null>(moodCatalog);
@@ -5062,6 +5145,8 @@ function ComposerView({
     [composerTagCatalog?.tags],
   );
   const stats = writingStats(draft.text);
+  const wordTargetProgressId = "composer-word-target-progress";
+  const gauntletBlocksSave = gauntletModeEnabled && stats.words < wordTarget;
   const activeAiProvider = aiSettings?.cloudProvider ?? "gemini";
   const activeAiStatus =
     aiProviderStatuses.find((status) => status.provider === activeAiProvider) ?? null;
@@ -5099,9 +5184,15 @@ function ComposerView({
               Cancel
             </button>
             <button
+              aria-describedby={wordTargetEnabled ? wordTargetProgressId : undefined}
               className="primary-button"
-              disabled={saving || !draft.text.trim()}
+              disabled={saving || !draft.text.trim() || gauntletBlocksSave}
               onClick={onSave}
+              title={
+                gauntletBlocksSave
+                  ? `Reach ${wordTarget.toLocaleString()} words to save in Gauntlet mode`
+                  : undefined
+              }
               type="button"
             >
               <Save size={17} />
@@ -5129,6 +5220,14 @@ function ComposerView({
             value={draft.text}
           />
         </label>
+        {wordTargetEnabled && (
+          <WordTargetProgress
+            gauntletModeEnabled={gauntletModeEnabled}
+            id={wordTargetProgressId}
+            target={wordTarget}
+            wordCount={stats.words}
+          />
+        )}
       </div>
 
       <aside className="composer-side">
@@ -5867,6 +5966,9 @@ type WriterModeViewProps = {
   setSettings: (next: WriterSettings) => void;
   error: string | null;
   notice: string | null;
+  wordTargetEnabled: boolean;
+  wordTarget: number;
+  gauntletModeEnabled: boolean;
 };
 
 function WriterModeView({
@@ -5880,8 +5982,13 @@ function WriterModeView({
   setSettings,
   error,
   notice,
+  wordTargetEnabled,
+  wordTarget,
+  gauntletModeEnabled,
 }: WriterModeViewProps) {
   const stats = writingStats(draft.text);
+  const wordTargetProgressId = "writer-word-target-progress";
+  const gauntletBlocksSave = gauntletModeEnabled && stats.words < wordTarget;
   const retroMode = settings.presentation === "retro";
   const retroTheme = RETRO_FOCUS_THEMES_BY_ID[settings.retroThemeId];
   const retroFontFamilyUsesThemeDefault = writerDefaultFontFamilies.has(settings.fontFamily);
@@ -6019,7 +6126,18 @@ function WriterModeView({
             <X size={17} />
             Exit
           </button>
-          <button className="primary-button" disabled={saving || !draft.text.trim()} onClick={onSave} type="button">
+          <button
+            aria-describedby={wordTargetEnabled ? wordTargetProgressId : undefined}
+            className="primary-button"
+            disabled={saving || !draft.text.trim() || gauntletBlocksSave}
+            onClick={onSave}
+            title={
+              gauntletBlocksSave
+                ? `Reach ${wordTarget.toLocaleString()} words to save in Gauntlet mode`
+                : undefined
+            }
+            type="button"
+          >
             <Save size={17} />
             {saving ? "Saving" : "Save"}
           </button>
@@ -6076,6 +6194,15 @@ function WriterModeView({
       )}
 
       <div className={retroMode ? "writer-footer writer-footer--retro" : "writer-footer"}>
+        {wordTargetEnabled && (
+          <WordTargetProgress
+            className="word-target-progress--writer"
+            gauntletModeEnabled={gauntletModeEnabled}
+            id={wordTargetProgressId}
+            target={wordTarget}
+            wordCount={stats.words}
+          />
+        )}
         <span>{stats.words} words</span>
         <span>{stats.characters} characters</span>
         <span>{stats.readingMinutes} min</span>
@@ -6284,6 +6411,9 @@ function SettingsView({
     minimizeToTrayOnClose: false,
     startWithWindows: false,
     debugMenuEnabled: false,
+    wordTargetEnabled: false,
+    wordTarget: defaultWordTarget,
+    gauntletModeEnabled: false,
   });
   const [aiDraft, setAiDraft] = useState({
     cloudProvider: "gemini" as AICloudProvider,
@@ -6346,6 +6476,9 @@ function SettingsView({
       minimizeToTrayOnClose: pathSettings?.minimizeToTrayOnClose ?? false,
       startWithWindows: pathSettings?.startWithWindows ?? false,
       debugMenuEnabled: pathSettings?.debugMenuEnabled ?? false,
+      wordTargetEnabled: pathSettings?.wordTargetEnabled ?? false,
+      wordTarget: pathSettings?.wordTarget ?? defaultWordTarget,
+      gauntletModeEnabled: pathSettings?.gauntletModeEnabled ?? false,
     });
   }, [
     backupDirectory,
@@ -6362,6 +6495,9 @@ function SettingsView({
     pathSettings?.minimizeToTrayOnClose,
     pathSettings?.startWithWindows,
     pathSettings?.syncPath,
+    pathSettings?.wordTargetEnabled,
+    pathSettings?.wordTarget,
+    pathSettings?.gauntletModeEnabled,
     status?.dbPath,
   ]);
 
@@ -6402,6 +6538,10 @@ function SettingsView({
       ? `Last checked ${formatDateTime(updateCheckedAt)}`
       : "Not checked yet";
   const canRunSyncFromSettings = Boolean(pathDraft.syncPath.trim() || pathDraft.githubGistId.trim());
+  const wordTargetInvalid =
+    !Number.isFinite(pathDraft.wordTarget) ||
+    pathDraft.wordTarget < 1 ||
+    pathDraft.wordTarget > maxWordTarget;
   const createMoodScore = Number(moodDraft.createSentiment);
   const editMoodScore = Number(moodDraft.editSentiment);
   const createMoodScoreValid =
@@ -6441,6 +6581,9 @@ function SettingsView({
       minimizeToTrayOnClose: pathDraft.minimizeToTrayOnClose,
       startWithWindows: pathDraft.startWithWindows,
       debugMenuEnabled: pathDraft.debugMenuEnabled,
+      wordTargetEnabled: pathDraft.wordTargetEnabled,
+      wordTarget: pathDraft.wordTarget,
+      gauntletModeEnabled: pathDraft.gauntletModeEnabled,
     });
   const aiContextLimitInvalid = contextLimitDraftInvalid(aiDraft.defaultContextLimit);
   const parsedAiContextLimit = parseContextLimitDraft(aiDraft.defaultContextLimit);
@@ -7099,6 +7242,79 @@ function SettingsView({
           >
             <Save size={17} />
             Save interface setting
+          </button>
+        </div>
+      </Panel>
+
+      <Panel icon={<FileText size={20} />} title="Writing">
+        <p className="writing-settings-copy">
+          Set one optional target for new and edited entries. The counter updates while you write.
+        </p>
+        <div className="settings-form-grid settings-form-grid--toggles">
+          <label className="check-row">
+            <input
+              checked={pathDraft.wordTargetEnabled}
+              onChange={(event) =>
+                setPathDraft({
+                  ...pathDraft,
+                  wordTargetEnabled: event.target.checked,
+                  gauntletModeEnabled: event.target.checked
+                    ? pathDraft.gauntletModeEnabled
+                    : false,
+                })
+              }
+              type="checkbox"
+            />
+            <span>Enable word targets</span>
+          </label>
+          <label className="check-row">
+            <input
+              checked={pathDraft.gauntletModeEnabled}
+              disabled={!pathDraft.wordTargetEnabled}
+              onChange={(event) =>
+                setPathDraft({
+                  ...pathDraft,
+                  gauntletModeEnabled: event.target.checked,
+                })
+              }
+              type="checkbox"
+            />
+            <span>Gauntlet mode</span>
+          </label>
+        </div>
+        <div className="settings-form-grid settings-form-grid--writing">
+          <label className="field">
+            <span>Word target</span>
+            <input
+              disabled={!pathDraft.wordTargetEnabled}
+              max={maxWordTarget}
+              min={1}
+              onChange={(event) =>
+                setPathDraft({ ...pathDraft, wordTarget: Number(event.target.value) })
+              }
+              type="number"
+              value={pathDraft.wordTarget}
+            />
+          </label>
+          <p className="writing-settings-copy">
+            Gauntlet mode disables Save—including the keyboard shortcut—until the target is met.
+          </p>
+        </div>
+        {wordTargetInvalid && pathDraft.wordTargetEnabled && (
+          <div className="inline-warning">
+            <TriangleAlert size={15} />
+            Word target must be between 1 and {maxWordTarget.toLocaleString()}.
+          </div>
+        )}
+        <div className="path-action-row">
+          <button
+            className="secondary-button"
+            disabled={dataToolMutating || (pathDraft.wordTargetEnabled && wordTargetInvalid)}
+            onClick={() => onRunMutation(savePathSettingsDraft)}
+            type="button"
+          >
+            <Save size={17} />
+            Save writing settings
           </button>
         </div>
       </Panel>

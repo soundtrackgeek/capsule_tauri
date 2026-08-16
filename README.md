@@ -54,6 +54,9 @@ explicit capability-gated AI/sync surfaces:
   completion that returns future Writer launches to a fresh draft, optional
   frameless Retro CRT layouts from the old Capsule focus themes, and a global
   `Ctrl+Alt+W` shortcut that opens Capsule directly into Writer Mode.
+- Optional configurable entry word targets with a subtle live progress line in
+  both the full composer and Writer Mode, plus Gauntlet mode to block button and
+  keyboard-shortcut saves until the target is reached.
 - Entry history review for legacy Capsule edit snapshots.
 - Keyword search using `entries_fts` when available, with a compatibility
   fallback to entry text matching.
@@ -184,6 +187,8 @@ the main window. Opening Capsule normally or restarting after an update still
 shows the main window.
 The hidden Debug menu flag is stored in the same local settings file and stays
 off until it is explicitly enabled in Settings.
+Optional entry word-target and Gauntlet-mode preferences are stored in that
+local settings file as well; they do not modify the journal database.
 Shared-folder sync resolves `CAPSULE_SYNC_PATH` first, then the saved sync path
 from Settings, and writes the same three sync files used by the older Capsule
 app. GitHub Gist sync resolves `CAPSULE_GITHUB_GIST_ID` and

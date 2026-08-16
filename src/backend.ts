@@ -222,6 +222,9 @@ let mockBackupRetentionCount = 5;
 let mockMinimizeToTrayOnClose = false;
 let mockStartWithWindows = false;
 let mockDebugMenuEnabled = false;
+let mockWordTargetEnabled = false;
+let mockWordTarget = 500;
+let mockGauntletModeEnabled = false;
 let mockDebugLogs: DebugLogEntry[] = [
   {
     timestamp: "2026-07-05T10:30:00Z",
@@ -1058,6 +1061,10 @@ export async function setPathSettings(
       24 * 60,
       Math.max(1, Math.round(input.autoSyncIntervalMinutes ?? mockAutoSyncIntervalMinutes)),
     );
+    const wordTarget = Math.min(
+      100_000,
+      Math.max(1, Math.round(input.wordTarget ?? mockWordTarget)),
+    );
 
     mockStatus = {
       ...mockStatus,
@@ -1090,6 +1097,9 @@ export async function setPathSettings(
     mockMinimizeToTrayOnClose = Boolean(input.minimizeToTrayOnClose);
     mockStartWithWindows = Boolean(input.startWithWindows);
     mockDebugMenuEnabled = Boolean(input.debugMenuEnabled);
+    mockWordTargetEnabled = Boolean(input.wordTargetEnabled);
+    mockWordTarget = wordTarget;
+    mockGauntletModeEnabled = Boolean(input.gauntletModeEnabled);
 
     return mockPathSettings();
   } catch (error) {
@@ -3961,6 +3971,9 @@ function mockPathSettings(): PathSettingsResponse {
     minimizeToTrayOnClose: mockMinimizeToTrayOnClose,
     startWithWindows: mockStartWithWindows,
     debugMenuEnabled: mockDebugMenuEnabled,
+    wordTargetEnabled: mockWordTargetEnabled,
+    wordTarget: mockWordTarget,
+    gauntletModeEnabled: mockGauntletModeEnabled,
     settingsPath: mockPathSettingsPath,
     warnings: [],
   };

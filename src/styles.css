@@ -2109,6 +2109,41 @@ button.entry-card {
   line-height: 1.72;
 }
 
+.word-target-progress {
+  display: grid;
+  grid-template-columns: minmax(72px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 9px;
+  color: inherit;
+  font-family:
+    Geist, Satoshi, "Segoe UI", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  opacity: 0.55;
+}
+
+.word-target-progress--complete {
+  opacity: 0.74;
+}
+
+.word-target-progress__track {
+  height: 2px;
+  overflow: hidden;
+  background: color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.word-target-progress__bar {
+  display: block;
+  height: 100%;
+  background: currentColor;
+}
+
+.word-target-progress__count {
+  white-space: nowrap;
+}
+
 .compact-textarea {
   min-height: 82px;
 }
@@ -2425,6 +2460,7 @@ button.entry-card {
   display: flex;
   justify-content: center;
   gap: 18px;
+  flex-wrap: wrap;
   margin-top: 18px;
   color: currentColor;
   font-family:
@@ -2433,6 +2469,12 @@ button.entry-card {
   font-size: 12px;
   font-weight: 800;
   opacity: 0.72;
+}
+
+.word-target-progress--writer {
+  width: min(340px, 44vw);
+  margin: 0;
+  opacity: 0.68;
 }
 
 .writer-footer--retro {
@@ -2556,6 +2598,19 @@ button.entry-card {
 
 .settings-form-grid--ai {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.settings-form-grid--writing {
+  grid-template-columns: minmax(160px, 0.35fr) minmax(0, 1fr);
+  align-items: center;
+}
+
+.writing-settings-copy {
+  margin: 0;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  opacity: 0.68;
 }
 
 .settings-form-grid .field--wide {
@@ -5077,6 +5132,18 @@ button.entry-card {
 
   .writer-controls {
     justify-content: flex-start;
+  }
+
+  .writer-mode:not(.writer-mode--retro) .writer-canvas {
+    margin-top: 24px;
+  }
+
+  .writer-mode:not(.writer-mode--retro) .writer-textarea {
+    min-height: max(300px, calc(100dvh - 440px));
+  }
+
+  .word-target-progress--writer {
+    width: min(320px, 100%);
   }
 
   .writer-mode--retro .writer-controls {
