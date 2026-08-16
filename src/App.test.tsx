@@ -53,6 +53,27 @@ describe("App Writer settings", () => {
     expect(screen.queryByText("This year")).not.toBeInTheDocument();
   });
 
+  test("shows per-entry and per-thread word counts across journal browsing views", async () => {
+    render(<App />);
+
+    expect((await screen.findAllByTitle("Word count")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Entries" }));
+    const entriesView = await screen.findByRole("region", { name: "Entries" });
+    expect((await within(entriesView).findAllByTitle("Word count")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    const searchView = await screen.findByRole("region", { name: "Search" });
+    expect((await within(searchView).findAllByTitle("Word count")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Threads" }));
+    const threadsView = await screen.findByRole("region", { name: "Threads" });
+    expect(await within(threadsView).findByTitle("Thread word count")).toHaveTextContent(
+      "44 words",
+    );
+    expect((await within(threadsView).findAllByTitle("Word count")).length).toBeGreaterThan(0);
+  });
+
   test("restores and persists Retro CRT display preferences", async () => {
     window.localStorage.setItem(
       writerSettingsStorageKey,

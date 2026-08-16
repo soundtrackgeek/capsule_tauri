@@ -16,7 +16,7 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import { formatDateTime, formatEntryNumber } from "../lib/format";
+import { countWords, formatDateTime, formatEntryNumber, formatWordCount } from "../lib/format";
 import type { Entry, EntryHistoryResponse, ExportFormat, ImageAttachment } from "../types";
 import { DataUrlImage } from "./media";
 import { Detail, SkeletonList } from "./ui";
@@ -87,6 +87,7 @@ export function EntryDetail({
   }
 
   const displayText = entry.text || entry.textPlain;
+  const wordCount = countWords(entry.textPlain || entry.text);
   const weatherTemperature = entry.location ? formatWeatherTemperature(entry.location) : null;
 
   return (
@@ -163,6 +164,7 @@ export function EntryDetail({
 
       <dl className="detail-list detail-list--compact">
         <Detail label="Number" value={formatEntryNumber(entry.id)} />
+        <Detail label="Words" value={formatWordCount(wordCount)} />
         <Detail label="UUID" value={entry.uuid} />
         <Detail label="Format" value={entry.contentFormat} />
         <Detail label="Updated" value={formatDateTime(entry.updatedAt)} />
@@ -365,9 +367,14 @@ export function EntryNumber({ entry }: { entry: Entry }) {
 
 export function EntryMeta({ entry }: { entry: Entry }) {
   const weatherTemperature = entry.location ? formatWeatherTemperature(entry.location) : null;
+  const wordCount = countWords(entry.textPlain || entry.text);
 
   return (
     <div className="entry-meta">
+      <span className="icon-stat" title="Word count">
+        <FileText size={12} />
+        {formatWordCount(wordCount)}
+      </span>
       {entry.moodInfo.label && <span className="mood-chip">{entry.moodInfo.label}</span>}
       {entry.tags.slice(0, 4).map((tag) => (
         <span className="tag-chip" key={tag.id}>

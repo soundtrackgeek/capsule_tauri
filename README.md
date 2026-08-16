@@ -28,8 +28,9 @@ explicit capability-gated AI/sync surfaces:
   capsules and words—plus counts for total entries, total tags, total words
   across every entry, and current-month entries.
 - Recent entries, pinned entries, and random entry panels with old-Capsule-style
-  entry numbers.
-- Entries list with chronological old-Capsule-style entry numbers, including
+  entry numbers and per-entry word counts.
+- Entries list with chronological old-Capsule-style entry numbers and per-entry
+  word counts, including
   automatic backup-guarded resequencing when an older entry arrives through
   sync, plus inline image thumbnails that open full-size previews and text,
   tag, mood, location, date, image, hidden, and sort filters.
@@ -59,14 +60,14 @@ explicit capability-gated AI/sync surfaces:
 - Structured search tokens for `tag:`, `mood:`, `before:`, `after:`, and
   `NOT tag:` queries, plus include/exclude tag and mood filters and a location
   text filter.
-- Search results with old-Capsule-style entry numbers, inline image thumbnails
-  that open full-size previews, preserved line breaks in the selected entry, and
-  the same star, pin, edit, continue, delete, and hide/unhide actions used by the
-  Entries view.
+- Search results with old-Capsule-style entry numbers, per-entry word counts,
+  and inline image thumbnails that open full-size previews, preserved line
+  breaks in the selected entry, and the same star, pin, edit, continue, delete,
+  and hide/unhide actions used by the Entries view.
 - Thread groups built from Capsule continuation links with ordered entries,
-  latest activity, titles, summaries, a direct action for adding a new entry,
-  and a searchable picker for attaching an existing standalone entry after the
-  end of the selected thread.
+  per-entry and per-thread word counts, latest activity, titles, summaries, a
+  direct action for adding a new entry, and a searchable picker for attaching
+  an existing standalone entry after the end of the selected thread.
 - Backup-guarded thread title/summary updates, bulk link commands, leaf detach,
   and thread disband actions with cycle prevention.
 - Backup listing for Capsule-compatible backup files.

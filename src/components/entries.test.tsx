@@ -45,6 +45,7 @@ describe("entry components", () => {
     expect(screen.getByText("A compact summary for the test entry.")).toBeInTheDocument();
     expect(screen.getByText("Focused")).toBeInTheDocument();
     expect(screen.getByText("work")).toBeInTheDocument();
+    expect(screen.getByTitle("Word count")).toHaveTextContent("12 words");
     expect(screen.getByTitle("Image attachments")).toHaveTextContent("2");
   });
 
@@ -67,6 +68,7 @@ describe("entry components", () => {
 
     expect(screen.getByRole("heading", { name: "Mini title" })).toBeInTheDocument();
     expect(screen.getByText("#42")).toBeInTheDocument();
+    expect(screen.getByTitle("Word count")).toHaveTextContent("12 words");
 
     rerender(<EntryStack entries={[]} loading={false} emptyText="Nothing here" />);
     expect(screen.getByText("Nothing here")).toBeInTheDocument();
@@ -103,6 +105,7 @@ describe("entry components", () => {
 
     expect(screen.getByRole("heading", { name: "Test entry" })).toBeInTheDocument();
     expect(screen.getByText("Tromso, Norway")).toBeInTheDocument();
+    expect(screen.getByText("Words").nextElementSibling).toHaveTextContent("12 words");
     expect(screen.queryByText("manual")).not.toBeInTheDocument();
 
     await user.click(screen.getByTitle("Star"));

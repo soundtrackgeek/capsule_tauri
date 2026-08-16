@@ -174,7 +174,7 @@ import {
   calendarSentimentClass,
 } from "./lib/calendar";
 import { parseChangelog } from "./lib/changelog";
-import { formatBytes, formatDateTime } from "./lib/format";
+import { countWords, formatBytes, formatDateTime, formatWordCount } from "./lib/format";
 import type {
   AICloudProvider,
   AIChatContextPreviewRequest,
@@ -4781,30 +4781,37 @@ function ThreadsView({
             <div className="empty-state">No continuation threads found.</div>
           )}
           {!loading &&
-            threads.map((thread) => (
-              <button
-                className={
-                  selectedThread?.rootUuid === thread.rootUuid
-                    ? "thread-card thread-card--active"
-                    : "thread-card"
-                }
-                key={thread.rootUuid}
-                onClick={() => onSelectThread(thread.rootUuid)}
-                type="button"
-              >
-                <div className="thread-card-heading">
-                  <GitBranch size={17} />
-                  <div>
-                    <h4>{thread.title || thread.rootUuid}</h4>
-                    <p>{thread.summary || thread.entries[0]?.textPlain.slice(0, 120)}</p>
+            threads.map((thread) => {
+              const wordCount = countThreadWords(thread);
+              return (
+                <button
+                  className={
+                    selectedThread?.rootUuid === thread.rootUuid
+                      ? "thread-card thread-card--active"
+                      : "thread-card"
+                  }
+                  key={thread.rootUuid}
+                  onClick={() => onSelectThread(thread.rootUuid)}
+                  type="button"
+                >
+                  <div className="thread-card-heading">
+                    <GitBranch size={17} />
+                    <div>
+                      <h4>{thread.title || thread.rootUuid}</h4>
+                      <p>{thread.summary || thread.entries[0]?.textPlain.slice(0, 120)}</p>
+                    </div>
                   </div>
-                </div>
-                <div className="entry-meta">
-                  <span className="tag-chip">{thread.entryCount} entries</span>
-                  <span className="tag-chip">{formatDateTime(thread.latestActivity)}</span>
-                </div>
-              </button>
-            ))}
+                  <div className="entry-meta">
+                    <span className="tag-chip">{thread.entryCount} entries</span>
+                    <span className="icon-stat" title="Thread word count">
+                      <FileText size={12} />
+                      {formatWordCount(wordCount)}
+                    </span>
+                    <span className="tag-chip">{formatDateTime(thread.latestActivity)}</span>
+                  </div>
+                </button>
+              );
+            })}
         </div>
       </div>
 
@@ -4824,6 +4831,9 @@ function ThreadsView({
               </div>
               <div className="thread-heading-actions">
                 <StatusPill tone="good">{selectedThread.entryCount} entries</StatusPill>
+                <StatusPill tone="neutral">
+                  {formatWordCount(countThreadWords(selectedThread))}
+                </StatusPill>
                 <button
                   className="secondary-button"
                   onClick={onAddExistingEntry}
@@ -9876,6 +9886,13 @@ function entryCountLabel(count: number) {
 
 function isThreadLeaf(thread: ThreadGroup, entry: Entry) {
   return !thread.entries.some((item) => item.thread?.parentUuid === entry.uuid);
+}
+
+function countThreadWords(thread: ThreadGroup) {
+  return thread.entries.reduce(
+    (total, entry) => total + countWords(entry.textPlain || entry.text),
+    0,
+  );
 }
 
 export default App;

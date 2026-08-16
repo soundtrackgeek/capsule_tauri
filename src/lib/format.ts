@@ -33,3 +33,11 @@ export const formatEntryNumber = (id: number | null | undefined) => {
 
   return `#${id}`;
 };
+
+export const countWords = (value: string) => {
+  const normalized = value.trim();
+  return normalized ? normalized.split(/\s+/).length : 0;
+};
+
+export const formatWordCount = (count: number) =>
+  `${new Intl.NumberFormat().format(count)} ${count === 1 ? "word" : "words"}`;

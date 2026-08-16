@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.35.0 - 2026-08-16
+
+### Added
+
+- Added per-entry word counts to Dashboard, Entries, Threads, and Search, plus
+  aggregate word counts for each thread.
+
+### Changed
+
+- Bumped the app version to 0.35.0.
+
 ## 0.34.1 - 2026-08-01
 
 ### Changed
