@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.36.1 - 2026-08-17
+
+### Fixed
+
+- Fixed sync-file merging between PCs to continue when GitHub Gist cannot be
+  pulled or pushed, with the Gist operation deferred until the next sync.
+
+### Changed
+
+- Bumped the app version to 0.36.1.
+
 ## 0.36.0 - 2026-08-16
 
 ### Added

@@ -204,7 +204,9 @@ token is configured, the merged files are pushed back and only successfully
 processed mobile note IDs are removed from the latest queue; without a token the
 Gist link is pull-only and pending notes remain in the queue. If no sync folder
 is configured, Gist sync uses a local cache folder under the app path settings
-directory.
+directory. If GitHub Gist cannot be pulled or pushed, the configured sync-file
+merge still completes and Gist work is deferred until the next sync. A failed
+Gist pull also skips the push so unmerged remote data cannot be overwritten.
 Uploaded originals use Capsule's legacy image key layout
 `<hash-prefix>/<sha256>.<ext>` and thumbnails use
 `thumb/<hash-prefix>/<sha256>.jpg`, with attachment metadata stored in

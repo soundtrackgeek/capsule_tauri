@@ -563,55 +563,76 @@ pub fn run_sync(input: Option<SyncRunRequest>) -> Result<SyncRunResponse> {
     )?;
     fs::create_dir_all(&sync_dir)
         .with_context(|| format!("failed to create {}", sync_dir.display()))?;
-    let sync_file = sync_dir.join(MAIN_SYNC_FILE);
     let db_path = db::resolve_database_path();
-    let (github_gist_pulled, mobile_note_ids) = if let Some(config) = gist_config.as_ref() {
-        match pull_github_gist_files(config, &sync_dir).and_then(|pull| {
-            let mobile_note_ids = stage_mobile_notes(&sync_dir, &pull.mobile_notes)?;
+    run_sync_with_github(
+        &db_path,
+        &sync_dir,
+        gist_config.as_ref(),
+        pull_github_gist_files,
+        push_github_gist_files,
+    )
+}
+
+fn run_sync_with_github<Pull, Push>(
+    db_path: &Path,
+    sync_dir: &Path,
+    gist_config: Option<&GithubGistConfig>,
+    pull_gist: Pull,
+    push_gist: Push,
+) -> Result<SyncRunResponse>
+where
+    Pull: Fn(&GithubGistConfig, &Path) -> Result<GithubGistPullResult>,
+    Push: Fn(&GithubGistConfig, &Path, &HashSet<String>) -> Result<bool>,
+{
+    let sync_file = sync_dir.join(MAIN_SYNC_FILE);
+    let mut github_pull_failed = false;
+    let mut github_failure_note = None;
+    let (github_gist_pulled, mobile_note_ids) = if let Some(config) = gist_config {
+        match pull_gist(config, sync_dir).and_then(|pull| {
+            let mobile_note_ids = stage_mobile_notes(sync_dir, &pull.mobile_notes)?;
             Ok((pull.pulled, mobile_note_ids))
         }) {
             Ok(result) => result,
             Err(error) => {
-                if let Err(status_error) =
-                    record_sync_error(&db_path, &sync_file, &error.to_string())
-                {
-                    eprintln!("[Sync] Failed to record GitHub Gist pull error: {status_error}");
-                }
-                return Err(error);
+                eprintln!("[Sync] GitHub Gist pull failed; continuing sync-file merge: {error:#}");
+                github_pull_failed = true;
+                github_failure_note = Some(
+                    "GitHub Gist unavailable; sync-file merge completed and Gist was deferred until the next sync",
+                );
+                (false, HashSet::new())
             }
         }
     } else {
         (false, HashSet::new())
     };
 
-    let mut response = match run_sync_with_backup_if_needed(&db_path, &sync_dir) {
+    let mut response = match run_sync_with_backup_if_needed(db_path, sync_dir) {
         Ok(response) => response,
         Err(error) => {
-            if let Err(status_error) = record_sync_error(&db_path, &sync_file, &error.to_string()) {
+            if let Err(status_error) = record_sync_error(db_path, &sync_file, &error.to_string()) {
                 eprintln!("[Sync] Failed to record sync error: {status_error}");
             }
             return Err(error);
         }
     };
     response.github_gist_pulled = github_gist_pulled;
-    response.github_gist_pushed = if let Some(config) = gist_config.as_ref() {
-        if config.token.is_some() {
-            match push_github_gist_files(
-                config,
-                &PathBuf::from(&response.sync_path),
-                &mobile_note_ids,
-            ) {
-                Ok(pushed) => pushed,
-                Err(error) => {
-                    if let Err(status_error) = record_sync_error(
-                        &db_path,
-                        &PathBuf::from(&response.sync_file_path),
-                        &error.to_string(),
-                    ) {
-                        eprintln!("[Sync] Failed to record GitHub Gist push error: {status_error}");
+    response.github_gist_pushed = if !github_pull_failed {
+        if let Some(config) = gist_config {
+            if config.token.is_some() {
+                match push_gist(config, sync_dir, &mobile_note_ids) {
+                    Ok(pushed) => pushed,
+                    Err(error) => {
+                        eprintln!(
+                            "[Sync] GitHub Gist push failed after sync-file merge completed: {error:#}"
+                        );
+                        github_failure_note = Some(
+                            "GitHub Gist push unavailable; sync-file merge completed and Gist push was deferred until the next sync",
+                        );
+                        false
                     }
-                    return Err(error);
                 }
+            } else {
+                false
             }
         } else {
             false
@@ -619,18 +640,24 @@ pub fn run_sync(input: Option<SyncRunRequest>) -> Result<SyncRunResponse> {
     } else {
         false
     };
-    if let Some(summary) = github_summary_note(
-        response.github_gist_pulled,
-        response.github_gist_pushed,
-        gist_config
-            .as_ref()
-            .and_then(|config| config.token.as_ref())
-            .is_none()
-            && gist_config.is_some(),
-    ) {
-        response.summary = append_summary_note(&response.summary, &summary);
+    if !github_pull_failed {
+        if let Some(summary) = github_summary_note(
+            response.github_gist_pulled,
+            response.github_gist_pushed,
+            gist_config
+                .and_then(|config| config.token.as_ref())
+                .is_none()
+                && gist_config.is_some(),
+        ) {
+            response.summary = append_summary_note(&response.summary, &summary);
+        }
+    }
+    if let Some(note) = github_failure_note {
+        response.summary = append_summary_note(&response.summary, note);
+    }
+    if gist_config.is_some() {
         if let Err(error) =
-            record_sync_summary_override(&db_path, &response.completed_at, &response.summary)
+            record_sync_summary_override(db_path, &response.completed_at, &response.summary)
         {
             eprintln!("[Sync] Failed to update GitHub Gist sync summary: {error}");
         }
@@ -715,13 +742,13 @@ fn pull_github_gist_files(
     let client = github_client()?;
     let gist = fetch_github_gist(&client, config)?;
     let mut result = GithubGistPullResult::default();
+    let mut fetched_sync_files = Vec::new();
     for filename in GITHUB_SYNC_FILES {
         if let Some(file) = gist.files.get(filename) {
             let content = github_gist_file_content(&client, config, file)
                 .with_context(|| format!("failed to fetch {filename} from GitHub Gist"))?;
             validate_sync_file_json(filename, &content)?;
-            write_text_replace(&sync_dir.join(filename), &content)
-                .with_context(|| format!("failed to write fetched GitHub Gist file {filename}"))?;
+            fetched_sync_files.push((filename, content));
             result.pulled = true;
         }
     }
@@ -733,6 +760,11 @@ fn pull_github_gist_files(
             format!("{MOBILE_NOTES_FILE} from GitHub Gist is not a valid note array")
         })?;
         result.pulled = true;
+    }
+
+    for (filename, content) in fetched_sync_files {
+        write_text_replace(&sync_dir.join(filename), &content)
+            .with_context(|| format!("failed to write fetched GitHub Gist file {filename}"))?;
     }
 
     Ok(result)
@@ -5260,6 +5292,116 @@ mod tests {
             .deleted_moods
             .iter()
             .any(|mood| mood.name == "focused"));
+    }
+
+    #[test]
+    fn gist_pull_failure_still_merges_shared_sync_file() {
+        use std::cell::Cell;
+
+        let db_dir = tempdir().expect("db tempdir");
+        let sync_dir = tempdir().expect("sync tempdir");
+        let db_path = db_dir.path().join("capsule.db");
+        create_sync_test_database(&db_path).expect("database");
+        let remote_payload = json!({
+            "version": 4,
+            "entries": [
+                {
+                    "uuid": "entry_from_shared_folder",
+                    "created_at": "2026-08-17 10:00",
+                    "updated_at": "2026-08-17 10:00",
+                    "text": "Available even while GitHub is down",
+                    "content_format": "plain",
+                    "tags": []
+                }
+            ],
+            "deleted_uuids": []
+        });
+        fs::write(
+            sync_dir.path().join(MAIN_SYNC_FILE),
+            serde_json::to_vec_pretty(&remote_payload).expect("json"),
+        )
+        .expect("sync file");
+        let config = GithubGistConfig {
+            gist_id: "offline-gist".to_string(),
+            token: Some("token".to_string()),
+        };
+        let push_called = Cell::new(false);
+
+        let response = run_sync_with_github(
+            &db_path,
+            sync_dir.path(),
+            Some(&config),
+            |_, _| Err(anyhow!("simulated GitHub outage")),
+            |_, _, _| {
+                push_called.set(true);
+                Ok(true)
+            },
+        )
+        .expect("shared-folder sync should complete");
+
+        assert_eq!(response.imported_count, 1);
+        assert!(!response.github_gist_pulled);
+        assert!(!response.github_gist_pushed);
+        assert!(!push_called.get());
+        assert!(response
+            .summary
+            .contains("Gist was deferred until the next sync"));
+        let connection = Connection::open(&db_path).expect("open db");
+        let imported_text: String = connection
+            .query_row(
+                "SELECT text FROM entries WHERE uuid = 'entry_from_shared_folder'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("shared entry");
+        assert_eq!(imported_text, "Available even while GitHub is down");
+        let (last_error, latest_status): (Option<String>, String) = connection
+            .query_row(
+                "SELECT sync_status.last_sync_error,
+                        (SELECT status FROM sync_history ORDER BY id DESC LIMIT 1)
+                 FROM sync_status WHERE sync_status.id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("sync status");
+        assert!(last_error.is_none());
+        assert_eq!(latest_status, "success");
+    }
+
+    #[test]
+    fn gist_push_failure_keeps_sync_file_run_successful() {
+        let db_dir = tempdir().expect("db tempdir");
+        let sync_dir = tempdir().expect("sync tempdir");
+        let db_path = db_dir.path().join("capsule.db");
+        create_sync_test_database(&db_path).expect("database");
+        let config = GithubGistConfig {
+            gist_id: "offline-gist".to_string(),
+            token: Some("token".to_string()),
+        };
+
+        let response = run_sync_with_github(
+            &db_path,
+            sync_dir.path(),
+            Some(&config),
+            |_, _| Ok(GithubGistPullResult::default()),
+            |_, _, _| Err(anyhow!("simulated GitHub outage")),
+        )
+        .expect("sync-file run should remain successful");
+
+        assert!(!response.github_gist_pushed);
+        assert!(response
+            .summary
+            .contains("Gist push was deferred until the next sync"));
+        assert!(sync_dir.path().join(MAIN_SYNC_FILE).exists());
+        let connection = Connection::open(&db_path).expect("open db");
+        let last_error: Option<String> = connection
+            .query_row(
+                "SELECT last_sync_error FROM sync_status WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("sync status");
+        assert!(last_error.is_none());
     }
 
     #[test]
