@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.36.3 - 2026-08-20
+
+### Fixed
+
+- Added the entry's created date and time to the Dashboard's expanded random
+  entry card.
+
+### Changed
+
+- Bumped the app version to 0.36.3.
+
 ## 0.36.2 - 2026-08-20
 
 ### Changed

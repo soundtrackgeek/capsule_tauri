@@ -1466,6 +1466,11 @@ button:active:not(:disabled) {
   -webkit-line-clamp: unset;
 }
 
+.entry-mini-timestamp {
+  display: block;
+  margin-top: 6px;
+}
+
 .entry-meta,
 .tag-row {
   display: flex;

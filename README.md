@@ -27,8 +27,9 @@ explicit capability-gated AI/sync surfaces:
   words in a day, most tags and words on one capsule, and biggest months by
   capsules and words—plus counts for total entries, total tags, total words
   across every entry, and current-month entries.
-- Recent entries, pinned entries, and a full-text random entry above Recent
-  Entries, with old-Capsule-style entry numbers and per-entry word counts.
+- Recent entries, pinned entries, and a full-text random entry with its created
+  timestamp above Recent Entries, with old-Capsule-style entry numbers and
+  per-entry word counts.
 - Entries list with chronological old-Capsule-style entry numbers and per-entry
   word counts, including
   automatic backup-guarded resequencing when an older entry arrives through

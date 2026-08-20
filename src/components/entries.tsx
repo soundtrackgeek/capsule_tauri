@@ -293,6 +293,11 @@ export function EntryMini({ entry, fullText = false }: { entry: Entry; fullText?
         <h4>{entry.title || entry.textPlain.slice(0, 82) || "Untitled entry"}</h4>
         <EntryNumber entry={entry} />
       </div>
+      {fullText && (
+        <time className="entry-mini-timestamp eyebrow" dateTime={entry.createdAt}>
+          {formatDateTime(entry.createdAt)}
+        </time>
+      )}
       <p>{body}</p>
       <EntryMeta entry={entry} />
     </article>

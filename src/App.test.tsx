@@ -77,6 +77,11 @@ describe("App Writer settings", () => {
     );
     expect(randomPanel).not.toBeNull();
     expect(recentPanel).not.toBeNull();
+    const randomTimestamp = await within(randomPanel as HTMLElement).findByText(/2026/);
+
+    expect(randomTimestamp.tagName).toBe("TIME");
+    expect(randomTimestamp).toHaveAttribute("datetime", "2026-06-29 12:40");
+    expect(recentPanel?.querySelector("time")).toBeNull();
     expect(await within(randomPanel as HTMLElement).findByText(fullEntry)).toBeInTheDocument();
     expect(within(recentPanel as HTMLElement).queryByText(fullEntry)).not.toBeInTheDocument();
     expect(within(recentPanel as HTMLElement).getByText(fullEntry.slice(0, 140))).toBeInTheDocument();
