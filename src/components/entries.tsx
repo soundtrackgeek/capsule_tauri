@@ -284,14 +284,16 @@ export function EntryStack({ entries, loading, emptyText = "No entries found." }
   );
 }
 
-export function EntryMini({ entry }: { entry: Entry }) {
+export function EntryMini({ entry, fullText = false }: { entry: Entry; fullText?: boolean }) {
+  const body = fullText ? entry.text || entry.textPlain : entry.textPlain.slice(0, 140);
+
   return (
-    <article className="entry-mini">
+    <article className={fullText ? "entry-mini entry-mini--full" : "entry-mini"}>
       <div className="entry-mini-heading">
         <h4>{entry.title || entry.textPlain.slice(0, 82) || "Untitled entry"}</h4>
         <EntryNumber entry={entry} />
       </div>
-      <p>{entry.textPlain.slice(0, 140)}</p>
+      <p>{body}</p>
       <EntryMeta entry={entry} />
     </article>
   );

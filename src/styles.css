@@ -1458,6 +1458,14 @@ button:active:not(:disabled) {
   -webkit-line-clamp: 2;
 }
 
+.entry-mini--full p {
+  display: block;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  -webkit-line-clamp: unset;
+}
+
 .entry-meta,
 .tag-row {
   display: flex;

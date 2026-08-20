@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.36.2 - 2026-08-20
+
+### Changed
+
+- Moved the Dashboard's random entry above Recent Entries and expanded it to
+  show the complete entry while recent entries remain compact previews.
+- Bumped the app version to 0.36.2.
+
 ## 0.36.1 - 2026-08-17
 
 ### Fixed

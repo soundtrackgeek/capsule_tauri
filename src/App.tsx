@@ -3376,14 +3376,6 @@ function DashboardView({
           </dl>
         </Panel>
 
-        <Panel icon={<BookOpen size={20} />} title="Recent Entries">
-          <EntryStack entries={recentEntries} loading={loading} />
-        </Panel>
-
-        <Panel icon={<Archive size={20} />} title="Pinned Entries">
-          <EntryStack entries={pinnedEntries} emptyText="No pinned entries found." loading={loading} />
-        </Panel>
-
         <Panel
           action={
             <button
@@ -3400,10 +3392,18 @@ function DashboardView({
           title="Random Entry"
         >
           {randomEntry ? (
-            <EntryMini entry={randomEntry} />
+            <EntryMini entry={randomEntry} fullText />
           ) : (
             <div className="empty-state">No random entry available.</div>
           )}
+        </Panel>
+
+        <Panel icon={<Archive size={20} />} title="Pinned Entries">
+          <EntryStack entries={pinnedEntries} emptyText="No pinned entries found." loading={loading} />
+        </Panel>
+
+        <Panel icon={<BookOpen size={20} />} title="Recent Entries">
+          <EntryStack entries={recentEntries} loading={loading} />
         </Panel>
 
         <Panel icon={<TriangleAlert size={20} />} title="Warnings">

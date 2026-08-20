@@ -31,6 +31,7 @@ function installLocalStorageMock() {
 
 describe("App Writer settings", () => {
   beforeEach(async () => {
+    vi.restoreAllMocks();
     installLocalStorageMock();
     window.localStorage.clear();
     window.history.replaceState({}, "", "/");
@@ -57,6 +58,28 @@ describe("App Writer settings", () => {
       expect(totalWordsLabel.nextElementSibling).not.toHaveTextContent("Unknown");
     });
     expect(screen.queryByText("This year")).not.toBeInTheDocument();
+  });
+
+  test("shows the full random entry above the compact recent entries", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    render(<App />);
+
+    const dashboard = await screen.findByRole("region", { name: "Journal dashboard" });
+    const randomHeading = within(dashboard).getByRole("heading", { name: "Random Entry" });
+    const recentHeading = within(dashboard).getByRole("heading", { name: "Recent Entries" });
+    const randomPanel = randomHeading.closest(".panel");
+    const recentPanel = recentHeading.closest(".panel");
+    const fullEntry =
+      "Finished the first read-only pass for Capsule Tauri. The important part is that the app can sit beside the real journal without touching it, and still feel fast enough to browse.";
+
+    expect(randomHeading.compareDocumentPosition(recentHeading)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(randomPanel).not.toBeNull();
+    expect(recentPanel).not.toBeNull();
+    expect(await within(randomPanel as HTMLElement).findByText(fullEntry)).toBeInTheDocument();
+    expect(within(recentPanel as HTMLElement).queryByText(fullEntry)).not.toBeInTheDocument();
+    expect(within(recentPanel as HTMLElement).getByText(fullEntry.slice(0, 140))).toBeInTheDocument();
   });
 
   test("shows per-entry and per-thread word counts across journal browsing views", async () => {
