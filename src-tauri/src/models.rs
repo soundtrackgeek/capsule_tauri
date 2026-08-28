@@ -1708,6 +1708,120 @@ pub struct AnalyticsWritingWindow {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AnalyticsCaptureSourceTrendPoint {
+    pub period: String,
+    pub mobile_count: i64,
+    pub desktop_count: i64,
+    pub total_count: i64,
+    pub mobile_percent: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsCaptureSources {
+    pub total_entries: i64,
+    pub mobile_entries: i64,
+    pub desktop_entries: i64,
+    pub mobile_percent: f64,
+    pub desktop_percent: f64,
+    pub trend: Vec<AnalyticsCaptureSourceTrendPoint>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsMoodTrendPoint {
+    pub date: String,
+    pub average_sentiment: f64,
+    pub mood_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsMoodTimingPoint {
+    pub key: String,
+    pub label: String,
+    pub detail: String,
+    pub average_sentiment: Option<f64>,
+    pub mood_count: i64,
+    pub top_mood: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsMoodTiming {
+    pub time_of_day: Vec<AnalyticsMoodTimingPoint>,
+    pub day_of_week: Vec<AnalyticsMoodTimingPoint>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsWeatherOverview {
+    pub total_entries: i64,
+    pub entries_with_weather: i64,
+    pub coverage_percent: f64,
+    pub unique_conditions: i64,
+    pub average_temp_c: Option<f64>,
+    pub min_temp_c: Option<f64>,
+    pub max_temp_c: Option<f64>,
+    pub most_common_condition: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsWeatherTemperatureBucket {
+    pub key: String,
+    pub label: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsWeatherTrendPoint {
+    pub date: String,
+    pub average_temp_c: Option<f64>,
+    pub average_humidity: Option<f64>,
+    pub average_wind_kph: Option<f64>,
+    pub entry_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsWeatherConditionMood {
+    pub condition: String,
+    pub average_sentiment: f64,
+    pub mood_count: i64,
+    pub top_mood: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsWeatherTag {
+    pub label: String,
+    pub count: i64,
+    pub percent: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsWeatherConditionTags {
+    pub condition: String,
+    pub entry_count: i64,
+    pub top_tags: Vec<AnalyticsWeatherTag>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsWeather {
+    pub overview: AnalyticsWeatherOverview,
+    pub temperature_buckets: Vec<AnalyticsWeatherTemperatureBucket>,
+    pub trend: Vec<AnalyticsWeatherTrendPoint>,
+    pub condition_mood: Vec<AnalyticsWeatherConditionMood>,
+    pub temperature_mood_correlation: Option<f64>,
+    pub condition_tags: Vec<AnalyticsWeatherConditionTags>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WordCount {
     pub word: String,
     pub count: i64,
@@ -1722,6 +1836,10 @@ pub struct AnalyticsResponse {
     pub hourly_trend: Vec<AnalyticsHourPoint>,
     pub weekday_trend: Vec<AnalyticsWeekdayPoint>,
     pub writing_window: AnalyticsWritingWindow,
+    pub capture_sources: AnalyticsCaptureSources,
+    pub mood_trend: Vec<AnalyticsMoodTrendPoint>,
+    pub mood_timing: AnalyticsMoodTiming,
+    pub weather: AnalyticsWeather,
     pub location_activity: Vec<AnalyticsBreakdownItem>,
     pub mood_breakdown: Vec<AnalyticsBreakdownItem>,
     pub tag_breakdown: Vec<AnalyticsBreakdownItem>,

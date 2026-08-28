@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
 
-import { ActivityTrends } from "./analytics";
+import { ActivityTrends, MoodTimingAnalytics, WeatherAnalytics } from "./analytics";
 import type { AnalyticsResponse } from "../types";
 
 function makeAnalytics(): AnalyticsResponse {
@@ -51,6 +51,42 @@ function makeAnalytics(): AnalyticsResponse {
         longestSpanDay: null,
       },
     },
+    captureSources: {
+      totalEntries: 3,
+      mobileEntries: 1,
+      desktopEntries: 2,
+      mobilePercent: 33.333,
+      desktopPercent: 66.667,
+      trend: [
+        { period: "2026-07-01", mobileCount: 1, desktopCount: 1, totalCount: 2, mobilePercent: 50 },
+      ],
+    },
+    moodTrend: [{ date: "2026-07-01", averageSentiment: 0.4, moodCount: 2 }],
+    moodTiming: {
+      timeOfDay: [
+        { key: "morning", label: "Morning", detail: "06:00-10:00", averageSentiment: 0.4, moodCount: 2, topMood: "focused" },
+      ],
+      dayOfWeek: [
+        { key: "3", label: "Wed", detail: "Wednesday", averageSentiment: 0.4, moodCount: 2, topMood: "focused" },
+      ],
+    },
+    weather: {
+      overview: {
+        totalEntries: 3,
+        entriesWithWeather: 2,
+        coveragePercent: 66.667,
+        uniqueConditions: 1,
+        averageTempC: 8,
+        minTempC: 7,
+        maxTempC: 9,
+        mostCommonCondition: "Clear",
+      },
+      temperatureBuckets: [{ key: "5-10", label: "5-10 C", count: 2 }],
+      trend: [{ date: "2026-07-01", averageTempC: 8, averageHumidity: 70, averageWindKph: 9, entryCount: 2 }],
+      conditionMood: [{ condition: "Clear", averageSentiment: 0.4, moodCount: 2, topMood: "focused" }],
+      temperatureMoodCorrelation: 0.2,
+      conditionTags: [{ condition: "Clear", entryCount: 2, topTags: [{ label: "work", count: 1, percent: 50 }] }],
+    },
     locationActivity: [],
     moodBreakdown: [],
     tagBreakdown: [],
@@ -79,5 +115,20 @@ describe("ActivityTrends", () => {
 
     expect(screen.getByRole("tooltip")).toHaveTextContent("2026-07-01");
     expect(screen.getByRole("tooltip")).toHaveTextContent("words: 50");
+  });
+
+  test("shows mood sample counts and switches weather metrics", () => {
+    const analytics = makeAnalytics();
+    render(
+      <>
+        <MoodTimingAnalytics analytics={analytics} />
+        <WeatherAnalytics analytics={analytics} />
+      </>,
+    );
+
+    expect(screen.getByLabelText("Morning: +0.40, 2 rated moods")).toBeInTheDocument();
+    expect(screen.getByText(/Associations are descriptive and do not establish causation/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Humidity" }));
+    expect(screen.getByRole("img", { name: "humidity chart" })).toBeInTheDocument();
   });
 });

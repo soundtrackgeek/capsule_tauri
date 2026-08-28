@@ -152,7 +152,16 @@ import {
   type AppUpdateInfo,
   type AppUpdateProgress,
 } from "./backend";
-import { ActivityTrends, TrendBars, MoodTrendBars, BreakdownList } from "./components/analytics";
+import {
+  ActivityTrends,
+  BreakdownList,
+  CaptureSourceAnalytics,
+  MoodDistribution,
+  MoodSentimentChart,
+  MoodTimingAnalytics,
+  TrendBars,
+  WeatherAnalytics,
+} from "./components/analytics";
 import { WrappedView } from "./components/wrapped";
 import {
   DeleteEntryDialog,
@@ -4375,24 +4384,30 @@ function AnalyticsView({
             <ActivityTrends analytics={analytics} />
           </Panel>
 
+          <Panel icon={<HardDrive size={20} />} title="Mobile vs Desktop">
+            <CaptureSourceAnalytics analytics={analytics} />
+          </Panel>
+
+          <Panel icon={<Sparkles size={20} />} title="Mood Sentiment Over Time">
+            <MoodSentimentChart analytics={analytics} />
+          </Panel>
+
+          <Panel icon={<Clock3 size={20} />} title="Mood and Timing">
+            <MoodTimingAnalytics analytics={analytics} />
+          </Panel>
+
           <div className="analytics-grid">
             <Panel icon={<BarChart3 size={20} />} title="Monthly Trend">
               <TrendBars trend={analytics.monthlyTrend} />
             </Panel>
-            <Panel icon={<Sparkles size={20} />} title="Mood Sentiment">
-              <MoodTrendBars trend={analytics.monthlyTrend} />
+            <Panel icon={<Sparkles size={20} />} title="Mood Distribution">
+              <MoodDistribution analytics={analytics} />
             </Panel>
             <Panel icon={<Tags size={20} />} title="Tags">
               <BreakdownList items={analytics.tagBreakdown} />
             </Panel>
-            <Panel icon={<Sparkles size={20} />} title="Moods">
-              <BreakdownList items={analytics.moodBreakdown} />
-            </Panel>
             <Panel icon={<MapPin size={20} />} title="Locations">
               <BreakdownList items={analytics.locationBreakdown} emptyText="No locations in this period." />
-            </Panel>
-            <Panel icon={<Cloud size={20} />} title="Weather">
-              <BreakdownList items={analytics.weatherBreakdown} emptyText="No weather metadata in this period." />
             </Panel>
             <Panel icon={<FileText size={20} />} title="Top Words">
               <div className="word-cloud">
@@ -4406,6 +4421,10 @@ function AnalyticsView({
               </div>
             </Panel>
           </div>
+
+          <Panel icon={<Cloud size={20} />} title="Weather Analytics">
+            <WeatherAnalytics analytics={analytics} />
+          </Panel>
         </>
       )}
     </section>

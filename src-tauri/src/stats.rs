@@ -10,15 +10,20 @@ use rusqlite::{params_from_iter, types::Value, Connection};
 use crate::{
     db,
     models::{
-        AnalyticsBreakdownItem, AnalyticsDailyTrendPoint, AnalyticsHourPoint, AnalyticsOverview,
-        AnalyticsPeriodRequest, AnalyticsResponse, AnalyticsTrendPoint, AnalyticsWeekdayPoint,
-        AnalyticsWritingWindow, AnalyticsWritingWindowDay, AnalyticsWritingWindowLongestDay,
-        AnalyticsWritingWindowSummary, DashboardBestDay, DashboardBestEntry, DashboardBestMonth,
-        DashboardBestOf, WordCount, WrappedActivityPoint, WrappedBadge, WrappedBusiestDay,
-        WrappedChartCountPoint, WrappedCharts, WrappedComparison, WrappedFunFact, WrappedHighlight,
-        WrappedHighlights, WrappedInsight, WrappedLongestEntry, WrappedMetricComparison,
-        WrappedMostTaggedEntry, WrappedNavigation, WrappedRange, WrappedRecords, WrappedRequest,
-        WrappedResponse, WrappedSummary, WritingCalendarDay, WritingCalendarResponse,
+        AnalyticsBreakdownItem, AnalyticsCaptureSourceTrendPoint, AnalyticsCaptureSources,
+        AnalyticsDailyTrendPoint, AnalyticsHourPoint, AnalyticsMoodTiming,
+        AnalyticsMoodTimingPoint, AnalyticsMoodTrendPoint, AnalyticsOverview,
+        AnalyticsPeriodRequest, AnalyticsResponse, AnalyticsTrendPoint, AnalyticsWeather,
+        AnalyticsWeatherConditionMood, AnalyticsWeatherConditionTags, AnalyticsWeatherOverview,
+        AnalyticsWeatherTag, AnalyticsWeatherTemperatureBucket, AnalyticsWeatherTrendPoint,
+        AnalyticsWeekdayPoint, AnalyticsWritingWindow, AnalyticsWritingWindowDay,
+        AnalyticsWritingWindowLongestDay, AnalyticsWritingWindowSummary, DashboardBestDay,
+        DashboardBestEntry, DashboardBestMonth, DashboardBestOf, WordCount, WrappedActivityPoint,
+        WrappedBadge, WrappedBusiestDay, WrappedChartCountPoint, WrappedCharts, WrappedComparison,
+        WrappedFunFact, WrappedHighlight, WrappedHighlights, WrappedInsight, WrappedLongestEntry,
+        WrappedMetricComparison, WrappedMostTaggedEntry, WrappedNavigation, WrappedRange,
+        WrappedRecords, WrappedRequest, WrappedResponse, WrappedSummary, WritingCalendarDay,
+        WritingCalendarResponse,
     },
     mood_sentiment,
 };
@@ -33,6 +38,17 @@ struct EntryStatsRow {
     date: String,
     text: String,
     mood: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct WeatherStatsRow {
+    entry_id: i64,
+    date: String,
+    mood: Option<String>,
+    condition: Option<String>,
+    temp_c: Option<f64>,
+    humidity: Option<f64>,
+    wind_kph: Option<f64>,
 }
 
 pub fn get_analytics(input: Option<AnalyticsPeriodRequest>) -> Result<AnalyticsResponse> {
@@ -221,6 +237,9 @@ pub(crate) fn get_analytics_for_database(
     let mood_sentiments = mood_sentiment::scores_for_database(&connection)?;
     let mood_sentiment_summary = mood_sentiment_summary(&rows, &mood_sentiments);
 
+    let capture_sources = capture_sources(&connection, &input, &rows)?;
+    let weather = weather_analytics(&connection, &input, total_entries, &mood_sentiments)?;
+
     Ok(AnalyticsResponse {
         overview: AnalyticsOverview {
             total_entries,
@@ -243,6 +262,10 @@ pub(crate) fn get_analytics_for_database(
         hourly_trend: hourly_trend(&rows),
         weekday_trend: weekday_trend(&rows),
         writing_window: writing_window(&rows),
+        capture_sources,
+        mood_trend: mood_trend(&rows, &mood_sentiments),
+        mood_timing: mood_timing(&rows, &mood_sentiments),
+        weather,
         location_activity: location_activity(&connection, &input)?,
         mood_breakdown: mood_breakdown(&rows),
         tag_breakdown: tag_breakdown(&connection, &input)?,
@@ -1520,6 +1543,506 @@ fn writing_window(rows: &[EntryStatsRow]) -> AnalyticsWritingWindow {
     AnalyticsWritingWindow { days, summary }
 }
 
+fn capture_sources(
+    connection: &Connection,
+    period: &AnalyticsPeriodRequest,
+    rows: &[EntryStatsRow],
+) -> Result<AnalyticsCaptureSources> {
+    let mobile_uuids = if table_exists(connection, "plugin_entry_locations")?
+        && table_columns(connection, "plugin_entry_locations")?.contains("source")
+    {
+        let filter = period_filter("e", period);
+        let sql = format!(
+            "SELECT DISTINCT e.uuid
+             FROM entries e
+             JOIN plugin_entry_locations pel ON pel.entry_uuid = e.uuid
+             {}
+             AND lower(COALESCE(pel.source, '')) = 'mobile'",
+            filter.where_sql
+        );
+        let mut statement = connection.prepare(&sql)?;
+        let values = statement
+            .query_map(params_from_iter(filter.params), |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<rusqlite::Result<HashSet<_>>>()?;
+        values
+    } else {
+        HashSet::new()
+    };
+
+    let total_entries = rows.len() as i64;
+    let mobile_entries = rows
+        .iter()
+        .filter(|row| mobile_uuids.contains(&row.uuid))
+        .count() as i64;
+    let desktop_entries = total_entries.saturating_sub(mobile_entries);
+    let use_months = rows
+        .first()
+        .and_then(|first| parse_date(&first.date))
+        .zip(rows.last().and_then(|last| parse_date(&last.date)))
+        .is_some_and(|(first, last)| (last - first).num_days() > 90);
+    let mut trend: BTreeMap<String, (i64, i64)> = BTreeMap::new();
+
+    for row in rows {
+        let period = if use_months {
+            row.date.get(0..7).unwrap_or(&row.date).to_string()
+        } else {
+            row.date.clone()
+        };
+        let bucket = trend.entry(period).or_default();
+        if mobile_uuids.contains(&row.uuid) {
+            bucket.0 += 1;
+        } else {
+            bucket.1 += 1;
+        }
+    }
+
+    Ok(AnalyticsCaptureSources {
+        total_entries,
+        mobile_entries,
+        desktop_entries,
+        mobile_percent: percent(mobile_entries, total_entries),
+        desktop_percent: percent(desktop_entries, total_entries),
+        trend: trend
+            .into_iter()
+            .map(|(period, (mobile_count, desktop_count))| {
+                let total_count = mobile_count + desktop_count;
+                AnalyticsCaptureSourceTrendPoint {
+                    period,
+                    mobile_count,
+                    desktop_count,
+                    total_count,
+                    mobile_percent: percent(mobile_count, total_count),
+                }
+            })
+            .collect(),
+    })
+}
+
+fn mood_trend(
+    rows: &[EntryStatsRow],
+    mood_sentiments: &HashMap<String, f64>,
+) -> Vec<AnalyticsMoodTrendPoint> {
+    let mut values: BTreeMap<String, MoodBucket> = BTreeMap::new();
+    for row in rows {
+        let Some((mood, score)) = rated_mood(row, mood_sentiments) else {
+            continue;
+        };
+        values.entry(row.date.clone()).or_default().add(mood, score);
+    }
+    values
+        .into_iter()
+        .map(|(date, bucket)| AnalyticsMoodTrendPoint {
+            date,
+            average_sentiment: bucket.average().unwrap_or_default(),
+            mood_count: bucket.count,
+        })
+        .collect()
+}
+
+fn mood_timing(
+    rows: &[EntryStatsRow],
+    mood_sentiments: &HashMap<String, f64>,
+) -> AnalyticsMoodTiming {
+    const PHASES: [(&str, &str, &str); 5] = [
+        ("morning", "Morning", "06:00-10:00"),
+        ("midday", "Midday", "10:00-15:00"),
+        ("late-afternoon", "Late Afternoon", "15:00-17:00"),
+        ("evening", "Evening", "17:00-21:00"),
+        ("late-night", "Late Night", "21:00-06:00"),
+    ];
+    let mut phase_buckets: HashMap<&str, MoodBucket> = HashMap::new();
+    let mut weekday_buckets: HashMap<i64, MoodBucket> = HashMap::new();
+
+    for row in rows {
+        let Some((mood, score)) = rated_mood(row, mood_sentiments) else {
+            continue;
+        };
+        if let Some(hour) = parse_hour(&row.created_at) {
+            let phase = match hour {
+                6..=9 => "morning",
+                10..=14 => "midday",
+                15..=16 => "late-afternoon",
+                17..=20 => "evening",
+                _ => "late-night",
+            };
+            phase_buckets.entry(phase).or_default().add(mood, score);
+        }
+        if let Some(date) = parse_date(&row.date) {
+            weekday_buckets
+                .entry(weekday_day_num(date))
+                .or_default()
+                .add(mood, score);
+        }
+    }
+
+    let time_of_day = PHASES
+        .into_iter()
+        .map(|(key, label, detail)| {
+            mood_timing_point(
+                key,
+                label,
+                detail,
+                phase_buckets.remove(key).unwrap_or_default(),
+            )
+        })
+        .collect();
+    let day_of_week = weekday_labels()
+        .into_iter()
+        .map(|(day_num, label, short_label)| {
+            mood_timing_point(
+                &day_num.to_string(),
+                short_label,
+                label,
+                weekday_buckets.remove(&day_num).unwrap_or_default(),
+            )
+        })
+        .collect();
+
+    AnalyticsMoodTiming {
+        time_of_day,
+        day_of_week,
+    }
+}
+
+fn mood_timing_point(
+    key: &str,
+    label: &str,
+    detail: &str,
+    bucket: MoodBucket,
+) -> AnalyticsMoodTimingPoint {
+    AnalyticsMoodTimingPoint {
+        key: key.to_string(),
+        label: label.to_string(),
+        detail: detail.to_string(),
+        average_sentiment: bucket.average(),
+        mood_count: bucket.count,
+        top_mood: bucket.top_mood(),
+    }
+}
+
+fn rated_mood<'a>(
+    row: &'a EntryStatsRow,
+    mood_sentiments: &HashMap<String, f64>,
+) -> Option<(&'a str, f64)> {
+    let mood = row.mood.as_deref()?;
+    mood_sentiment::score_from_catalog(mood_sentiments, mood).map(|score| (mood, score))
+}
+
+fn weather_analytics(
+    connection: &Connection,
+    period: &AnalyticsPeriodRequest,
+    total_entries: i64,
+    mood_sentiments: &HashMap<String, f64>,
+) -> Result<AnalyticsWeather> {
+    if !table_exists(connection, "plugin_entry_locations")? {
+        return Ok(empty_weather_analytics(total_entries));
+    }
+    let columns = table_columns(connection, "plugin_entry_locations")?;
+    let condition_expr = if columns.contains("weather_condition") {
+        "pel.weather_condition"
+    } else {
+        "NULL"
+    };
+    let temp_expr = if columns.contains("weather_temp_c") {
+        "pel.weather_temp_c"
+    } else if columns.contains("weather_temp_f") {
+        "((pel.weather_temp_f - 32.0) * 5.0 / 9.0)"
+    } else {
+        "NULL"
+    };
+    let humidity_expr = if columns.contains("weather_humidity") {
+        "CAST(pel.weather_humidity AS REAL)"
+    } else {
+        "NULL"
+    };
+    let wind_expr = if columns.contains("weather_wind_kph") {
+        "pel.weather_wind_kph"
+    } else {
+        "NULL"
+    };
+    let filter = period_filter("e", period);
+    let sql = format!(
+        "SELECT e.id,
+                substr(e.created_at, 1, 10),
+                e.mood,
+                {condition_expr},
+                {temp_expr},
+                {humidity_expr},
+                {wind_expr}
+         FROM entries e
+         JOIN plugin_entry_locations pel ON pel.entry_uuid = e.uuid
+         {}
+         ORDER BY datetime(e.created_at) ASC, e.id ASC",
+        filter.where_sql
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let weather_rows = statement
+        .query_map(params_from_iter(filter.params), |row| {
+            Ok(WeatherStatsRow {
+                entry_id: row.get(0)?,
+                date: row.get(1)?,
+                mood: row.get(2)?,
+                condition: row.get(3)?,
+                temp_c: row.get(4)?,
+                humidity: row.get(5)?,
+                wind_kph: row.get(6)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let rows = weather_rows
+        .into_iter()
+        .filter(|row| {
+            normalize_string(row.condition.as_deref()).is_some()
+                || row.temp_c.is_some()
+                || row.humidity.is_some()
+                || row.wind_kph.is_some()
+        })
+        .collect::<Vec<_>>();
+    let entries_with_weather = rows
+        .iter()
+        .map(|row| row.entry_id)
+        .collect::<HashSet<_>>()
+        .len() as i64;
+    let mut condition_counts: HashMap<String, i64> = HashMap::new();
+    let mut temperatures = Vec::new();
+    let mut temperature_mood_points = Vec::new();
+    let mut mood_by_condition: HashMap<String, MoodBucket> = HashMap::new();
+    let mut trend: BTreeMap<String, WeatherTrendAccumulator> = BTreeMap::new();
+    let mut temperature_buckets = weather_temperature_buckets();
+
+    for row in &rows {
+        let condition = normalize_string(row.condition.as_deref());
+        if let Some(condition) = condition.as_ref() {
+            *condition_counts.entry(condition.clone()).or_insert(0) += 1;
+        }
+        if let Some(temp) = row.temp_c {
+            temperatures.push(temp);
+            if let Some(bucket) = temperature_buckets
+                .iter_mut()
+                .find(|bucket| weather_temperature_bucket_matches(&bucket.key, temp))
+            {
+                bucket.count += 1;
+            }
+        }
+        let daily = trend.entry(row.date.clone()).or_default();
+        daily.entry_count += 1;
+        daily.add_temp(row.temp_c);
+        daily.add_humidity(row.humidity);
+        daily.add_wind(row.wind_kph);
+
+        if let (Some(condition), Some(mood)) = (condition, row.mood.as_deref()) {
+            if let Some(score) = mood_sentiment::score_from_catalog(mood_sentiments, mood) {
+                mood_by_condition
+                    .entry(condition)
+                    .or_default()
+                    .add(mood, score);
+                if let Some(temp) = row.temp_c {
+                    temperature_mood_points.push((temp, score));
+                }
+            }
+        }
+    }
+
+    let mut condition_mood = mood_by_condition
+        .into_iter()
+        .filter_map(|(condition, bucket)| {
+            Some(AnalyticsWeatherConditionMood {
+                condition,
+                average_sentiment: bucket.average()?,
+                mood_count: bucket.count,
+                top_mood: bucket.top_mood(),
+            })
+        })
+        .collect::<Vec<_>>();
+    condition_mood.sort_by(|left, right| {
+        right
+            .average_sentiment
+            .total_cmp(&left.average_sentiment)
+            .then_with(|| right.mood_count.cmp(&left.mood_count))
+            .then_with(|| {
+                left.condition
+                    .to_lowercase()
+                    .cmp(&right.condition.to_lowercase())
+            })
+    });
+
+    let most_common_condition = condition_counts
+        .iter()
+        .max_by(|left, right| {
+            left.1
+                .cmp(right.1)
+                .then_with(|| right.0.to_lowercase().cmp(&left.0.to_lowercase()))
+        })
+        .map(|(condition, _)| condition.clone());
+    let average_temp_c = average_f64(&temperatures);
+    let min_temp_c = temperatures.iter().copied().reduce(f64::min);
+    let max_temp_c = temperatures.iter().copied().reduce(f64::max);
+    let condition_tags = weather_condition_tags(connection, period, &condition_counts)?;
+
+    Ok(AnalyticsWeather {
+        overview: AnalyticsWeatherOverview {
+            total_entries,
+            entries_with_weather,
+            coverage_percent: percent(entries_with_weather, total_entries),
+            unique_conditions: condition_counts.len() as i64,
+            average_temp_c,
+            min_temp_c,
+            max_temp_c,
+            most_common_condition,
+        },
+        temperature_buckets,
+        trend: trend
+            .into_iter()
+            .map(|(date, value)| AnalyticsWeatherTrendPoint {
+                date,
+                average_temp_c: value.average_temp(),
+                average_humidity: value.average_humidity(),
+                average_wind_kph: value.average_wind(),
+                entry_count: value.entry_count,
+            })
+            .collect(),
+        condition_mood,
+        temperature_mood_correlation: pearson_correlation(&temperature_mood_points),
+        condition_tags,
+    })
+}
+
+fn weather_condition_tags(
+    connection: &Connection,
+    period: &AnalyticsPeriodRequest,
+    condition_counts: &HashMap<String, i64>,
+) -> Result<Vec<AnalyticsWeatherConditionTags>> {
+    if condition_counts.is_empty()
+        || !table_exists(connection, "entry_tags")?
+        || !table_exists(connection, "tags")?
+    {
+        return Ok(Vec::new());
+    }
+    let filter = period_filter("e", period);
+    let sql = format!(
+        "SELECT trim(pel.weather_condition), t.name, COUNT(DISTINCT e.id)
+         FROM entries e
+         JOIN plugin_entry_locations pel ON pel.entry_uuid = e.uuid
+         JOIN entry_tags et ON et.entry_id = e.id
+         JOIN tags t ON t.id = et.tag_id
+         {}
+         AND NULLIF(trim(pel.weather_condition), '') IS NOT NULL
+         GROUP BY trim(pel.weather_condition), t.name",
+        filter.where_sql
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let values = statement
+        .query_map(params_from_iter(filter.params), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut grouped: HashMap<String, Vec<AnalyticsWeatherTag>> = HashMap::new();
+    for (condition, label, count) in values {
+        let total = condition_counts
+            .get(&condition)
+            .copied()
+            .unwrap_or_default();
+        grouped
+            .entry(condition)
+            .or_default()
+            .push(AnalyticsWeatherTag {
+                label,
+                count,
+                percent: percent(count, total),
+            });
+    }
+    let mut result = grouped
+        .into_iter()
+        .map(|(condition, mut top_tags)| {
+            top_tags.sort_by(|left, right| {
+                right
+                    .count
+                    .cmp(&left.count)
+                    .then_with(|| left.label.to_lowercase().cmp(&right.label.to_lowercase()))
+            });
+            top_tags.truncate(3);
+            AnalyticsWeatherConditionTags {
+                entry_count: condition_counts
+                    .get(&condition)
+                    .copied()
+                    .unwrap_or_default(),
+                condition,
+                top_tags,
+            }
+        })
+        .collect::<Vec<_>>();
+    result.sort_by(|left, right| {
+        right.entry_count.cmp(&left.entry_count).then_with(|| {
+            left.condition
+                .to_lowercase()
+                .cmp(&right.condition.to_lowercase())
+        })
+    });
+    result.truncate(6);
+    Ok(result)
+}
+
+fn empty_weather_analytics(total_entries: i64) -> AnalyticsWeather {
+    AnalyticsWeather {
+        overview: AnalyticsWeatherOverview {
+            total_entries,
+            entries_with_weather: 0,
+            coverage_percent: 0.0,
+            unique_conditions: 0,
+            average_temp_c: None,
+            min_temp_c: None,
+            max_temp_c: None,
+            most_common_condition: None,
+        },
+        temperature_buckets: weather_temperature_buckets(),
+        trend: Vec::new(),
+        condition_mood: Vec::new(),
+        temperature_mood_correlation: None,
+        condition_tags: Vec::new(),
+    }
+}
+
+fn weather_temperature_buckets() -> Vec<AnalyticsWeatherTemperatureBucket> {
+    [
+        ("below-0", "Below 0 C"),
+        ("0-5", "0-5 C"),
+        ("5-10", "5-10 C"),
+        ("10-15", "10-15 C"),
+        ("15-20", "15-20 C"),
+        ("20-25", "20-25 C"),
+        ("25-30", "25-30 C"),
+        ("30-plus", "30+ C"),
+    ]
+    .into_iter()
+    .map(|(key, label)| AnalyticsWeatherTemperatureBucket {
+        key: key.to_string(),
+        label: label.to_string(),
+        count: 0,
+    })
+    .collect()
+}
+
+fn weather_temperature_bucket_matches(key: &str, temp: f64) -> bool {
+    match key {
+        "below-0" => temp < 0.0,
+        "0-5" => (0.0..5.0).contains(&temp),
+        "5-10" => (5.0..10.0).contains(&temp),
+        "10-15" => (10.0..15.0).contains(&temp),
+        "15-20" => (15.0..20.0).contains(&temp),
+        "20-25" => (20.0..25.0).contains(&temp),
+        "25-30" => (25.0..30.0).contains(&temp),
+        "30-plus" => temp >= 30.0,
+        _ => false,
+    }
+}
+
 fn location_activity(
     connection: &Connection,
     period: &AnalyticsPeriodRequest,
@@ -1575,6 +2098,82 @@ struct TrendAccumulator {
     word_count: i64,
     mood_sentiment_sum: f64,
     mood_sentiment_count: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MoodBucket {
+    sum: f64,
+    count: i64,
+    moods: HashMap<String, i64>,
+}
+
+impl MoodBucket {
+    fn add(&mut self, mood: &str, score: f64) {
+        self.sum += score;
+        self.count += 1;
+        *self.moods.entry(mood.to_string()).or_insert(0) += 1;
+    }
+
+    fn average(&self) -> Option<f64> {
+        (self.count > 0).then_some(self.sum / self.count as f64)
+    }
+
+    fn top_mood(&self) -> Option<String> {
+        self.moods
+            .iter()
+            .max_by(|left, right| {
+                left.1
+                    .cmp(right.1)
+                    .then_with(|| right.0.to_lowercase().cmp(&left.0.to_lowercase()))
+            })
+            .map(|(mood, _)| mood.clone())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct WeatherTrendAccumulator {
+    entry_count: i64,
+    temp_sum: f64,
+    temp_count: i64,
+    humidity_sum: f64,
+    humidity_count: i64,
+    wind_sum: f64,
+    wind_count: i64,
+}
+
+impl WeatherTrendAccumulator {
+    fn add_temp(&mut self, value: Option<f64>) {
+        if let Some(value) = value {
+            self.temp_sum += value;
+            self.temp_count += 1;
+        }
+    }
+
+    fn add_humidity(&mut self, value: Option<f64>) {
+        if let Some(value) = value {
+            self.humidity_sum += value;
+            self.humidity_count += 1;
+        }
+    }
+
+    fn add_wind(&mut self, value: Option<f64>) {
+        if let Some(value) = value {
+            self.wind_sum += value;
+            self.wind_count += 1;
+        }
+    }
+
+    fn average_temp(&self) -> Option<f64> {
+        average_sum(self.temp_sum, self.temp_count)
+    }
+
+    fn average_humidity(&self) -> Option<f64> {
+        average_sum(self.humidity_sum, self.humidity_count)
+    }
+
+    fn average_wind(&self) -> Option<f64> {
+        average_sum(self.wind_sum, self.wind_count)
+    }
 }
 
 impl TrendAccumulator {
@@ -1891,6 +2490,45 @@ fn parse_date(value: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(value.get(0..10).unwrap_or(value), "%Y-%m-%d").ok()
 }
 
+fn percent(value: i64, total: i64) -> f64 {
+    if total <= 0 {
+        0.0
+    } else {
+        value as f64 * 100.0 / total as f64
+    }
+}
+
+fn average_sum(sum: f64, count: i64) -> Option<f64> {
+    (count > 0).then_some(sum / count as f64)
+}
+
+fn average_f64(values: &[f64]) -> Option<f64> {
+    (!values.is_empty()).then_some(values.iter().sum::<f64>() / values.len() as f64)
+}
+
+fn pearson_correlation(points: &[(f64, f64)]) -> Option<f64> {
+    if points.len() < 3 {
+        return None;
+    }
+    let count = points.len() as f64;
+    let mean_x = points.iter().map(|point| point.0).sum::<f64>() / count;
+    let mean_y = points.iter().map(|point| point.1).sum::<f64>() / count;
+    let numerator = points
+        .iter()
+        .map(|(x, y)| (x - mean_x) * (y - mean_y))
+        .sum::<f64>();
+    let denominator_x = points
+        .iter()
+        .map(|(x, _)| (x - mean_x).powi(2))
+        .sum::<f64>();
+    let denominator_y = points
+        .iter()
+        .map(|(_, y)| (y - mean_y).powi(2))
+        .sum::<f64>();
+    let denominator = (denominator_x * denominator_y).sqrt();
+    (denominator > f64::EPSILON).then_some(numerator / denominator)
+}
+
 fn table_exists(connection: &Connection, table_name: &str) -> Result<bool> {
     Ok(connection
         .query_row(
@@ -1903,6 +2541,12 @@ fn table_exists(connection: &Connection, table_name: &str) -> Result<bool> {
         )
         .optional()?
         .is_some())
+}
+
+fn table_columns(connection: &Connection, table_name: &str) -> Result<HashSet<String>> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    Ok(rows.collect::<rusqlite::Result<HashSet<_>>>()?)
 }
 
 trait OptionalRowExt<T> {
@@ -2019,6 +2663,26 @@ mod tests {
         assert_eq!(response.monthly_trend[0].period, "2026-01");
         assert_eq!(response.monthly_trend[0].mood_sentiment_count, 2);
         assert_close(response.monthly_trend[0].average_mood_sentiment, 0.5);
+        assert_eq!(response.capture_sources.mobile_entries, 1);
+        assert_eq!(response.capture_sources.desktop_entries, 3);
+        assert_eq!(response.mood_trend.len(), 3);
+        assert_eq!(response.mood_timing.time_of_day[0].mood_count, 3);
+        assert_eq!(response.weather.overview.entries_with_weather, 2);
+        assert_eq!(
+            response.weather.overview.most_common_condition.as_deref(),
+            Some("Rain")
+        );
+        assert_eq!(
+            response
+                .weather
+                .temperature_buckets
+                .iter()
+                .find(|bucket| bucket.key == "below-0")
+                .expect("freezing bucket")
+                .count,
+            1
+        );
+        assert_eq!(response.weather.condition_tags[0].top_tags.len(), 1);
     }
 
     #[test]
@@ -2260,9 +2924,12 @@ mod tests {
                     latitude REAL NOT NULL,
                     longitude REAL NOT NULL,
                     place_name TEXT,
+                    source TEXT,
                     weather_condition TEXT,
                     weather_temp_c REAL,
                     weather_temp_f REAL,
+                    weather_humidity INTEGER,
+                    weather_wind_kph REAL,
                     created_at TEXT NOT NULL
                 );
                 INSERT INTO entries
@@ -2282,9 +2949,9 @@ mod tests {
                 VALUES ('entry_one', 1, 0, '2026-01-01 08:00'),
                        ('entry_one', 1, 1, '2026-01-01 08:00');
                 INSERT INTO plugin_entry_locations
-                    (entry_uuid, latitude, longitude, place_name, weather_condition, weather_temp_c, weather_temp_f, created_at)
-                VALUES ('entry_one', 69.0, 18.0, 'Tromso', 'Snow', -2, 28, '2026-01-01 08:00'),
-                       ('entry_two', 59.0, 10.0, 'Oslo', 'Rain', 4, 39, '2026-01-02 08:00');
+                    (entry_uuid, latitude, longitude, place_name, source, weather_condition, weather_temp_c, weather_temp_f, weather_humidity, weather_wind_kph, created_at)
+                VALUES ('entry_one', 69.0, 18.0, 'Tromso', 'mobile', 'Snow', -2, 28, 82, 14, '2026-01-01 08:00'),
+                       ('entry_two', 59.0, 10.0, 'Oslo', 'manual', 'Rain', 4, 39, 75, 9, '2026-01-02 08:00');
                 ",
             )
             .expect("fixture");

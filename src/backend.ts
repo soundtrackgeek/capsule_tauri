@@ -3222,6 +3222,8 @@ function buildMockAnalytics(input: AnalyticsPeriodRequest): AnalyticsResponse {
     }
   }
 
+  const extended = buildMockExtendedAnalytics(entries);
+
   return {
     overview: {
       totalEntries: entries.length,
@@ -3252,6 +3254,10 @@ function buildMockAnalytics(input: AnalyticsPeriodRequest): AnalyticsResponse {
     hourlyTrend: hourly,
     weekdayTrend: weekday,
     writingWindow: buildMockWritingWindow([...writingDays.values()].sort((left, right) => left.date.localeCompare(right.date))),
+    captureSources: extended.captureSources,
+    moodTrend: extended.moodTrend,
+    moodTiming: extended.moodTiming,
+    weather: extended.weather,
     locationActivity: mapMockLocationActivity(locationActivity),
     moodBreakdown: mapToBreakdown(moods),
     tagBreakdown: mapToBreakdown(tags),
@@ -3263,6 +3269,229 @@ function buildMockAnalytics(input: AnalyticsPeriodRequest): AnalyticsResponse {
       .slice(0, 12),
     warnings: [],
   };
+}
+
+function buildMockExtendedAnalytics(entries: Entry[]): Pick<
+  AnalyticsResponse,
+  "captureSources" | "moodTrend" | "moodTiming" | "weather"
+> {
+  const mobileCount = entries.filter((entry) => entry.location?.source?.toLowerCase() === "mobile").length;
+  const captureTrend = new Map<string, { mobileCount: number; desktopCount: number }>();
+  const moodByDay = new Map<string, { sum: number; count: number }>();
+  const phases = [
+    { key: "morning", label: "Morning", detail: "06:00-10:00", matches: (hour: number) => hour >= 6 && hour < 10 },
+    { key: "midday", label: "Midday", detail: "10:00-15:00", matches: (hour: number) => hour >= 10 && hour < 15 },
+    { key: "late-afternoon", label: "Late Afternoon", detail: "15:00-17:00", matches: (hour: number) => hour >= 15 && hour < 17 },
+    { key: "evening", label: "Evening", detail: "17:00-21:00", matches: (hour: number) => hour >= 17 && hour < 21 },
+    { key: "late-night", label: "Late Night", detail: "21:00-06:00", matches: (hour: number) => hour >= 21 || hour < 6 },
+  ];
+  const weekdays = [
+    { key: "1", label: "Mon", detail: "Monday", day: 1 },
+    { key: "2", label: "Tue", detail: "Tuesday", day: 2 },
+    { key: "3", label: "Wed", detail: "Wednesday", day: 3 },
+    { key: "4", label: "Thu", detail: "Thursday", day: 4 },
+    { key: "5", label: "Fri", detail: "Friday", day: 5 },
+    { key: "6", label: "Sat", detail: "Saturday", day: 6 },
+    { key: "0", label: "Sun", detail: "Sunday", day: 0 },
+  ];
+  const timingBuckets = new Map<string, MockMoodBucket>();
+  const weatherEntries = entries.filter((entry) => {
+    const location = entry.location;
+    return Boolean(location && (
+      location.weatherCondition || location.weatherTempC !== null ||
+      location.weatherHumidity !== null || location.weatherWindKph !== null
+    ));
+  });
+  const conditionCounts = new Map<string, number>();
+  const conditionMoods = new Map<string, MockMoodBucket>();
+  const conditionTags = new Map<string, Map<string, number>>();
+  const weatherTrend = new Map<string, MockWeatherTrendBucket>();
+  const temperaturePairs: Array<[number, number]> = [];
+  const temperatures: number[] = [];
+  const temperatureBuckets = [
+    { key: "below-0", label: "Below 0 C", count: 0 },
+    { key: "0-5", label: "0-5 C", count: 0 },
+    { key: "5-10", label: "5-10 C", count: 0 },
+    { key: "10-15", label: "10-15 C", count: 0 },
+    { key: "15-20", label: "15-20 C", count: 0 },
+    { key: "20-25", label: "20-25 C", count: 0 },
+    { key: "25-30", label: "25-30 C", count: 0 },
+    { key: "30-plus", label: "30+ C", count: 0 },
+  ];
+
+  for (const entry of entries) {
+    const date = entry.createdAt.slice(0, 10);
+    const sourceBucket = captureTrend.get(date) ?? { mobileCount: 0, desktopCount: 0 };
+    if (entry.location?.source?.toLowerCase() === "mobile") sourceBucket.mobileCount += 1;
+    else sourceBucket.desktopCount += 1;
+    captureTrend.set(date, sourceBucket);
+
+    const sentiment = moodSentimentScore(entry.mood);
+    if (sentiment === null || !entry.mood) continue;
+    const daily = moodByDay.get(date) ?? { sum: 0, count: 0 };
+    daily.sum += sentiment;
+    daily.count += 1;
+    moodByDay.set(date, daily);
+    const minutes = mockMinutesSinceMidnight(entry.createdAt);
+    if (minutes !== null) {
+      const phase = phases.find((definition) => definition.matches(Math.floor(minutes / 60)));
+      if (phase) addMockMoodBucket(timingBuckets, `phase:${phase.key}`, entry.mood, sentiment);
+    }
+    addMockMoodBucket(timingBuckets, `weekday:${mockWeekdayDayNum(date)}`, entry.mood, sentiment);
+  }
+
+  for (const entry of weatherEntries) {
+    const location = entry.location!;
+    const date = entry.createdAt.slice(0, 10);
+    const condition = location.weatherCondition?.trim() || null;
+    const trend = weatherTrend.get(date) ?? { temps: [], humidity: [], wind: [], count: 0 };
+    trend.count += 1;
+    if (location.weatherTempC !== null) {
+      trend.temps.push(location.weatherTempC);
+      temperatures.push(location.weatherTempC);
+      const index = location.weatherTempC < 0 ? 0
+        : location.weatherTempC < 5 ? 1
+        : location.weatherTempC < 10 ? 2
+        : location.weatherTempC < 15 ? 3
+        : location.weatherTempC < 20 ? 4
+        : location.weatherTempC < 25 ? 5
+        : location.weatherTempC < 30 ? 6 : 7;
+      temperatureBuckets[index].count += 1;
+    }
+    if (location.weatherHumidity !== null) trend.humidity.push(location.weatherHumidity);
+    if (location.weatherWindKph !== null) trend.wind.push(location.weatherWindKph);
+    weatherTrend.set(date, trend);
+    if (!condition) continue;
+    conditionCounts.set(condition, (conditionCounts.get(condition) ?? 0) + 1);
+    const sentiment = moodSentimentScore(entry.mood);
+    if (sentiment !== null && entry.mood) {
+      addMockMoodBucket(conditionMoods, condition, entry.mood, sentiment);
+      if (location.weatherTempC !== null) temperaturePairs.push([location.weatherTempC, sentiment]);
+    }
+    const tags = conditionTags.get(condition) ?? new Map<string, number>();
+    for (const tag of entry.tags) tags.set(tag.name, (tags.get(tag.name) ?? 0) + 1);
+    conditionTags.set(condition, tags);
+  }
+
+  const toTimingPoint = (
+    definition: { key: string; label: string; detail: string },
+    bucketKey: string,
+  ) => {
+    const bucket = timingBuckets.get(bucketKey);
+    return {
+      key: definition.key,
+      label: definition.label,
+      detail: definition.detail,
+      averageSentiment: bucket ? bucket.sum / bucket.count : null,
+      moodCount: bucket?.count ?? 0,
+      topMood: bucket ? topMockMood(bucket.moods) : null,
+    };
+  };
+  const mostCommonCondition = [...conditionCounts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0] ?? null;
+
+  return {
+    captureSources: {
+      totalEntries: entries.length,
+      mobileEntries: mobileCount,
+      desktopEntries: entries.length - mobileCount,
+      mobilePercent: mockPercent(mobileCount, entries.length),
+      desktopPercent: mockPercent(entries.length - mobileCount, entries.length),
+      trend: [...captureTrend.entries()].sort().map(([period, value]) => ({
+        period,
+        ...value,
+        totalCount: value.mobileCount + value.desktopCount,
+        mobilePercent: mockPercent(value.mobileCount, value.mobileCount + value.desktopCount),
+      })),
+    },
+    moodTrend: [...moodByDay.entries()].sort().map(([date, value]) => ({
+      date,
+      averageSentiment: value.sum / value.count,
+      moodCount: value.count,
+    })),
+    moodTiming: {
+      timeOfDay: phases.map((definition) => toTimingPoint(definition, `phase:${definition.key}`)),
+      dayOfWeek: weekdays.map((definition) => toTimingPoint(definition, `weekday:${definition.day}`)),
+    },
+    weather: {
+      overview: {
+        totalEntries: entries.length,
+        entriesWithWeather: weatherEntries.length,
+        coveragePercent: mockPercent(weatherEntries.length, entries.length),
+        uniqueConditions: conditionCounts.size,
+        averageTempC: mockAverage(temperatures),
+        minTempC: temperatures.length ? Math.min(...temperatures) : null,
+        maxTempC: temperatures.length ? Math.max(...temperatures) : null,
+        mostCommonCondition,
+      },
+      temperatureBuckets,
+      trend: [...weatherTrend.entries()].sort().map(([date, value]) => ({
+        date,
+        averageTempC: mockAverage(value.temps),
+        averageHumidity: mockAverage(value.humidity),
+        averageWindKph: mockAverage(value.wind),
+        entryCount: value.count,
+      })),
+      conditionMood: [...conditionMoods.entries()].map(([condition, value]) => ({
+        condition,
+        averageSentiment: value.sum / value.count,
+        moodCount: value.count,
+        topMood: topMockMood(value.moods),
+      })).sort((left, right) => right.averageSentiment - left.averageSentiment),
+      temperatureMoodCorrelation: mockPearson(temperaturePairs),
+      conditionTags: [...conditionTags.entries()].map(([condition, tags]) => ({
+        condition,
+        entryCount: conditionCounts.get(condition) ?? 0,
+        topTags: [...tags.entries()]
+          .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+          .slice(0, 3)
+          .map(([label, count]) => ({
+            label,
+            count,
+            percent: mockPercent(count, conditionCounts.get(condition) ?? 0),
+          })),
+      })).sort((left, right) => right.entryCount - left.entryCount).slice(0, 6),
+    },
+  };
+}
+
+type MockMoodBucket = { sum: number; count: number; moods: Map<string, number> };
+type MockWeatherTrendBucket = { temps: number[]; humidity: number[]; wind: number[]; count: number };
+
+function addMockMoodBucket(
+  buckets: Map<string, MockMoodBucket>,
+  key: string,
+  mood: string,
+  sentiment: number,
+) {
+  const bucket = buckets.get(key) ?? { sum: 0, count: 0, moods: new Map<string, number>() };
+  bucket.sum += sentiment;
+  bucket.count += 1;
+  bucket.moods.set(mood, (bucket.moods.get(mood) ?? 0) + 1);
+  buckets.set(key, bucket);
+}
+
+function topMockMood(moods: Map<string, number>) {
+  return [...moods.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0] ?? null;
+}
+
+function mockPercent(value: number, total: number) {
+  return total > 0 ? value * 100 / total : 0;
+}
+
+function mockAverage(values: number[]) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+function mockPearson(points: Array<[number, number]>) {
+  if (points.length < 3) return null;
+  const meanX = points.reduce((sum, point) => sum + point[0], 0) / points.length;
+  const meanY = points.reduce((sum, point) => sum + point[1], 0) / points.length;
+  const numerator = points.reduce((sum, point) => sum + (point[0] - meanX) * (point[1] - meanY), 0);
+  const denominatorX = points.reduce((sum, point) => sum + (point[0] - meanX) ** 2, 0);
+  const denominatorY = points.reduce((sum, point) => sum + (point[1] - meanY) ** 2, 0);
+  const denominator = Math.sqrt(denominatorX * denominatorY);
+  return denominator > Number.EPSILON ? numerator / denominator : null;
 }
 
 type MockWrappedWindow = {

@@ -1242,6 +1242,96 @@ export type AnalyticsWritingWindow = {
   summary: AnalyticsWritingWindowSummary;
 };
 
+export type AnalyticsCaptureSourceTrendPoint = {
+  period: string;
+  mobileCount: number;
+  desktopCount: number;
+  totalCount: number;
+  mobilePercent: number;
+};
+
+export type AnalyticsCaptureSources = {
+  totalEntries: number;
+  mobileEntries: number;
+  desktopEntries: number;
+  mobilePercent: number;
+  desktopPercent: number;
+  trend: AnalyticsCaptureSourceTrendPoint[];
+};
+
+export type AnalyticsMoodTrendPoint = {
+  date: string;
+  averageSentiment: number;
+  moodCount: number;
+};
+
+export type AnalyticsMoodTimingPoint = {
+  key: string;
+  label: string;
+  detail: string;
+  averageSentiment: number | null;
+  moodCount: number;
+  topMood: string | null;
+};
+
+export type AnalyticsMoodTiming = {
+  timeOfDay: AnalyticsMoodTimingPoint[];
+  dayOfWeek: AnalyticsMoodTimingPoint[];
+};
+
+export type AnalyticsWeatherOverview = {
+  totalEntries: number;
+  entriesWithWeather: number;
+  coveragePercent: number;
+  uniqueConditions: number;
+  averageTempC: number | null;
+  minTempC: number | null;
+  maxTempC: number | null;
+  mostCommonCondition: string | null;
+};
+
+export type AnalyticsWeatherTemperatureBucket = {
+  key: string;
+  label: string;
+  count: number;
+};
+
+export type AnalyticsWeatherTrendPoint = {
+  date: string;
+  averageTempC: number | null;
+  averageHumidity: number | null;
+  averageWindKph: number | null;
+  entryCount: number;
+};
+
+export type AnalyticsWeatherConditionMood = {
+  condition: string;
+  averageSentiment: number;
+  moodCount: number;
+  topMood: string | null;
+};
+
+export type AnalyticsWeatherTag = {
+  label: string;
+  count: number;
+  percent: number;
+};
+
+export type AnalyticsWeatherConditionTags = {
+  condition: string;
+  entryCount: number;
+  topTags: AnalyticsWeatherTag[];
+};
+
+export type AnalyticsWeather = {
+  overview: AnalyticsWeatherOverview;
+  temperatureBuckets: AnalyticsWeatherTemperatureBucket[];
+  trend: AnalyticsWeatherTrendPoint[];
+  conditionMood: AnalyticsWeatherConditionMood[];
+  temperatureMoodCorrelation: number | null;
+  conditionTags: AnalyticsWeatherConditionTags[];
+};
+
 export type WordCount = {
   word: string;
   count: number;
@@ -1254,6 +1344,10 @@ export type AnalyticsResponse = {
   hourlyTrend: AnalyticsHourPoint[];
   weekdayTrend: AnalyticsWeekdayPoint[];
   writingWindow: AnalyticsWritingWindow;
+  captureSources: AnalyticsCaptureSources;
+  moodTrend: AnalyticsMoodTrendPoint[];
+  moodTiming: AnalyticsMoodTiming;
+  weather: AnalyticsWeather;
   locationActivity: AnalyticsBreakdownItem[];
   moodBreakdown: AnalyticsBreakdownItem[];
   tagBreakdown: AnalyticsBreakdownItem[];

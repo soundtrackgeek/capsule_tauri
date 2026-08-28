@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.37.0 - 2026-08-28
+
+### Added
+
+- Added mobile-versus-desktop capture analytics using explicit mobile location
+  provenance, including period share and trend history.
+- Added daily mood sentiment, mood-by-time-of-day, mood-by-weekday, and a richer
+  mood distribution with visible sample counts.
+- Added weather coverage summaries, condition and temperature distributions,
+  temperature/humidity/wind trends with day/week/month grouping, weather versus
+  mood associations with statistical guardrails, and top tags by condition.
+
+### Changed
+
+- Bumped the app version to 0.37.0.
+
 ## 0.36.3 - 2026-08-20
 
 ### Fixed

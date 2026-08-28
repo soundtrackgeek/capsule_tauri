@@ -107,8 +107,11 @@ explicit capability-gated AI/sync surfaces:
   recording.
 - Analytics dashboard with overview counts, Activity Trends charts for entry
   frequency, words, first/last Capsule timing, hourly/weekday activity, and
-  location activity with hover tooltips, plus monthly trend, mood sentiment trend,
-  tag/mood/location breakdowns, weather breakdowns, top words, and streaks.
+  location activity with hover tooltips; mobile-versus-desktop capture share;
+  daily mood sentiment, time-of-day and weekday mood patterns with sample counts,
+  and mood distribution; plus weather coverage, condition and temperature
+  distributions, temperature/humidity/wind trends, mood associations, weather-tag
+  patterns, monthly trend, tags, locations, top words, and streaks.
 - Capsule Wrapped retrospectives for the last completed week, month, or year,
   with older/newer navigation, period-over-period metrics, deterministic
   insights and fun facts, lifetime-best callouts, activity charts, top tags,
