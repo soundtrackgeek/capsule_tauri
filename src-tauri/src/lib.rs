@@ -2,13 +2,8 @@ mod ai_chat;
 mod ai_config;
 mod ai_metadata;
 mod ai_providers;
-mod backup;
-mod db;
 mod debug;
-mod entries;
 mod images;
-mod location;
-mod models;
 mod mood_sentiment;
 mod phase6;
 mod search;
@@ -17,6 +12,12 @@ mod settings;
 mod stats;
 mod sync;
 mod threads;
+
+// The storage, entry, backup, location, and model modules are implemented in
+// one headless crate.  Re-exporting them at the old paths keeps all existing
+// desktop command adapters and frontend serialization stable.
+pub use capsule_core::{backup, db, entries, location, models};
+mod backup_adapter;
 
 use models::{
     AiApiKeyMutationResponse, AiApiKeyUpdateRequest, AiChatContextPreviewRequest,
@@ -120,7 +121,7 @@ async fn restore_backup(input: BackupRestoreRequest) -> Result<BackupRestoreResp
 
 #[tauri::command]
 async fn open_backup_folder() -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(backup::open_backup_folder)
+    tauri::async_runtime::spawn_blocking(backup_adapter::open_backup_folder)
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())

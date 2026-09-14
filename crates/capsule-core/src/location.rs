@@ -5,7 +5,6 @@ use std::{
     time::Duration,
 };
 
-#[cfg(test)]
 use std::cell::RefCell;
 
 use anyhow::{Context, Result};
@@ -63,9 +62,9 @@ struct PendingMobileLocation {
     weather_fetched_at: Option<String>,
 }
 
-#[cfg(test)]
 #[derive(Debug, Clone)]
-pub(crate) struct TestAutoCaptureFixture {
+#[doc(hidden)]
+pub struct TestAutoCaptureFixture {
     pub latitude: f64,
     pub longitude: f64,
     pub place_name: Option<String>,
@@ -74,19 +73,18 @@ pub(crate) struct TestAutoCaptureFixture {
     pub weather_condition: Option<String>,
 }
 
-#[cfg(test)]
 thread_local! {
     static TEST_AUTO_CAPTURE: RefCell<Option<TestAutoCaptureFixture>> = const { RefCell::new(None) };
 }
 
-#[cfg(test)]
-pub(crate) fn set_test_auto_capture_fixture(fixture: Option<TestAutoCaptureFixture>) {
+#[doc(hidden)]
+pub fn set_test_auto_capture_fixture(fixture: Option<TestAutoCaptureFixture>) {
     TEST_AUTO_CAPTURE.with(|slot| {
         *slot.borrow_mut() = fixture;
     });
 }
 
-pub(crate) fn has_pending_mobile_location_enrichment(db_path: &Path) -> Result<bool> {
+pub fn has_pending_mobile_location_enrichment(db_path: &Path) -> Result<bool> {
     let connection = crate::db::open_read_only_connection(db_path)?;
     if !table_exists(&connection, "plugin_entry_locations")? {
         return Ok(false);
@@ -111,7 +109,7 @@ pub(crate) fn has_pending_mobile_location_enrichment(db_path: &Path) -> Result<b
         .map_err(Into::into)
 }
 
-pub(crate) fn enrich_pending_mobile_locations(db_path: &Path) -> Result<usize> {
+pub fn enrich_pending_mobile_locations(db_path: &Path) -> Result<usize> {
     let mut connection = crate::db::open_read_write_connection(db_path)?;
     ensure_schema(&connection)?;
     let candidates = pending_mobile_locations(&connection)?;
@@ -279,7 +277,6 @@ fn resolve_mobile_place(
     longitude: f64,
     config: &LocationConfig,
 ) -> Result<Option<GeocodeData>> {
-    #[cfg(test)]
     if let Some(fixture) = TEST_AUTO_CAPTURE.with(|slot| slot.borrow().clone()) {
         return Ok(fixture.place_name.map(|place_name| GeocodeData {
             place_name,
@@ -301,7 +298,6 @@ fn resolve_mobile_weather(
     entry_created_at: &str,
     config: &LocationConfig,
 ) -> Option<WeatherData> {
-    #[cfg(test)]
     if let Some(fixture) = TEST_AUTO_CAPTURE.with(|slot| slot.borrow().clone()) {
         return fixture.weather_temp_c.map(|temp_c| WeatherData {
             temp_c: Some(temp_c),
@@ -319,13 +315,35 @@ fn resolve_mobile_weather(
     get_weather(latitude, longitude, None, config)
 }
 
-pub(crate) fn auto_capture_location(db_path: &Path, entry_uuid: &str) -> Result<bool> {
+pub fn auto_capture_location(db_path: &Path, entry_uuid: &str) -> Result<bool> {
     let config = LocationConfig::load(db_path);
+    auto_capture_location_with_config(db_path, entry_uuid, &config)
+}
+
+/// Explicit-config variant for non-desktop clients.  The supplied path is
+/// read exactly; it does not consult `CAPSULE_CONFIG_PATH` or another sibling
+/// candidate.  Passing `None` retains the desktop candidate behavior.
+pub fn auto_capture_location_with_config_path(
+    db_path: &Path,
+    entry_uuid: &str,
+    config_path: Option<&Path>,
+) -> Result<bool> {
+    let config = match config_path {
+        Some(path) => LocationConfig::load_from_path(path),
+        None => LocationConfig::load(db_path),
+    };
+    auto_capture_location_with_config(db_path, entry_uuid, &config)
+}
+
+fn auto_capture_location_with_config(
+    db_path: &Path,
+    entry_uuid: &str,
+    config: &LocationConfig,
+) -> Result<bool> {
     if !config.bool_value("location.auto_capture", true) {
         return Ok(false);
     }
 
-    #[cfg(test)]
     if let Some(fixture) = TEST_AUTO_CAPTURE.with(|slot| slot.borrow().clone()) {
         let weather = fixture.weather_temp_c.map(|temp_c| WeatherData {
             temp_c: Some(temp_c),
@@ -335,7 +353,7 @@ pub(crate) fn auto_capture_location(db_path: &Path, entry_uuid: &str) -> Result<
             humidity: None,
             wind_kph: None,
         });
-        attach_location(
+        attach_location_with_config(
             db_path,
             entry_uuid,
             fixture.latitude,
@@ -344,6 +362,7 @@ pub(crate) fn auto_capture_location(db_path: &Path, entry_uuid: &str) -> Result<
             fixture.source,
             weather,
             None,
+            config,
         )?;
         return Ok(true);
     }
@@ -351,8 +370,8 @@ pub(crate) fn auto_capture_location(db_path: &Path, entry_uuid: &str) -> Result<
     if config.bool_value("location.use_default_location", false) {
         if let Some(place_name) = config.string_value("location.default_location_name") {
             if let Some((lat, lon)) = geocode_place(&place_name) {
-                let weather = get_weather_for_entry(db_path, entry_uuid, lat, lon, &config)?;
-                attach_location(
+                let weather = get_weather_for_entry(db_path, entry_uuid, lat, lon, config)?;
+                attach_location_with_config(
                     db_path,
                     entry_uuid,
                     lat,
@@ -361,6 +380,7 @@ pub(crate) fn auto_capture_location(db_path: &Path, entry_uuid: &str) -> Result<
                     "default".to_string(),
                     weather,
                     None,
+                    config,
                 )?;
                 return Ok(true);
             }
@@ -380,8 +400,8 @@ pub(crate) fn auto_capture_location(db_path: &Path, entry_uuid: &str) -> Result<
     let Some((lat, lon)) = get_location_from_ip() else {
         return Ok(false);
     };
-    let weather = get_weather_for_entry(db_path, entry_uuid, lat, lon, &config)?;
-    attach_location(
+    let weather = get_weather_for_entry(db_path, entry_uuid, lat, lon, config)?;
+    attach_location_with_config(
         db_path,
         entry_uuid,
         lat,
@@ -390,12 +410,13 @@ pub(crate) fn auto_capture_location(db_path: &Path, entry_uuid: &str) -> Result<
         "ip".to_string(),
         weather,
         None,
+        config,
     )?;
     Ok(true)
 }
 
 #[allow(clippy::too_many_arguments)]
-fn attach_location(
+fn attach_location_with_config(
     db_path: &Path,
     entry_uuid: &str,
     lat: f64,
@@ -404,6 +425,7 @@ fn attach_location(
     source: String,
     weather: Option<WeatherData>,
     place_details: Option<String>,
+    config: &LocationConfig,
 ) -> Result<()> {
     let mut connection = crate::db::open_read_write_connection(db_path)?;
     ensure_schema(&connection)?;
@@ -415,14 +437,13 @@ fn attach_location(
         )
         .with_context(|| format!("Entry with UUID '{entry_uuid}' does not exist."))?;
 
-    let config = LocationConfig::load(db_path);
     let (place_name, place_details) = match place_name {
         Some(value) => (Some(value), place_details),
-        None => resolve_place_name(&connection, lat, lon, &config)?,
+        None => resolve_place_name(&connection, lat, lon, config)?,
     };
     let weather = match weather {
         Some(value) => Some(value),
-        None => get_weather(lat, lon, Some(&entry_created_at), &config),
+        None => get_weather(lat, lon, Some(&entry_created_at), config),
     };
     let created_at = Local::now().format("%Y-%m-%d %H:%M").to_string();
     let weather_fetched_at = weather
@@ -1099,15 +1120,25 @@ fn url_with_params(base_url: &str, params: Vec<(&str, String)>) -> Option<Url> {
 impl LocationConfig {
     fn load(db_path: &Path) -> Self {
         for path in config_path_candidates(db_path) {
-            let Ok(raw) = fs::read(&path) else {
-                continue;
-            };
-            let Ok(JsonValue::Object(values)) = serde_json::from_slice::<JsonValue>(&raw) else {
-                continue;
-            };
-            return Self { values };
+            if let Some(config) = Self::try_load_from_path(&path) {
+                return config;
+            }
         }
         Self { values: Map::new() }
+    }
+
+    fn load_from_path(path: &Path) -> Self {
+        Self::try_load_from_path(path).unwrap_or_else(|| Self { values: Map::new() })
+    }
+
+    fn try_load_from_path(path: &Path) -> Option<Self> {
+        let Ok(raw) = fs::read(path) else {
+            return None;
+        };
+        let Ok(JsonValue::Object(values)) = serde_json::from_slice::<JsonValue>(&raw) else {
+            return None;
+        };
+        Some(Self { values })
     }
 
     fn bool_value(&self, key: &str, default: bool) -> bool {

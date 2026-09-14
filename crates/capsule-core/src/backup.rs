@@ -1,7 +1,6 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::Command,
     time::Duration,
 };
 
@@ -100,7 +99,7 @@ pub fn preview_restore_backup(input: BackupRestorePreviewRequest) -> Result<Back
     preview_restore_backup_for_database(&db_path, input)
 }
 
-pub(crate) fn preview_restore_backup_for_database(
+pub fn preview_restore_backup_for_database(
     db_path: &Path,
     input: BackupRestorePreviewRequest,
 ) -> Result<BackupRestorePreview> {
@@ -147,7 +146,7 @@ pub fn restore_backup(input: BackupRestoreRequest) -> Result<BackupRestoreRespon
     restore_backup_for_database(&db_path, input)
 }
 
-pub(crate) fn restore_backup_for_database(
+pub fn restore_backup_for_database(
     db_path: &Path,
     input: BackupRestoreRequest,
 ) -> Result<BackupRestoreResponse> {
@@ -208,17 +207,6 @@ pub(crate) fn restore_backup_for_database(
         completed_at: Utc::now().to_rfc3339(),
         status,
     })
-}
-
-pub fn open_backup_folder() -> Result<()> {
-    let backup_directory = db::backup_directory_for_database(&db::resolve_database_path());
-    fs::create_dir_all(&backup_directory)
-        .with_context(|| format!("failed to create {}", backup_directory.display()))?;
-    Command::new("explorer.exe")
-        .arg(&backup_directory)
-        .spawn()
-        .with_context(|| format!("failed to open {}", backup_directory.display()))?;
-    Ok(())
 }
 
 #[derive(Debug, Clone)]

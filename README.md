@@ -9,6 +9,10 @@ location-aware browsing, analytics, Writer Mode, a visual cover wall, and
 explicit capability-gated AI/sync surfaces:
 
 - Tauri 2 desktop configuration.
+- A headless `capsule-core` crate containing the shared database, backup,
+  entries, location, and model behavior. It exposes explicit-path resolution,
+  read-only schema capability diagnostics, and non-Tauri capture/context DTOs;
+  desktop-only shell actions remain in the Tauri adapter.
 - Native window restoration for the last size, position, maximized, and
   fullscreen state used before closing the app, while every fresh launch opens
   the main window even if the previous session ended from the tray.

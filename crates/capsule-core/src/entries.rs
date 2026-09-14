@@ -165,7 +165,28 @@ pub fn list_entries_for_database(
     db_path: &Path,
     filters: EntryFilters,
 ) -> Result<EntryListResponse> {
-    ensure_entry_ids_for_database(db_path)?;
+    list_entries_for_database_with_repair(db_path, filters, true)
+}
+
+/// Read-only list path for CLI browsing and diagnostics.  It never invokes
+/// `ensure_entry_ids_for_database`, creates a backup, or mutates the schema.
+pub fn list_entries_read_only_for_database(
+    db_path: &Path,
+    filters: EntryFilters,
+) -> Result<EntryListResponse> {
+    list_entries_for_database_with_repair(db_path, filters, false)
+}
+
+fn list_entries_for_database_with_repair(
+    db_path: &Path,
+    filters: EntryFilters,
+    repair_ids: bool,
+) -> Result<EntryListResponse> {
+    if repair_ids {
+        ensure_entry_ids_for_database(db_path)?;
+    } else {
+        ensure_read_capabilities(db_path)?;
+    }
     let connection = open_entries_connection(db_path)?;
     let tables = detected_tables(&connection)?;
     ensure_entries_table(&tables)?;
@@ -192,7 +213,25 @@ pub fn get_entry(identifier: String) -> Result<Entry> {
 }
 
 pub fn get_entry_for_database(db_path: &Path, identifier: &str) -> Result<Entry> {
-    ensure_entry_ids_for_database(db_path)?;
+    get_entry_for_database_with_repair(db_path, identifier, true)
+}
+
+/// Read-only detail path.  Unsupported schemas are rejected before SQL is
+/// prepared rather than being repaired or silently falling back.
+pub fn get_entry_read_only_for_database(db_path: &Path, identifier: &str) -> Result<Entry> {
+    get_entry_for_database_with_repair(db_path, identifier, false)
+}
+
+fn get_entry_for_database_with_repair(
+    db_path: &Path,
+    identifier: &str,
+    repair_ids: bool,
+) -> Result<Entry> {
+    if repair_ids {
+        ensure_entry_ids_for_database(db_path)?;
+    } else {
+        ensure_read_capabilities(db_path)?;
+    }
     let connection = open_entries_connection(db_path)?;
     let tables = detected_tables(&connection)?;
     ensure_entries_table(&tables)?;
@@ -209,15 +248,32 @@ pub fn get_entry_for_database(db_path: &Path, identifier: &str) -> Result<Entry>
     Ok(build_entry(raw_entry, &relations))
 }
 
-pub(crate) fn list_entries_by_uuids_for_database(
+pub fn list_entries_by_uuids_for_database(db_path: &Path, uuids: &[String]) -> Result<Vec<Entry>> {
+    list_entries_by_uuids_for_database_with_repair(db_path, uuids, true)
+}
+
+/// Read-only UUID projection used by context/diagnostics consumers.
+pub fn list_entries_by_uuids_read_only_for_database(
     db_path: &Path,
     uuids: &[String],
+) -> Result<Vec<Entry>> {
+    list_entries_by_uuids_for_database_with_repair(db_path, uuids, false)
+}
+
+fn list_entries_by_uuids_for_database_with_repair(
+    db_path: &Path,
+    uuids: &[String],
+    repair_ids: bool,
 ) -> Result<Vec<Entry>> {
     if uuids.is_empty() {
         return Ok(Vec::new());
     }
 
-    ensure_entry_ids_for_database(db_path)?;
+    if repair_ids {
+        ensure_entry_ids_for_database(db_path)?;
+    } else {
+        ensure_read_capabilities(db_path)?;
+    }
     let connection = open_entries_connection(db_path)?;
     let tables = detected_tables(&connection)?;
     ensure_entries_table(&tables)?;
@@ -255,7 +311,26 @@ pub fn get_random_entry_for_database(
     db_path: &Path,
     filters: RandomEntryFilters,
 ) -> Result<Option<Entry>> {
-    ensure_entry_ids_for_database(db_path)?;
+    get_random_entry_for_database_with_repair(db_path, filters, true)
+}
+
+pub fn get_random_entry_read_only_for_database(
+    db_path: &Path,
+    filters: RandomEntryFilters,
+) -> Result<Option<Entry>> {
+    get_random_entry_for_database_with_repair(db_path, filters, false)
+}
+
+fn get_random_entry_for_database_with_repair(
+    db_path: &Path,
+    filters: RandomEntryFilters,
+    repair_ids: bool,
+) -> Result<Option<Entry>> {
+    if repair_ids {
+        ensure_entry_ids_for_database(db_path)?;
+    } else {
+        ensure_read_capabilities(db_path)?;
+    }
     let entry_filters = EntryFilters {
         include_hidden: filters.include_hidden,
         tags: filters.tags,
@@ -456,6 +531,29 @@ fn open_entries_connection(db_path: &Path) -> Result<Connection> {
     }
 
     Ok(connection)
+}
+
+fn ensure_read_capabilities(db_path: &Path) -> Result<()> {
+    let connection = db::open_read_only_connection(db_path)?;
+    let report = db::inspect_capabilities(&connection)?;
+    if !report.schema.supports_read {
+        return Err(anyhow!(
+            "database schema is unsupported for read-only entry queries: {}",
+            report
+                .schema
+                .missing_required_columns
+                .iter()
+                .map(|column| format!("entries.{column}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if entry_ids_need_repair(&connection)? {
+        return Err(anyhow!(
+            "database entry IDs require repair; read-only queries refuse to mutate the journal"
+        ));
+    }
+    Ok(())
 }
 
 fn create_entry_inner(db_path: &Path, input: EntryCreate) -> Result<Entry> {
@@ -1192,7 +1290,7 @@ fn update_sqlite_sequence(connection: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn ensure_entry_ids_for_database(db_path: &Path) -> Result<()> {
+pub fn ensure_entry_ids_for_database(db_path: &Path) -> Result<()> {
     let connection = db::open_read_only_connection(db_path)?;
     let tables = detected_tables(&connection)?;
     ensure_entries_table(&tables)?;
@@ -1334,7 +1432,7 @@ fn duplicate_entry_id(connection: &Connection) -> Result<Option<i64>> {
         .map_err(Into::into)
 }
 
-pub(crate) fn resequence_entry_ids(connection: &Connection) -> Result<()> {
+pub fn resequence_entry_ids(connection: &Connection) -> Result<()> {
     if !entry_id_column_info(connection)?.exists {
         return Err(anyhow!(
             "Cannot resequence entry numbers because entries.id is missing."
@@ -2495,6 +2593,47 @@ mod tests {
                 .as_deref(),
             Some("Thread title")
         );
+    }
+
+    #[test]
+    fn read_only_queries_do_not_repair_legacy_ids_or_create_backups() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_nullable_id_fixture_database(temp_dir.path());
+        let before = std::fs::read(&db_path).expect("read before");
+
+        let error = list_entries_read_only_for_database(&db_path, EntryFilters::default())
+            .expect_err("legacy IDs must be rejected by read-only query");
+        assert!(error.to_string().contains("read-only"));
+        assert_eq!(std::fs::read(&db_path).expect("read after"), before);
+
+        let backup_directory = db_path.parent().unwrap();
+        let backup_files = std::fs::read_dir(backup_directory)
+            .expect("backup dir")
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("capsule_backup_")
+            })
+            .count();
+        assert_eq!(backup_files, 0);
+    }
+
+    #[test]
+    fn read_only_queries_preserve_normal_projection_without_repair() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_fixture_database(temp_dir.path());
+        let response = list_entries_read_only_for_database(
+            &db_path,
+            EntryFilters {
+                limit: Some(10),
+                ..EntryFilters::default()
+            },
+        )
+        .expect("read-only entries");
+        assert_eq!(response.total, 3);
+        assert_eq!(response.entries[0].uuid, "entry_child");
     }
 
     #[test]

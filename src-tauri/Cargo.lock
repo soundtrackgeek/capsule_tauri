@@ -459,12 +459,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "capsule-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "url",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "capsule-tauri"
 version = "0.37.0"
 dependencies = [
  "anyhow",
  "apple-native-keyring-store",
  "base64 0.22.1",
+ "capsule-core",
  "chrono",
  "dotenvy",
  "image",

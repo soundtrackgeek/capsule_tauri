@@ -1,0 +1,21 @@
+[package]
+name = "capsule-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Headless shared journal and storage behavior for Capsule clients"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "native-tls-no-alpn"] }
+rusqlite = { version = "0.37", features = ["backup", "bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }

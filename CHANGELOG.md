@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.37.1 - 2026-09-14
+
+### Added
+
+- Extracted the database, backup, entries, location, and model behavior into a
+  headless `capsule-core` crate with explicit-path resolver diagnostics,
+  capability inspection, read-only query seams, and renderer-independent
+  capture/context contracts.
+
+### Changed
+
+- Kept desktop command and frontend model paths stable through core re-exports;
+  Explorer backup-folder launching now lives in a desktop-only adapter.
+
 ## 0.37.0 - 2026-08-28
 
 ### Added
