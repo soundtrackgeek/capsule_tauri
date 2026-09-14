@@ -22,6 +22,16 @@
   The default SQLite timeout counts requested sleep intervals and exceeded the
   capture budget on Windows; scoped handlers now stop at the live deadline.
 
+## 0.37.1-dev.8 - 2026-09-14
+
+### Added
+
+- Automatic external-journal refresh detection for visible Capsule views using
+  a persistent read-only SQLite connection and same-connection `data_version`,
+  including database/WAL replacement and unavailable-path recovery handling.
+- Focus/tray rechecks, modest polling and debounced model refreshes that retain
+  filters, ordering, selection, scroll position and unsaved composer drafts.
+
 ## 0.37.1-dev.7 - 2026-09-14
 
 ### Fixed

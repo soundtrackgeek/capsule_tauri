@@ -3,6 +3,7 @@ mod ai_config;
 mod ai_metadata;
 mod ai_providers;
 mod debug;
+mod external_changes;
 mod images;
 mod mood_sentiment;
 mod phase6;
@@ -48,7 +49,7 @@ use models::{
 use tauri::{
     menu::MenuBuilder,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager,
+    Emitter, Manager, State,
 };
 #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 use tauri_plugin_autostart::ManagerExt;
@@ -82,6 +83,16 @@ async fn get_database_status() -> Result<DatabaseStatus, String> {
     tauri::async_runtime::spawn_blocking(db::database_status)
         .await
         .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn check_external_changes(
+    state: State<'_, external_changes::ExternalChangeState>,
+) -> Result<external_changes::ExternalChangeStatus, String> {
+    let watcher = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || watcher.check_resolved())
+        .await
         .map_err(|error| error.to_string())
 }
 
@@ -976,6 +987,7 @@ pub fn run() {
     );
 
     builder
+        .manage(external_changes::ExternalChangeState::default())
         .setup(|app| {
             set_main_window_icon(app)?;
             setup_tray(app)?;
@@ -1028,6 +1040,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_database_status,
+            check_external_changes,
             list_backups,
             create_backup,
             preview_restore_backup,

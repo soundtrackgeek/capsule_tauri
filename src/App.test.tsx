@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import App from "./App";
+import * as backend from "./backend";
 import { getPathSettings, setPathSettings } from "./backend";
 
 const writerSettingsStorageKey = "capsule-tauri-writer-settings-v1";
@@ -58,6 +59,93 @@ describe("App Writer settings", () => {
       expect(totalWordsLabel.nextElementSibling).not.toHaveTextContent("Unknown");
     });
     expect(screen.queryByText("This year")).not.toBeInTheDocument();
+  });
+
+  test("refreshes an active composer without losing its unsaved draft", async () => {
+    const externalProbe = vi
+      .spyOn(backend, "checkExternalChanges")
+      .mockResolvedValueOnce({
+        changed: false,
+        available: true,
+        reopened: false,
+        databasePath: "fixture.db",
+        reason: null,
+      })
+      .mockResolvedValueOnce({
+        changed: true,
+        available: true,
+        reopened: false,
+        databasePath: "fixture.db",
+        reason: "data_version",
+      })
+      .mockResolvedValue({
+        changed: false,
+        available: true,
+        reopened: false,
+        databasePath: "fixture.db",
+        reason: null,
+      });
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+    render(<App />);
+
+    await waitFor(() => expect(externalProbe).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "New Entry" }));
+    const draft = "An unsaved draft must survive an external refresh.";
+    fireEvent.change(await screen.findByPlaceholderText("Write the entry"), {
+      target: { value: draft },
+    });
+
+    window.dispatchEvent(new Event("focus"));
+    await screen.findByText("Updated from an external journal change.", {}, { timeout: 5000 });
+    await waitFor(() => expect(scrollTo).toHaveBeenCalled());
+    expect(screen.getByPlaceholderText("Write the entry")).toHaveValue(draft);
+  });
+
+  test("preserves an active search filter and selection during external refresh", async () => {
+    const externalProbe = vi
+      .spyOn(backend, "checkExternalChanges")
+      .mockResolvedValueOnce({
+        changed: false,
+        available: true,
+        reopened: false,
+        databasePath: "fixture.db",
+        reason: null,
+      })
+      .mockResolvedValueOnce({
+        changed: true,
+        available: true,
+        reopened: false,
+        databasePath: "fixture.db",
+        reason: "data_version",
+      })
+      .mockResolvedValue({
+        changed: false,
+        available: true,
+        reopened: false,
+        databasePath: "fixture.db",
+        reason: null,
+      });
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+    render(<App />);
+
+    await waitFor(() => expect(externalProbe).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    const searchView = await screen.findByRole("region", { name: "Search" });
+    const query = within(searchView).getByPlaceholderText("keyword tag:work NOT tag:archive");
+    fireEvent.change(query, { target: { value: "Phase" } });
+    const selected = await within(searchView).findByRole("button", { name: /Phase 1 shape/ });
+    fireEvent.click(selected);
+    await within(searchView).findByRole("heading", { name: "Phase 1 shape", level: 3 });
+
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(externalProbe).toHaveBeenCalledTimes(2));
+    await screen.findByText("Updated from an external journal change.", {}, { timeout: 5000 });
+    await waitFor(() => expect(scrollTo).toHaveBeenCalled());
+
+    expect(query).toHaveValue("Phase");
+    expect(
+      within(searchView).getByRole("heading", { name: "Phase 1 shape", level: 3 }),
+    ).toBeInTheDocument();
   });
 
   test("shows the full random entry above the compact recent entries", async () => {

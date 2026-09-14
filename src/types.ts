@@ -29,6 +29,14 @@ export type DatabaseStatus = {
   warnings: string[];
 };
 
+export type ExternalChangeStatus = {
+  changed: boolean;
+  available: boolean;
+  reopened: boolean;
+  databasePath: string;
+  reason: string | null;
+};
+
 export type BackupInfo = {
   path: string;
   manifestPath: string | null;

@@ -68,7 +68,7 @@ export function EntryDetail({
 
   if (loading) {
     return (
-      <Wrapper className={panelClassName}>
+      <Wrapper className={panelClassName} data-external-scroll="entry-detail">
         <div className="skeleton skeleton-title" />
         <div className="skeleton skeleton-line" />
         <div className="skeleton skeleton-block" />
@@ -78,7 +78,7 @@ export function EntryDetail({
 
   if (!entry) {
     return (
-      <Wrapper className={emptyClassName}>
+      <Wrapper className={emptyClassName} data-external-scroll="entry-detail">
         <Search size={22} />
         <h3>No entry selected</h3>
         <p>Select an entry to inspect it.</p>
@@ -91,7 +91,7 @@ export function EntryDetail({
   const weatherTemperature = entry.location ? formatWeatherTemperature(entry.location) : null;
 
   return (
-    <Wrapper className={panelClassName}>
+    <Wrapper className={panelClassName} data-external-scroll="entry-detail">
       <div className="entry-detail-heading">
         <p className="eyebrow">{formatDateTime(entry.createdAt)}</p>
         <h3>{entry.title || entry.textPlain.slice(0, 72) || "Untitled entry"}</h3>
