@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.37.1-dev.5 - 2026-09-14
+
+### Fixed
+
+- Consuming an abandoned context preparation clears fetched-but-unsaved
+  location and weather values, including expiry before lock acquisition.
+
 ## 0.37.1-dev.4 - 2026-09-14
 
 ### Added

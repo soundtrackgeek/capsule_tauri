@@ -22,7 +22,9 @@ implementations. `capture_report` owns a short mutation-lock phase; headless
 fresh verified-backup phase. Integrations that already own a backup/mutation
 guard can call `ContextService::prepare` before acquiring it and
 `persist_prepared` inside the short write phase; provider work never needs the
-guard. Provider work
+guard. `ContextPreparation::report` exposes provider candidates for inspection;
+`into_report` abandons persistence and clears unsaved candidates so the final
+report cannot claim they were attached. Provider work
 shares one deadline capped at eight seconds;
 offline, disabled, skipped, cancelled, malformed, and unavailable outcomes are
 reported independently for location and weather. Enrichment re-reads the

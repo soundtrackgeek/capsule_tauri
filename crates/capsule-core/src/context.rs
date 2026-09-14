@@ -443,7 +443,13 @@ impl ContextPreparation {
         self.persistable
     }
 
-    pub fn into_report(self) -> ContextReport {
+    /// Abandon persistence and consume the preparation as an honest final
+    /// report. Provider candidates are available through `report()` while
+    /// preparing, but must not look saved when a caller skips persistence.
+    pub fn into_report(mut self) -> ContextReport {
+        if self.persistable {
+            clear_unpersisted_context(&mut self.report, "context fields were not persisted");
+        }
         self.report
     }
 
@@ -2096,6 +2102,33 @@ mod tests {
                 r#"{"current":{"temperature_2m":12.3,"relative_humidity_2m":72,"weather_code":61,"wind_speed_10m":4.0,"is_day":1}}"#,
             ),
         ]
+    }
+
+    #[test]
+    fn abandoned_or_expired_preparation_never_reports_unpersisted_weather() {
+        for expire in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let db_path = fixture_database(directory.path(), "2026-09-14 11:59");
+            let clock = Arc::new(ManualClock::new(
+                Utc.with_ymd_and_hms(2026, 9, 14, 12, 0, 0).unwrap(),
+            ));
+            let http = Arc::new(FakeHttp::new(ip_weather_fixtures()));
+            let service = ContextService::new(dependencies(http, clock.clone()));
+            let request = ContextRequest::capture(&db_path, "entry_test", ContextPolicy::default());
+            let prepared = service.prepare(&request).unwrap();
+            assert!(prepared.is_persistable());
+            assert!(prepared.report().result.weather.is_some());
+            if expire {
+                clock.advance(Duration::from_secs(9));
+            }
+            let report = prepared.into_report();
+            assert!(report.result.location.is_none());
+            assert!(report.result.weather.is_none());
+            assert!(report.result.persisted_at.is_none());
+            assert_eq!(report.result.weather_status, ContextStatus::Unavailable);
+            let connection = crate::db::open_read_only_connection(&db_path).unwrap();
+            assert!(!location::table_exists(&connection, "plugin_entry_locations").unwrap());
+        }
     }
 
     #[test]

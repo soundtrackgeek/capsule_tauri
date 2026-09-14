@@ -220,13 +220,16 @@ impl JournalReader {
         } else {
             raw_uuid
         };
-        entries::list_entries_by_uuids_read_only_for_database(&self.db_path, &[lookup.clone()])
-            .and_then(|items| {
-                items
-                    .into_iter()
-                    .next()
-                    .ok_or_else(|| anyhow!("entry not found: {lookup}"))
-            })
+        entries::list_entries_by_uuids_read_only_for_database(
+            &self.db_path,
+            std::slice::from_ref(&lookup),
+        )
+        .and_then(|items| {
+            items
+                .into_iter()
+                .next()
+                .ok_or_else(|| anyhow!("entry not found: {lookup}"))
+        })
     }
 
     pub fn search(&self, query: impl Into<String>, options: ReadOptions) -> Result<SearchResponse> {
