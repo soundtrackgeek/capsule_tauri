@@ -133,6 +133,29 @@ impl std::error::Error for CaptureError {}
 
 pub type CaptureResult<T> = std::result::Result<T, CaptureError>;
 
+/// Normalize authored content using the same rules as the shared writer.
+/// This function performs no I/O. Serialize the returned structure before
+/// hashing it; concatenating fields with user-enterable delimiters is ambiguous.
+pub fn normalize_capture_content(
+    request: &CaptureRequest,
+) -> Result<crate::contracts::NormalizedCaptureContent> {
+    let mut normalized = entries::normalize_capture_request(request)?;
+    normalized.tags.sort();
+    Ok(crate::contracts::NormalizedCaptureContent {
+        schema_version: 1,
+        text: normalized.text,
+        text_plain: normalized.text_plain,
+        content_format: normalized.content_format,
+        title: normalized.title,
+        summary: normalized.summary,
+        mood: normalized.mood,
+        tags: normalized.tags,
+        starred: normalized.starred,
+        pinned: normalized.pinned,
+        continue_from_uuid: normalized.continue_from_uuid,
+    })
+}
+
 const CAPTURE_OPERATION_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Capture with a request whose database and backup policies are already
@@ -782,6 +805,51 @@ mod tests {
         let mut request = request;
         request.database_identity = Some(identity);
         (root, request)
+    }
+
+    #[test]
+    fn canonical_content_matches_shared_normalization_without_io_or_invocation_identity() {
+        let mut request = CaptureRequest::new(
+            "  body\r\n  next  ",
+            "first",
+            "entry_first",
+            "missing.db".into(),
+            FixedOffset::east_opt(3600)
+                .unwrap()
+                .with_ymd_and_hms(2026, 9, 14, 12, 0, 0)
+                .unwrap(),
+        );
+        request.title = Some("  title  ".into());
+        request.summary = Some("  ".into());
+        request.tags = vec![" ÅNGST ".into(), "work".into(), "ångst".into()];
+        let normalized = normalize_capture_content(&request).unwrap();
+        assert_eq!(normalized.text, "  body\n  next  ");
+        assert_eq!(normalized.text_plain, "body next");
+        assert_eq!(normalized.title.as_deref(), Some("title"));
+        assert!(normalized.summary.is_none());
+        assert_eq!(normalized.tags, ["work", "ångst"]);
+        request.created_at += chrono::Duration::days(2);
+        request.capture_id = "second".into();
+        request.reserved_uuid = "entry_second".into();
+        request.database_path = "another-missing.db".into();
+        request.tags.reverse();
+        assert_eq!(normalize_capture_content(&request).unwrap(), normalized);
+    }
+
+    #[test]
+    fn canonical_serialization_keeps_authored_delimiters_unambiguous() {
+        let (_root, mut first) = fixture();
+        first.title = Some("alpha\u{1f}beta".into());
+        first.summary = Some("gamma".into());
+        first.tags = vec!["a,b".into()];
+        let mut second = first.clone();
+        second.title = Some("alpha".into());
+        second.summary = Some("beta\u{1f}gamma".into());
+        second.tags = vec!["a".into(), "b".into()];
+        assert_ne!(
+            serde_json::to_vec(&normalize_capture_content(&first).unwrap()).unwrap(),
+            serde_json::to_vec(&normalize_capture_content(&second).unwrap()).unwrap()
+        );
     }
 
     #[test]

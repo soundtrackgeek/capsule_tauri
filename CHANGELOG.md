@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.37.1-dev.10 - 2026-09-14
+
+### Added
+
+- Pure canonical capture-content projection for client retry fingerprints,
+  sharing the writer's normalization while keeping database binding separate.
+
 ## 0.37.1-dev.9 - 2026-09-14
 
 ### Fixed

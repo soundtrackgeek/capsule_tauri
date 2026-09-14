@@ -8,6 +8,27 @@ use std::path::PathBuf;
 use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
 
+/// Canonical authored fields for client retry comparison. Identity, destination,
+/// backup policy and the invocation timestamp are deliberately separate: the
+/// client must validate its frozen database binding and replay the original
+/// CaptureRequest, never replace its reserved UUID or saved time.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NormalizedCaptureContent {
+    pub schema_version: u32,
+    pub text: String,
+    pub text_plain: String,
+    pub content_format: String,
+    pub title: Option<String>,
+    pub summary: Option<String>,
+    pub mood: Option<String>,
+    /// Trimmed, Unicode-lowercased, deduplicated and sorted comparison keys.
+    pub tags: Vec<String>,
+    pub starred: bool,
+    pub pinned: bool,
+    pub continue_from_uuid: Option<String>,
+}
+
 /// Explicit backup policy captured alongside a headless request.  A client
 /// that needs deterministic retries must not allow the core to consult mutable
 /// process settings after the request is created.

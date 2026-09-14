@@ -52,6 +52,12 @@ the existing UUID once, while changed content or a replaced database is
 reported explicitly. `CaptureRequest`, `CommitReceipt`, and context DTOs are
 renderer-independent seams for desktop and non-desktop clients.
 
+`normalize_capture_content(&request)` performs no I/O and returns a Serde/Eq
+projection using the writer's authored-content normalization. Clients can hash
+its serialized bytes for retry comparison without ambiguous delimiter joins.
+The projection excludes invocation timestamps and identity: clients must still
+validate the frozen database binding and replay the original request/UUID/time.
+
 Capture has one 15-second operation budget. The same deadline covers preflight,
 database and backup-directory lock acquisition, SQLite busy waits (including
 `BEGIN IMMEDIATE` and legacy ID repair), backup stepping/verification,

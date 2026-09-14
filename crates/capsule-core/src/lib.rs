@@ -23,8 +23,9 @@ pub use backup::{
 };
 pub use capture::{
     capture_entry, capture_entry_for_database, capture_entry_with_hooks,
-    capture_entry_with_hooks_for_database, reconcile_capture_for_database, CaptureError,
-    CaptureErrorCode, CaptureHookPoint, CaptureHooks, CaptureResult, CaptureStatus,
+    capture_entry_with_hooks_for_database, normalize_capture_content,
+    reconcile_capture_for_database, CaptureError, CaptureErrorCode, CaptureHookPoint, CaptureHooks,
+    CaptureResult, CaptureStatus,
 };
 pub use context::{
     capture_context, capture_context_with_dependencies, enrich_context,
@@ -36,7 +37,8 @@ pub use context::{
 };
 pub use contracts::{
     BackupPolicy, CaptureOutcome, CaptureRequest, CommitReceipt, ContextAttachment,
-    ContextLocation, ContextPolicy, ContextResult, ContextStatus, WeatherObservation,
+    ContextLocation, ContextPolicy, ContextResult, ContextStatus, NormalizedCaptureContent,
+    WeatherObservation,
 };
 pub use db::{
     capability_report_for_database, inspect_capabilities, resolve_capsule,
