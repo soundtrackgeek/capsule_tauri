@@ -160,42 +160,136 @@ export type ScrollPosition = {
   y: number;
   containers: Array<{
     element: HTMLElement;
+    marker: string | null;
+    occurrence: number;
     left: number;
     top: number;
   }>;
 };
 
-export function captureScrollPosition(): ScrollPosition {
+export type ScrollIntentTracker = {
+  hasUserIntent: () => boolean;
+  dispose: () => void;
+};
+
+const scrollIntentKeys = new Set([
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "End",
+  "Home",
+  "PageDown",
+  "PageUp",
+  " ",
+]);
+
+/** Track user input that should win over a layout-driven scroll reset. */
+export function trackScrollIntent(): ScrollIntentTracker {
+  let userIntent = false;
+  let disposed = false;
+  const captureOptions = { capture: true, passive: true } as const;
+  const markIntent = () => {
+    userIntent = true;
+  };
+  const markKeyIntent = (event: KeyboardEvent) => {
+    if (scrollIntentKeys.has(event.key)) {
+      markIntent();
+    }
+  };
+  const markTrustedScroll = (event: Event) => {
+    if (event.isTrusted) {
+      markIntent();
+    }
+  };
+
+  for (const eventName of ["pointerdown", "touchmove", "touchstart", "wheel"] as const) {
+    window.addEventListener(eventName, markIntent, captureOptions);
+  }
+  window.addEventListener("keydown", markKeyIntent, captureOptions);
+  window.addEventListener("scroll", markTrustedScroll, captureOptions);
+  if (typeof document !== "undefined") {
+    document.addEventListener("scroll", markTrustedScroll, captureOptions);
+  }
+
   return {
-    x: typeof window === "undefined" ? 0 : window.scrollX,
-    y: typeof window === "undefined" ? 0 : window.scrollY,
-    containers:
-      typeof document === "undefined"
-        ? []
-        : Array.from(
-            document.querySelectorAll<HTMLElement>("[data-external-scroll]"),
-            (element) => ({
-              element,
-              left: element.scrollLeft,
-              top: element.scrollTop,
-            }),
-          ),
+    hasUserIntent: () => userIntent,
+    dispose: () => {
+      if (disposed) {
+        return;
+      }
+      disposed = true;
+      for (const eventName of ["pointerdown", "touchmove", "touchstart", "wheel"] as const) {
+        window.removeEventListener(eventName, markIntent, captureOptions);
+      }
+      window.removeEventListener("keydown", markKeyIntent, captureOptions);
+      window.removeEventListener("scroll", markTrustedScroll, captureOptions);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("scroll", markTrustedScroll, captureOptions);
+      }
+    },
   };
 }
 
-export function restoreScrollPosition(position: ScrollPosition) {
+export function captureScrollPosition(): ScrollPosition {
+  const elements =
+    typeof document === "undefined"
+      ? []
+      : Array.from(document.querySelectorAll<HTMLElement>("[data-external-scroll]"));
+  return {
+    x: typeof window === "undefined" ? 0 : window.scrollX,
+    y: typeof window === "undefined" ? 0 : window.scrollY,
+    containers: elements.map((element, index) => {
+      const marker = element.getAttribute("data-external-scroll");
+      const occurrence = elements
+        .slice(0, index)
+        .filter((candidate) => candidate.getAttribute("data-external-scroll") === marker)
+        .length;
+      return {
+        element,
+        marker,
+        occurrence,
+        left: element.scrollLeft,
+        top: element.scrollTop,
+      };
+    }),
+  };
+}
+
+function resolveScrollContainer(
+  container: ScrollPosition["containers"][number],
+): HTMLElement | null {
+  if (typeof document === "undefined") {
+    return null;
+  }
+  if (document.contains(container.element)) {
+    return container.element;
+  }
+  if (container.marker === null) {
+    return null;
+  }
+  const matches = Array.from(document.querySelectorAll<HTMLElement>("[data-external-scroll]"))
+    .filter((element) => element.getAttribute("data-external-scroll") === container.marker);
+  return matches[container.occurrence] ?? null;
+}
+
+export function restoreScrollPosition(
+  position: ScrollPosition,
+  intentTracker?: ScrollIntentTracker,
+) {
   if (typeof window === "undefined") {
     return;
   }
 
-  // Do not jump over a newer user scroll/navigation that happened while the
-  // async refresh was in flight. Only restore a position that is unchanged
-  // since capture.
-  if (
+  // A refresh can reset an existing layout to zero or remount a marked
+  // container. Restore those resets, but keep a newer user offset or input.
+  const hasUserIntent = intentTracker?.hasUserIntent() ?? false;
+  const shouldRestoreWindow =
+    !hasUserIntent &&
     typeof window.scrollTo === "function" &&
-    window.scrollX === position.x &&
-    window.scrollY === position.y
-  ) {
+    (window.scrollX === position.x || window.scrollX === 0) &&
+    (window.scrollY === position.y || window.scrollY === 0);
+  if (shouldRestoreWindow) {
     try {
       window.scrollTo(position.x, position.y);
     } catch {
@@ -205,12 +299,19 @@ export function restoreScrollPosition(position: ScrollPosition) {
   }
 
   for (const container of position.containers) {
-    if (
-      container.element.scrollLeft === container.left &&
-      container.element.scrollTop === container.top
-    ) {
-      container.element.scrollLeft = container.left;
-      container.element.scrollTop = container.top;
+    if (hasUserIntent) {
+      break;
+    }
+    const element = resolveScrollContainer(container);
+    if (!element) {
+      continue;
+    }
+    const shouldRestore =
+      (element.scrollLeft === container.left || element.scrollLeft === 0) &&
+      (element.scrollTop === container.top || element.scrollTop === 0);
+    if (shouldRestore) {
+      element.scrollLeft = container.left;
+      element.scrollTop = container.top;
     }
   }
 }

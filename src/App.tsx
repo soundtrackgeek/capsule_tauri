@@ -186,8 +186,10 @@ import { parseChangelog } from "./lib/changelog";
 import {
   captureScrollPosition,
   restoreScrollPosition,
+  trackScrollIntent,
   useExternalChanges,
 } from "./lib/externalChanges";
+import type { ScrollIntentTracker } from "./lib/externalChanges";
 import { countWords, formatBytes, formatDateTime, formatWordCount } from "./lib/format";
 import type {
   AICloudProvider,
@@ -845,6 +847,8 @@ function App() {
     ((change: ExternalChangeStatus) => Promise<void>) | null
   >(null);
   const externalRefreshFrameRef = useRef<number | null>(null);
+  const externalRefreshScrollIntentRef = useRef<ScrollIntentTracker | null>(null);
+  const externalRefreshMountedRef = useRef(true);
   const entryListRequestIdRef = useRef(0);
   const searchRequestIdRef = useRef(0);
   const selectedEntryRef = useRef<Entry | null>(null);
@@ -1438,7 +1442,14 @@ function App() {
         return runningRefresh;
       }
 
+      if (externalRefreshFrameRef.current !== null) {
+        window.cancelAnimationFrame(externalRefreshFrameRef.current);
+        externalRefreshFrameRef.current = null;
+      }
       const scrollPosition = captureScrollPosition();
+      const scrollIntent = trackScrollIntent();
+      externalRefreshScrollIntentRef.current?.dispose();
+      externalRefreshScrollIntentRef.current = scrollIntent;
       const selectedUuid = selectedEntry?.uuid ?? null;
       const editingUuid = editingEntry?.uuid ?? null;
       const operation = (async () => {
@@ -1530,25 +1541,43 @@ function App() {
             );
           }
         } finally {
-          // React may commit the refreshed list on the next animation frame.
-          // Restore after that commit, but only when the user has not scrolled
-          // or navigated in the meantime (the helper performs that guard).
-          if (typeof window.requestAnimationFrame === "function") {
-            if (externalRefreshFrameRef.current !== null) {
-              window.cancelAnimationFrame(externalRefreshFrameRef.current);
+          if (!externalRefreshMountedRef.current) {
+            scrollIntent.dispose();
+            if (externalRefreshScrollIntentRef.current === scrollIntent) {
+              externalRefreshScrollIntentRef.current = null;
             }
-            externalRefreshFrameRef.current = window.requestAnimationFrame(() => {
-              externalRefreshFrameRef.current = null;
-              restoreScrollPosition(scrollPosition);
-            });
+            externalRefreshInFlightRef.current = null;
           } else {
-            restoreScrollPosition(scrollPosition);
-          }
-          externalRefreshInFlightRef.current = null;
-          const pendingChange = externalRefreshPendingRef.current;
-          externalRefreshPendingRef.current = null;
-          if (pendingChange) {
-            void externalRefreshCallbackRef.current?.(pendingChange);
+            // React may commit the refreshed list on the next animation frame.
+            // Restore after that commit, but only when the user has not scrolled
+            // or navigated in the meantime (the helper performs that guard).
+            const restore = () => {
+              try {
+                restoreScrollPosition(scrollPosition, scrollIntent);
+              } finally {
+                scrollIntent.dispose();
+                if (externalRefreshScrollIntentRef.current === scrollIntent) {
+                  externalRefreshScrollIntentRef.current = null;
+                }
+              }
+            };
+            if (typeof window.requestAnimationFrame === "function") {
+              if (externalRefreshFrameRef.current !== null) {
+                window.cancelAnimationFrame(externalRefreshFrameRef.current);
+              }
+              externalRefreshFrameRef.current = window.requestAnimationFrame(() => {
+                externalRefreshFrameRef.current = null;
+                restore();
+              });
+            } else {
+              restore();
+            }
+            externalRefreshInFlightRef.current = null;
+            const pendingChange = externalRefreshPendingRef.current;
+            externalRefreshPendingRef.current = null;
+            if (pendingChange) {
+              void externalRefreshCallbackRef.current?.(pendingChange);
+            }
           }
         }
       })();
@@ -1581,15 +1610,18 @@ function App() {
     onChange: refreshForExternalChange,
   });
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    externalRefreshMountedRef.current = true;
+    return () => {
+      externalRefreshMountedRef.current = false;
       if (externalRefreshFrameRef.current !== null) {
         window.cancelAnimationFrame(externalRefreshFrameRef.current);
         externalRefreshFrameRef.current = null;
       }
-    },
-    [],
-  );
+      externalRefreshScrollIntentRef.current?.dispose();
+      externalRefreshScrollIntentRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     void refresh();
