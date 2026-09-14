@@ -6,9 +6,11 @@
 
 pub mod backup;
 pub mod context;
+pub mod capture;
 pub mod contracts;
 pub mod db;
 pub mod entries;
+pub mod identity;
 pub mod location;
 pub mod models;
 pub mod providers;
@@ -21,9 +23,18 @@ pub use context::{
     MemoryContextCache, NeverCancel, NoopContextCache, ReqwestHttpClient, SystemClock,
     WeatherCacheKey,
 };
+pub use backup::{
+    with_database_backup_for_database_using_policy_with_timeout, with_mutation_lock_for_database,
+    with_mutation_lock_for_database_with_timeout,
+};
+pub use capture::{
+    capture_entry, capture_entry_for_database, capture_entry_with_hooks,
+    capture_entry_with_hooks_for_database, reconcile_capture_for_database, CaptureError,
+    CaptureErrorCode, CaptureHookPoint, CaptureHooks, CaptureResult, CaptureStatus,
+};
 pub use contracts::{
-    CaptureOutcome, CaptureRequest, CommitReceipt, ContextAttachment, ContextLocation,
-    ContextPolicy, ContextResult, ContextStatus, WeatherObservation,
+    BackupPolicy, CaptureOutcome, CaptureRequest, CommitReceipt, ContextAttachment,
+    ContextLocation, ContextPolicy, ContextResult, ContextStatus, WeatherObservation,
 };
 pub use db::{
     capability_report_for_database, inspect_capabilities, resolve_capsule,

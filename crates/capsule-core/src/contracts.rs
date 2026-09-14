@@ -8,6 +8,25 @@ use std::path::PathBuf;
 use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize};
 
+/// Explicit backup policy captured alongside a headless request.  A client
+/// that needs deterministic retries must not allow the core to consult mutable
+/// process settings after the request is created.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupPolicy {
+    pub directory: PathBuf,
+    pub retention_count: usize,
+}
+
+impl BackupPolicy {
+    pub fn new(directory: impl Into<PathBuf>, retention_count: usize) -> Self {
+        Self {
+            directory: directory.into(),
+            retention_count,
+        }
+    }
+}
+
 /// A normalized request handed to the shared capture implementation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +49,11 @@ pub struct CaptureRequest {
     /// re-resolved during commit or retry.
     pub database_path: PathBuf,
     pub database_identity: Option<crate::db::FileIdentity>,
+    /// Explicit backup destination and retention snapshot.  Older serialized
+    /// requests may omit this field, but capture rejects them rather than
+    /// silently consulting current process settings.
+    #[serde(default)]
+    pub backup_policy: Option<BackupPolicy>,
 }
 
 impl CaptureRequest {
@@ -55,7 +79,13 @@ impl CaptureRequest {
             capture_id: capture_id.into(),
             database_path,
             database_identity: None,
+            backup_policy: None,
         }
+    }
+
+    pub fn with_backup_policy(mut self, policy: BackupPolicy) -> Self {
+        self.backup_policy = Some(policy);
+        self
     }
 }
 
@@ -66,7 +96,9 @@ pub struct CommitReceipt {
     pub uuid: String,
     pub capture_id: String,
     pub display_number: Option<i64>,
-    pub saved_at: DateTime<Utc>,
+    /// Actual commit observation when this process made the commit.  A
+    /// read-only reconciliation of an older row cannot invent that instant.
+    pub saved_at: Option<DateTime<Utc>>,
     pub backup_path: Option<PathBuf>,
     pub backup_operation: Option<String>,
     pub committed: bool,
@@ -82,7 +114,7 @@ impl CommitReceipt {
             uuid: uuid.into(),
             capture_id: capture_id.into(),
             display_number: None,
-            saved_at,
+            saved_at: Some(saved_at),
             backup_path: None,
             backup_operation: None,
             committed: true,

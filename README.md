@@ -12,7 +12,10 @@ explicit capability-gated AI/sync surfaces:
 - A headless `capsule-core` crate containing the shared database, backup,
   entries, location, and model behavior. It exposes explicit-path resolution,
   read-only schema capability diagnostics, and non-Tauri capture/context DTOs;
-  desktop-only shell actions remain in the Tauri adapter.
+  desktop-only shell actions remain in the Tauri adapter. Durable capture uses
+  caller-reserved UUIDs, frozen database identity and explicit backup policy,
+  with verified atomic snapshots, bounded cross-process coordination, and
+  read-only reconciliation for safe retries.
 - Native window restoration for the last size, position, maximized, and
   fullscreen state used before closing the app, while every fresh launch opens
   the main window even if the previous session ended from the tray.

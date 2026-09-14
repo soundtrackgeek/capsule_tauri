@@ -16,6 +16,23 @@
   database identities, prevented deleted location rows from being resurrected,
   and avoided attaching weather to coordinates changed during provider work.
 
+## 0.37.1-dev.2 - 2026-09-14
+
+### Added
+
+- Added headless durable capture with reserved UUIDs, frozen database identity,
+  explicit backup policy, normalized retry reconciliation, and structured
+  commit outcomes.
+- Added atomic verified backup publication, bounded cross-process mutation and
+  shared-directory coordination, and retention-safe backup reservations.
+- Added deadline-aware lock and explicit-policy backup helpers for context
+  workers with bounded persistence budgets.
+
+### Changed
+
+- Shared entry mutations now allocate IDs and update tags, continuations, FTS,
+  and resequencing within immediate transactions before returning receipts.
+
 ## 0.37.1 - 2026-09-14
 
 ### Added
