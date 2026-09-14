@@ -45,6 +45,7 @@ import type {
   CoverWallResponse,
   DashboardBestOf,
   DatabaseStatus,
+  ExternalChangeStatus,
   DebugBundleResponse,
   DebugDiagnosticsResponse,
   DebugLogEntry,
@@ -825,6 +826,27 @@ export async function getDatabaseStatus(): Promise<DatabaseStatus> {
 
     await pause(150);
     return mockStatus;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+}
+
+export async function checkExternalChanges(): Promise<ExternalChangeStatus> {
+  try {
+    if (runningInTauri()) {
+      return await invoke<ExternalChangeStatus>("check_external_changes");
+    }
+
+    // Browser-only development uses a static in-memory fixture.  Keep the
+    // shape identical to the native response so the automatic refresh hook
+    // can be exercised without starting a local daemon or touching disk.
+    return {
+      changed: false,
+      available: mockStatus.readable,
+      reopened: false,
+      databasePath: mockStatus.dbPath,
+      reason: null,
+    };
   } catch (error) {
     throw normalizeError(error);
   }

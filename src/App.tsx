@@ -183,6 +183,11 @@ import {
   calendarSentimentClass,
 } from "./lib/calendar";
 import { parseChangelog } from "./lib/changelog";
+import {
+  captureScrollPosition,
+  restoreScrollPosition,
+  useExternalChanges,
+} from "./lib/externalChanges";
 import { countWords, formatBytes, formatDateTime, formatWordCount } from "./lib/format";
 import type {
   AICloudProvider,
@@ -206,6 +211,7 @@ import type {
   CoverWallResponse,
   DashboardBestOf,
   DatabaseStatus,
+  ExternalChangeStatus,
   DebugBundleResponse,
   DebugCheck,
   DebugDiagnosticsResponse,
@@ -264,6 +270,23 @@ type ActiveView =
   | "about";
 
 type TrayOpenView = Extract<ActiveView, "writer" | "settings">;
+
+const externalRefreshViews = new Set<ActiveView>([
+  "dashboard",
+  "entries",
+  "threads",
+  "search",
+  "ai",
+  "sync",
+  "images",
+  "analytics",
+  "wrapped",
+  "calendar",
+  "covers",
+  "gamification",
+  "composer",
+  "writer",
+]);
 
 type EntryFilterForm = {
   text: string;
@@ -674,6 +697,11 @@ function fileNameFromPath(path: string) {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
+function isEntryMissingError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /(?:entry|record).*not found|no entry/i.test(message);
+}
+
 function isTauriRuntime() {
   return (
     typeof window !== "undefined" &&
@@ -810,6 +838,19 @@ function App() {
   const autoSyncRunningRef = useRef(false);
   const coverEntryLoadIdRef = useRef(0);
   const updateCheckRunningRef = useRef(false);
+  const selectedDetailLoadIdRef = useRef(0);
+  const externalRefreshInFlightRef = useRef<Promise<void> | null>(null);
+  const externalRefreshPendingRef = useRef<ExternalChangeStatus | null>(null);
+  const externalRefreshCallbackRef = useRef<
+    ((change: ExternalChangeStatus) => Promise<void>) | null
+  >(null);
+  const externalRefreshFrameRef = useRef<number | null>(null);
+  const entryListRequestIdRef = useRef(0);
+  const searchRequestIdRef = useRef(0);
+  const selectedEntryRef = useRef<Entry | null>(null);
+  const editingEntryRef = useRef<Entry | null>(null);
+  selectedEntryRef.current = selectedEntry;
+  editingEntryRef.current = editingEntry;
 
   const statusTone = useMemo(() => {
     if (!status || !status.dbExists || !status.readable) {
@@ -930,11 +971,14 @@ function App() {
     [selectedThreadRoot, threadResponse],
   );
 
-  const loadEntryList = useCallback(async () => {
+  const loadEntryList = useCallback(async (preserveSelectionUuid?: string | null) => {
+    const requestId = entryListRequestIdRef.current + 1;
+    entryListRequestIdRef.current = requestId;
     if (!status?.readable) {
       setEntryResponse(null);
       setSelectedEntry(null);
       setEntryListImages({});
+      setEntriesLoading(false);
       return;
     }
 
@@ -946,32 +990,53 @@ function App() {
       try {
         imageMap = await loadEntryImageMap(response.entries);
       } catch (imageError) {
-        setError(
-          imageError instanceof Error
-            ? imageError.message
-            : "Unable to load entry image thumbnails",
-        );
+        if (entryListRequestIdRef.current === requestId) {
+          setError(
+            imageError instanceof Error
+              ? imageError.message
+              : "Unable to load entry image thumbnails",
+          );
+        }
+      }
+      if (entryListRequestIdRef.current !== requestId) {
+        return;
       }
       setEntryResponse(response);
       setEntryListImages(imageMap);
       setSelectedEntry((current) => {
+        if (preserveSelectionUuid !== undefined) {
+          if (current && current.uuid !== preserveSelectionUuid) {
+            return current;
+          }
+          if (current) {
+            return response.entries.find((entry) => entry.uuid === current.uuid) ?? current;
+          }
+          return response.entries[0] ?? null;
+        }
         if (!current) {
           return response.entries[0] ?? null;
         }
         return response.entries.find((entry) => entry.uuid === current.uuid) ?? response.entries[0] ?? null;
       });
     } catch (listError) {
-      setEntryListImages({});
-      setError(listError instanceof Error ? listError.message : "Unable to load entries");
+      if (entryListRequestIdRef.current === requestId) {
+        setEntryListImages({});
+        setError(listError instanceof Error ? listError.message : "Unable to load entries");
+      }
     } finally {
-      setEntriesLoading(false);
+      if (entryListRequestIdRef.current === requestId) {
+        setEntriesLoading(false);
+      }
     }
   }, [builtEntryFilters, status?.readable]);
 
-  const loadSearchResults = useCallback(async () => {
+  const loadSearchResults = useCallback(async (preserveSelectionUuid?: string | null) => {
+    const requestId = searchRequestIdRef.current + 1;
+    searchRequestIdRef.current = requestId;
     if (!status?.readable) {
       setSearchResponse(null);
       setSearchResultImages({});
+      setSearchLoading(false);
       return;
     }
 
@@ -983,25 +1048,43 @@ function App() {
       try {
         imageMap = await loadEntryImageMap(response.entries);
       } catch (imageError) {
-        setError(
-          imageError instanceof Error
-            ? imageError.message
-            : "Unable to load search image thumbnails",
-        );
+        if (searchRequestIdRef.current === requestId) {
+          setError(
+            imageError instanceof Error
+              ? imageError.message
+              : "Unable to load search image thumbnails",
+          );
+        }
+      }
+      if (searchRequestIdRef.current !== requestId) {
+        return;
       }
       setSearchResponse(response);
       setSearchResultImages(imageMap);
       setSelectedEntry((current) => {
+        if (preserveSelectionUuid !== undefined) {
+          if (current && current.uuid !== preserveSelectionUuid) {
+            return current;
+          }
+          if (current) {
+            return response.entries.find((entry) => entry.uuid === current.uuid) ?? current;
+          }
+          return response.entries[0] ?? null;
+        }
         if (!current) {
           return response.entries[0] ?? null;
         }
         return response.entries.find((entry) => entry.uuid === current.uuid) ?? response.entries[0] ?? null;
       });
     } catch (searchError) {
-      setSearchResultImages({});
-      setError(searchError instanceof Error ? searchError.message : "Unable to search entries");
+      if (searchRequestIdRef.current === requestId) {
+        setSearchResultImages({});
+        setError(searchError instanceof Error ? searchError.message : "Unable to search entries");
+      }
     } finally {
-      setSearchLoading(false);
+      if (searchRequestIdRef.current === requestId) {
+        setSearchLoading(false);
+      }
     }
   }, [builtSearchRequest, status?.readable]);
 
@@ -1347,6 +1430,167 @@ function App() {
     }
   }, []);
 
+  const refreshForExternalChange = useCallback(
+    async (change: ExternalChangeStatus) => {
+      const runningRefresh = externalRefreshInFlightRef.current;
+      if (runningRefresh) {
+        externalRefreshPendingRef.current = change;
+        return runningRefresh;
+      }
+
+      const scrollPosition = captureScrollPosition();
+      const selectedUuid = selectedEntry?.uuid ?? null;
+      const editingUuid = editingEntry?.uuid ?? null;
+      const operation = (async () => {
+        try {
+          // `refresh` updates status/dashboard/path projections but does not
+          // touch filters, ordering, selection, composer drafts, or scroll.
+          // The active view is then re-queried with its existing request.
+          await refresh();
+          setNotice(
+            change.available
+              ? "Updated from an external journal change."
+              : "External journal change detected; the database is unavailable.",
+          );
+          if (activeView === "entries") {
+            await loadEntryList(selectedUuid);
+          } else if (activeView === "search") {
+            await loadSearchResults(selectedUuid);
+          } else if (activeView === "threads") {
+            await loadThreads();
+          } else if (activeView === "images") {
+            await loadImageEntries();
+          } else if (activeView === "ai") {
+            await loadAiOverview();
+          } else if (activeView === "sync") {
+            await loadSyncOverview();
+          } else if (activeView === "analytics") {
+            await loadAnalytics();
+          } else if (activeView === "wrapped") {
+            await loadWrapped();
+          } else if (activeView === "calendar") {
+            await loadWritingCalendar();
+          } else if (activeView === "covers") {
+            await loadCoverWall();
+          } else if (activeView === "gamification") {
+            await loadGamificationOverview();
+          }
+
+          // A user may select or begin editing another entry while the list
+          // refresh is in flight. Only fetch identities that are still active;
+          // never invalidate a newer user-triggered detail request.
+          const detailUuids = [
+            selectedUuid && selectedEntryRef.current?.uuid === selectedUuid ? selectedUuid : null,
+            editingUuid && editingEntryRef.current?.uuid === editingUuid ? editingUuid : null,
+          ].filter(
+            (uuid, index, values): uuid is string =>
+              Boolean(uuid) && values.indexOf(uuid) === index,
+          );
+          if (detailUuids.length > 0) {
+            await Promise.all(
+              detailUuids.map(async (uuid) => {
+                try {
+                  const detail = await getEntry(uuid);
+                  setSelectedEntry((current) =>
+                    current?.uuid === uuid ? detail : current,
+                  );
+                  setSelectedCoverEntry((current) =>
+                    current?.uuid === uuid ? detail : current,
+                  );
+                  setEditingEntry((current) =>
+                    current?.uuid === uuid ? detail : current,
+                  );
+                } catch (error) {
+                  // Only a confirmed not-found response means deletion. A
+                  // busy/read error leaves selection and the editor draft for
+                  // the next probe instead of silently changing an edit into a
+                  // create operation.
+                  if (isEntryMissingError(error)) {
+                    setSelectedEntry((current) =>
+                      current?.uuid === uuid ? null : current,
+                    );
+                    setSelectedCoverEntry((current) =>
+                      current?.uuid === uuid ? null : current,
+                    );
+                    setEditingEntry((current) =>
+                      current?.uuid === uuid ? null : current,
+                    );
+                    if (
+                      selectedEntryRef.current?.uuid === uuid ||
+                      editingEntryRef.current?.uuid === uuid
+                    ) {
+                      setEntryHistory(null);
+                    }
+                    if (editingUuid === uuid && editingEntryRef.current?.uuid === uuid) {
+                      setNotice("The edited entry was removed externally. Your draft is preserved.");
+                    }
+                  }
+                }
+              }),
+            );
+          }
+        } finally {
+          // React may commit the refreshed list on the next animation frame.
+          // Restore after that commit, but only when the user has not scrolled
+          // or navigated in the meantime (the helper performs that guard).
+          if (typeof window.requestAnimationFrame === "function") {
+            if (externalRefreshFrameRef.current !== null) {
+              window.cancelAnimationFrame(externalRefreshFrameRef.current);
+            }
+            externalRefreshFrameRef.current = window.requestAnimationFrame(() => {
+              externalRefreshFrameRef.current = null;
+              restoreScrollPosition(scrollPosition);
+            });
+          } else {
+            restoreScrollPosition(scrollPosition);
+          }
+          externalRefreshInFlightRef.current = null;
+          const pendingChange = externalRefreshPendingRef.current;
+          externalRefreshPendingRef.current = null;
+          if (pendingChange) {
+            void externalRefreshCallbackRef.current?.(pendingChange);
+          }
+        }
+      })();
+      externalRefreshInFlightRef.current = operation;
+      return operation;
+    },
+    [
+      activeView,
+      editingEntry?.uuid,
+      loadAiOverview,
+      loadAnalytics,
+      loadCoverWall,
+      loadEntryList,
+      loadGamificationOverview,
+      loadImageEntries,
+      loadSearchResults,
+      loadSyncOverview,
+      loadThreads,
+      loadWrapped,
+      loadWritingCalendar,
+      refresh,
+      selectedEntry?.uuid,
+    ],
+  );
+
+  externalRefreshCallbackRef.current = refreshForExternalChange;
+
+  useExternalChanges({
+    enabled: externalRefreshViews.has(activeView),
+    onChange: refreshForExternalChange,
+  });
+
+  useEffect(
+    () => () => {
+      if (externalRefreshFrameRef.current !== null) {
+        window.cancelAnimationFrame(externalRefreshFrameRef.current);
+        externalRefreshFrameRef.current = null;
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     void refresh();
     void loadAiConfiguration();
@@ -1469,6 +1713,15 @@ function App() {
   useEffect(() => {
     setWriterSettings((settings) => applyWriterThemeDefaults(settings, uiSettings.theme));
   }, [uiSettings.theme]);
+
+  useEffect(() => {
+    if (activeView !== "entries") {
+      entryListRequestIdRef.current += 1;
+    }
+    if (activeView !== "search") {
+      searchRequestIdRef.current += 1;
+    }
+  }, [activeView]);
 
   useEffect(() => {
     if (activeView === "entries") {
@@ -1986,17 +2239,27 @@ function App() {
   }, []);
 
   const handleSelectEntry = useCallback(async (entry: Entry) => {
+    const detailLoadId = selectedDetailLoadIdRef.current + 1;
+    selectedDetailLoadIdRef.current = detailLoadId;
     setSelectedEntry(entry);
     setDetailLoading(true);
     setError(null);
 
     try {
       const detail = await getEntry(entry.uuid);
-      setSelectedEntry(detail);
+      if (selectedDetailLoadIdRef.current === detailLoadId) {
+        setSelectedEntry((current) =>
+          current?.uuid === entry.uuid ? detail : current,
+        );
+      }
     } catch (detailError) {
-      setError(detailError instanceof Error ? detailError.message : "Unable to open entry");
+      if (selectedDetailLoadIdRef.current === detailLoadId) {
+        setError(detailError instanceof Error ? detailError.message : "Unable to open entry");
+      }
     } finally {
-      setDetailLoading(false);
+      if (selectedDetailLoadIdRef.current === detailLoadId) {
+        setDetailLoading(false);
+      }
     }
   }, []);
 
@@ -2356,6 +2619,13 @@ function App() {
   const handleSaveEntry = useCallback(async () => {
     if (!composerDraft.text.trim()) {
       setError("Entry text is required.");
+      return;
+    }
+
+    if (composerMode === "edit" && !editingEntry) {
+      setError(
+        "The entry being edited no longer exists. Choose New Entry to save this draft as a new capsule.",
+      );
       return;
     }
 
@@ -3708,7 +3978,7 @@ function EntriesView({
         </button>
       </aside>
 
-      <div className="entry-list-panel">
+      <div className="entry-list-panel" data-external-scroll="entries">
         <div className="section-heading">
           <div>
             <p className="eyebrow">Browse</p>
@@ -3975,7 +4245,7 @@ function SearchView({
         </button>
       </aside>
 
-      <div className="entry-list-panel">
+      <div className="entry-list-panel" data-external-scroll="search">
         <div className="section-heading">
           <div>
             <p className="eyebrow">Results</p>
@@ -4137,7 +4407,7 @@ function ImagesView({
           <FileImage size={18} />
           <h3>Image Entries</h3>
         </div>
-        <div className="image-entry-list">
+        <div className="image-entry-list" data-external-scroll="images">
           {loading && <SkeletonList compact />}
           {!loading && entries.length === 0 && (
             <div className="empty-state">No image attachments found.</div>
@@ -4711,7 +4981,7 @@ function CoverWallView({
         )}
       </div>
 
-      <aside className="detail-panel cover-detail-panel">
+      <aside className="detail-panel cover-detail-panel" data-external-scroll="cover-detail">
         {selectedCover ? (
           <>
             <div className="entry-detail-heading">
@@ -4868,7 +5138,7 @@ function ThreadsView({
         </div>
       </div>
 
-      <aside className="thread-detail-panel">
+      <aside className="thread-detail-panel" data-external-scroll="thread-detail">
         {!selectedThread ? (
           <div className="detail-panel--empty">
             <GitBranch size={22} />
