@@ -59,6 +59,12 @@ publication, and commit preparation; there are no stacked per-stage waits.
 CPU work and filesystem I/O consume that budget too, so a large or slow backup
 can report `database_busy` once the deadline expires.
 
+Timed SQLite operations use a scoped monotonic busy handler because SQLite's
+default timeout counts requested sleep intervals rather than elapsed wall time.
+The callback owns no connection state and is unregistered before its boxed
+deadline is freed. Contention can still succeed when the other writer releases
+its lock before the deadline; it is not converted to an immediate refusal.
+
 Context or other deadline-bound workers can use
 `with_mutation_lock_for_database_with_timeout` or
 `with_database_backup_for_database_using_policy_with_timeout` to bound lock

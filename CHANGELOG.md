@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.37.1-dev.9 - 2026-09-14
+
+### Fixed
+
+- Enforce capture/context SQLite contention against elapsed monotonic time.
+  The default SQLite timeout counts requested sleep intervals and exceeded the
+  capture budget on Windows; scoped handlers now stop at the live deadline.
+
 ## 0.37.1-dev.7 - 2026-09-14
 
 ### Fixed

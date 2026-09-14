@@ -787,10 +787,13 @@ fn create_entry_commit_with_timeout(
     }
 
     let deadline = timeout.and_then(|timeout| Instant::now().checked_add(timeout));
-    let mut connection = match timeout {
+    let connection = match timeout {
         Some(timeout) => db::open_read_write_connection_with_timeout(db_path, timeout)?,
         None => db::open_read_write_connection(db_path)?,
     };
+    let _busy_guard = deadline
+        .map(|value| db::SqliteDeadline::install(&connection, value))
+        .transpose()?;
     ensure_entry_deadline(deadline, "entry schema inspection")?;
     let schema = db::inspect_schema(&connection)?;
     ensure_entries_table(&schema.detected_tables.into_iter().collect())?;
@@ -798,10 +801,7 @@ fn create_entry_commit_with_timeout(
     ensure_entry_deadline(deadline, "entry transaction start")?;
     hook(MutationPoint::BeforeBegin)?;
     ensure_entry_deadline(deadline, "entry transaction start")?;
-    if let Some(deadline) = deadline {
-        connection.busy_timeout(remaining_entry_deadline(deadline))?;
-    }
-    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let tx = rusqlite::Transaction::new_unchecked(&connection, TransactionBehavior::Immediate)?;
     let uuid = match reserved_uuid {
         Some(uuid) => {
             let uuid = uuid.trim();
@@ -874,10 +874,6 @@ fn create_entry_commit_with_timeout(
     ensure_entry_deadline(deadline, "entry commit")?;
     if let Some(expected) = expected_identity {
         crate::identity::validate_database_binding(db_path, expected)?;
-    }
-    if let Some(deadline) = deadline {
-        tx.busy_timeout(remaining_entry_deadline(deadline))?;
-        ensure_entry_deadline(Some(deadline), "entry commit")?;
     }
     tx.commit().map_err(|error| {
         anyhow::Error::new(CommitUncertain(error.to_string()))
@@ -1622,22 +1618,18 @@ fn ensure_entry_ids_for_database_unlocked_with_timeout_option(
         Some(timeout) => db::open_read_write_connection_with_timeout(db_path, timeout)?,
         None => db::open_read_write_connection(db_path)?,
     };
+    let _busy_guard = deadline
+        .map(|value| db::SqliteDeadline::install(&connection, value))
+        .transpose()?;
     ensure_entry_deadline(deadline, "legacy ID schema inspection")?;
     let tables = detected_tables(&connection)?;
     ensure_entries_table(&tables)?;
     if entry_ids_need_repair(&connection)? {
         ensure_entry_deadline(deadline, "legacy ID repair preparation")?;
-        if let Some(deadline) = deadline {
-            connection.busy_timeout(remaining_entry_deadline(deadline))?;
-        }
         repair_entry_ids(&connection)?;
         ensure_entry_deadline(deadline, "legacy ID repair")?;
     }
     Ok(())
-}
-
-fn remaining_entry_deadline(deadline: Instant) -> Duration {
-    deadline.saturating_duration_since(Instant::now())
 }
 
 fn ensure_entry_deadline(deadline: Option<Instant>, phase: &str) -> Result<()> {

@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -1062,6 +1062,71 @@ pub fn open_read_only_connection(path: &Path) -> Result<Connection> {
     open_read_only_connection_with_timeout(path, Duration::from_secs(15))
 }
 
+/// A scoped SQLite busy handler measured against a monotonic deadline.
+/// SQLite's default busy_timeout counts requested sleeps, which can overshoot
+/// wall time on Windows. The boxed deadline stays at a stable address until
+/// this guard unregisters the callback. This guard must not outlive connection.
+pub(crate) struct SqliteDeadline<'connection> {
+    connection: &'connection Connection,
+    deadline: Box<Instant>,
+}
+
+impl<'connection> SqliteDeadline<'connection> {
+    pub(crate) fn install(connection: &'connection Connection, deadline: Instant) -> Result<Self> {
+        let mut guard = Self {
+            connection,
+            deadline: Box::new(deadline),
+        };
+        // SAFETY: SQLite does not own this pointer. Box gives it a stable
+        // address, the connection borrow prevents closing it, and Drop removes
+        // the callback before freeing the box. Connection is not Sync, so this
+        // immutable borrow cannot concurrently execute on another thread.
+        let result = unsafe {
+            rusqlite::ffi::sqlite3_busy_handler(
+                connection.handle(),
+                Some(deadline_busy_callback),
+                (&mut *guard.deadline as *mut Instant).cast(),
+            )
+        };
+        if result != rusqlite::ffi::SQLITE_OK {
+            return Err(
+                rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(result), None).into(),
+            );
+        }
+        Ok(guard)
+    }
+
+    pub(crate) fn reset_remaining(&mut self, remaining: Duration) {
+        *self.deadline = Instant::now()
+            .checked_add(remaining)
+            .unwrap_or_else(Instant::now);
+    }
+}
+
+impl Drop for SqliteDeadline<'_> {
+    fn drop(&mut self) {
+        // Removing a busy handler does not invoke it. The connection is still
+        // alive and no statement is executing while this guard is dropped.
+        let _ = self.connection.busy_handler(None);
+    }
+}
+
+unsafe extern "C" fn deadline_busy_callback(data: *mut std::ffi::c_void, _attempt: i32) -> i32 {
+    // Never unwind across SQLite's C boundary, even if the host sleep panics.
+    std::panic::catch_unwind(|| {
+        // SAFETY: only SqliteDeadline::install registers this callback and it
+        // keeps the boxed Instant alive until the callback is unregistered.
+        let deadline = unsafe { &*data.cast::<Instant>() };
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return 0;
+        }
+        std::thread::sleep(remaining.min(Duration::from_millis(10)));
+        i32::from(Instant::now() < *deadline)
+    })
+    .unwrap_or(0)
+}
+
 /// Open a read-only connection with an explicit SQLite busy timeout.  Capture
 /// uses this variant to spend only the remaining operation budget waiting on
 /// SQLite instead of starting a fresh fixed 15-second wait at each phase.
@@ -1102,11 +1167,12 @@ fn open_read_write_connection_configured(
     // pass a short setup timeout and we restore their full remaining budget
     // for the actual schema/transaction work; otherwise each pragma could
     // consume a fresh full timeout and defeat a single operation budget.
-    connection.busy_timeout(setup_timeout)?;
+    let setup_guard = SqliteDeadline::install(&connection, Instant::now() + setup_timeout)?;
     connection.pragma_update(None, "foreign_keys", "ON")?;
     connection.pragma_update(None, "journal_mode", "WAL")?;
     connection.pragma_update(None, "synchronous", "NORMAL")?;
     connection.pragma_update(None, "temp_store", "MEMORY")?;
+    drop(setup_guard);
     connection.busy_timeout(timeout)?;
     Ok(connection)
 }
@@ -1251,6 +1317,41 @@ fn normalize_path_setting(value: Option<String>) -> Option<String> {
 mod tests {
     use super::*;
     use rusqlite::Connection;
+
+    #[test]
+    fn monotonic_busy_guard_retries_until_release_then_unregisters() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("deadline.db");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE entries(id INTEGER)")
+            .unwrap();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let blocker = std::thread::spawn(move || {
+            let connection = Connection::open(path).unwrap();
+            connection.execute_batch("BEGIN IMMEDIATE").unwrap();
+            ready_tx.send(()).unwrap();
+            std::thread::sleep(Duration::from_millis(150));
+            connection.execute_batch("ROLLBACK").unwrap();
+        });
+        ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let start = Instant::now();
+        let guard = SqliteDeadline::install(&connection, start + Duration::from_secs(1)).unwrap();
+        connection
+            .execute_batch("BEGIN IMMEDIATE; INSERT INTO entries VALUES (1); COMMIT")
+            .unwrap();
+        assert!(start.elapsed() >= Duration::from_millis(100));
+        assert!(start.elapsed() < Duration::from_secs(1));
+        blocker.join().unwrap();
+        drop(guard);
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM entries", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
 
     #[test]
     fn database_status_detects_core_tables_and_counts() {

@@ -434,10 +434,14 @@ fn reconcile_normalized_with_timeout(
     timeout: Option<Duration>,
 ) -> Result<Reconciliation> {
     identity::validate_database_binding(db_path, expected)?;
+    let deadline = timeout.and_then(|value| Instant::now().checked_add(value));
     let connection = match timeout {
         Some(timeout) => db::open_read_only_connection_with_timeout(db_path, timeout)?,
         None => db::open_read_only_connection(db_path)?,
     };
+    let _busy_guard = deadline
+        .map(|value| db::SqliteDeadline::install(&connection, value))
+        .transpose()?;
     let row = connection
         .query_row(
             "SELECT id, created_at, text, text_plain, content_format, title, summary, mood,

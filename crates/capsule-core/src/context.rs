@@ -17,6 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::db;
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Duration as ChronoDuration, TimeZone, Utc};
 use reqwest::blocking::Client;
@@ -1460,7 +1461,9 @@ fn read_entry_created_at(path: &Path, uuid: &str, timeout: Duration) -> Result<O
     if timeout.is_zero() {
         return Ok(None);
     }
+    let until = Instant::now() + timeout;
     let connection = open_read_only_with_timeout(path, timeout)?;
+    let _busy_guard = db::SqliteDeadline::install(&connection, until)?;
     connection
         .query_row(
             "SELECT created_at FROM entries WHERE uuid = ?1",
@@ -1479,7 +1482,9 @@ fn load_existing_location(
     if timeout.is_zero() {
         return Ok(None);
     }
+    let until = Instant::now() + timeout;
     let connection = open_read_only_with_timeout(path, timeout)?;
+    let _busy_guard = db::SqliteDeadline::install(&connection, until)?;
     if !location::table_exists(&connection, "plugin_entry_locations")? {
         return Ok(None);
     }
@@ -1569,15 +1574,15 @@ fn persist_context(
     if timeout.is_zero() {
         return Ok(None);
     }
-    let mut connection = open_read_write_with_timeout(path, timeout)?;
+    let connection = open_read_write_with_timeout(path, timeout)?;
     // Opening/configuring SQLite can consume a meaningful part of the
     // invocation budget (notably while switching journal mode).  Refresh the
     // busy timeout from the live deadline immediately before BEGIN so that a
     // contended writer cannot wait on the stale pre-open timeout.
-    if !refresh_write_timeout(&connection, deadline, cancellation)? {
+    let Some(_busy_guard) = refresh_write_timeout(&connection, deadline, cancellation)? else {
         return Ok(None);
-    }
-    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    };
+    let tx = rusqlite::Transaction::new_unchecked(&connection, TransactionBehavior::Immediate)?;
     if cancellation.is_cancelled() || deadline.expired() {
         return Ok(None);
     }
@@ -1868,7 +1873,9 @@ fn read_geocode_cache(
     if timeout.is_zero() {
         return Ok(None);
     }
+    let until = Instant::now() + timeout;
     let connection = open_read_only_with_timeout(path, timeout)?;
+    let _busy_guard = db::SqliteDeadline::install(&connection, until)?;
     if !location::table_exists(&connection, "plugin_location_cache")? {
         return Ok(None);
     }
@@ -1910,42 +1917,44 @@ fn open_read_only_with_timeout(path: &Path, timeout: Duration) -> Result<Connect
 }
 
 fn open_read_write_with_timeout(path: &Path, timeout: Duration) -> Result<Connection> {
+    let until = Instant::now() + timeout;
     let connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .with_context(|| format!("failed to open {}", path.display()))?;
-    connection.busy_timeout(timeout)?;
+    let guard = db::SqliteDeadline::install(&connection, until)?;
     connection.pragma_update(None, "foreign_keys", "ON")?;
     connection.pragma_update(None, "journal_mode", "WAL")?;
     connection.pragma_update(None, "synchronous", "NORMAL")?;
     connection.pragma_update(None, "temp_store", "MEMORY")?;
+    drop(guard);
     Ok(connection)
 }
 
-fn refresh_write_timeout(
-    connection: &Connection,
+fn refresh_write_timeout<'connection>(
+    connection: &'connection Connection,
     deadline: &ContextDeadline,
     cancellation: &dyn Cancellation,
-) -> Result<bool> {
+) -> Result<Option<db::SqliteDeadline<'connection>>> {
     if cancellation.is_cancelled() {
-        return Ok(false);
+        return Ok(None);
     }
     let Some(timeout) = deadline.remaining() else {
-        return Ok(false);
+        return Ok(None);
     };
-    connection.busy_timeout(timeout)?;
+    let mut guard = db::SqliteDeadline::install(connection, Instant::now() + timeout)?;
     // A cancellation/deadline transition can happen while configuring the
     // connection.  Do not enter BEGIN after that transition, and reset the
     // timeout once more from the final remaining budget.
     if cancellation.is_cancelled() {
-        return Ok(false);
+        return Ok(None);
     }
     let Some(timeout) = deadline.remaining() else {
-        return Ok(false);
+        return Ok(None);
     };
-    connection.busy_timeout(timeout)?;
-    Ok(true)
+    guard.reset_remaining(timeout);
+    Ok(Some(guard))
 }
 
 fn local_timestamp(value: DateTime<Utc>) -> String {
@@ -2557,14 +2566,26 @@ mod tests {
         // Simulate journal-mode setup consuming most of the invocation budget
         // before BEGIN IMMEDIATE is attempted.
         clock.advance(Duration::from_millis(7_500));
-        assert!(refresh_write_timeout(&connection, &deadline, &NeverCancel).expect("refresh"));
-        let busy_timeout_ms: i64 = connection
-            .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
-            .expect("busy timeout");
-        assert!(
-            busy_timeout_ms <= 500,
-            "BEGIN must use the remaining budget, not the pre-open timeout"
+        let guard = refresh_write_timeout(&connection, &deadline, &NeverCancel)
+            .expect("refresh")
+            .expect("remaining budget");
+        let blocker = Connection::open(&db_path).unwrap();
+        blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let started = Instant::now();
+        let error = connection.execute_batch("BEGIN IMMEDIATE").unwrap_err();
+        assert_eq!(
+            error.sqlite_error_code(),
+            Some(rusqlite::ErrorCode::DatabaseBusy)
         );
+        assert!(
+            started.elapsed() < Duration::from_millis(750),
+            "BEGIN must use the remaining wall-clock budget, not the pre-open timeout"
+        );
+        drop(guard);
+        blocker.execute_batch("ROLLBACK").unwrap();
+        connection
+            .execute_batch("BEGIN IMMEDIATE; ROLLBACK")
+            .unwrap();
     }
 
     #[test]

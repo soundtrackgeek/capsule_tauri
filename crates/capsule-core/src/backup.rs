@@ -692,6 +692,7 @@ fn verify_backup_until(path: &Path, deadline: Instant, timeout: Duration) -> Res
 
     let connection =
         db::open_read_only_connection_with_timeout(path, remaining_backup_deadline(deadline))?;
+    let _busy_guard = db::SqliteDeadline::install(&connection, deadline)?;
     check_backup_deadline(Some((deadline, timeout)), "backup schema verification")?;
     let schema = db::inspect_schema(&connection)?;
     if !schema.has_entries_table {
@@ -701,7 +702,6 @@ fn verify_backup_until(path: &Path, deadline: Instant, timeout: Duration) -> Res
     }
 
     check_backup_deadline(Some((deadline, timeout)), "backup integrity verification")?;
-    connection.busy_timeout(remaining_backup_deadline(deadline))?;
     let integrity =
         connection.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))?;
     if !integrity.eq_ignore_ascii_case("ok") {
@@ -711,7 +711,6 @@ fn verify_backup_until(path: &Path, deadline: Instant, timeout: Duration) -> Res
     }
 
     check_backup_deadline(Some((deadline, timeout)), "backup foreign-key verification")?;
-    connection.busy_timeout(remaining_backup_deadline(deadline))?;
     let mut foreign_keys = connection.prepare("PRAGMA foreign_key_check")?;
     let mut rows = foreign_keys.query([])?;
     if rows.next()?.is_some() {
