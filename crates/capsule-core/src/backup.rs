@@ -461,7 +461,7 @@ pub fn with_database_backup_for_database_using_policy_with_timeout<T>(
 /// snapshot is created.  Capture uses this boundary to revalidate the frozen
 /// database identity after lock contention, preventing a replaced database
 /// from being backed up before the write is rejected.
-pub fn with_database_backup_for_database_using_policy_with_timeout_and_preflight<T>(
+pub(crate) fn with_database_backup_for_database_using_policy_with_timeout_and_preflight<T>(
     db_path: &Path,
     operation: &str,
     timeout: Duration,
