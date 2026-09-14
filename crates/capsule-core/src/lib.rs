@@ -14,6 +14,8 @@ pub mod identity;
 pub mod location;
 pub mod models;
 pub mod providers;
+pub mod read;
+pub mod search;
 
 pub use backup::{
     with_database_backup_for_database_using_policy_with_timeout, with_mutation_lock_for_database,
@@ -43,3 +45,4 @@ pub use db::{
     ResolverEnvironment, SafePathSettings, SchemaCapabilities,
 };
 pub use location::{load_context_settings, ContextSettings};
+pub use read::{EntryKey, JournalReader, MetadataPage, ReadOptions, ReadPage};

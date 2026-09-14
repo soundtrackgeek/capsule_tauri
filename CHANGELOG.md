@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.37.1-dev.4 - 2026-09-14
+
+### Added
+
+- Added a path-bound `capsule-core::JournalReader` with bounded entry lists,
+  exact UUID/number lookup, hidden-entry protection, metadata discovery, and
+  context-safe settings reporting.
+- Moved keyword/structured search into the headless core with FTS fallback
+  diagnostics while keeping the legacy desktop repair wrapper intact.
+
 ## 0.37.1-dev.3 - 2026-09-14
 
 ### Added

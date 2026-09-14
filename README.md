@@ -11,7 +11,8 @@ explicit capability-gated AI/sync surfaces:
 - Tauri 2 desktop configuration.
 - A headless `capsule-core` crate containing the shared database, backup,
   entries, location, and model behavior. It exposes explicit-path resolution,
-  read-only schema capability diagnostics, and non-Tauri capture/context DTOs;
+  read-only schema capability diagnostics, a bounded `JournalReader` for
+  exact/list/search/tag/mood queries, and non-Tauri capture/context DTOs;
   desktop-only shell actions remain in the Tauri adapter. Durable capture uses
   caller-reserved UUIDs, frozen database identity and explicit backup policy,
   with verified atomic snapshots, bounded cross-process coordination, and

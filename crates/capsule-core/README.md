@@ -53,3 +53,16 @@ Context or other deadline-bound workers can use
 coordination by their remaining budget. The latter shares one timeout across
 the database and backup-directory locks and keeps both locks through backup
 publication and the caller's transaction closure.
+
+`JournalReader` adds an explicit-path, query-only boundary with bounded entry
+lists, exact UUID/number lookup, tag and mood discovery, and date/search
+metadata pages. `search` keeps Capsule's structured tokens and FTS fallback
+diagnostics without invoking repair.
+
+```rust
+use capsule_core::{JournalReader, ReadOptions};
+
+let reader = JournalReader::open("/path/to/capsule.db")?;
+let recent = reader.recent(ReadOptions::default())?;
+let result = reader.search("tag:work", ReadOptions::default())?;
+```

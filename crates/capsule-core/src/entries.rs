@@ -648,6 +648,13 @@ fn ensure_read_capabilities(db_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Validate that a database can be queried without invoking the legacy ID
+/// repair path.  This is intentionally read-only and is shared by bounded
+/// metadata/context services that do not need to materialize an entry list.
+pub fn ensure_read_only_for_database(db_path: &Path) -> Result<()> {
+    ensure_read_capabilities(db_path)
+}
+
 fn create_entry_inner(db_path: &Path, input: EntryCreate) -> Result<EntryCommit> {
     let normalized = normalize_entry_create(&input, None)?;
     let mut no_hook = |_point: MutationPoint| Ok(());
