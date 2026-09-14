@@ -4,13 +4,17 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use chrono::{Local, Utc};
-use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
+use chrono::{DateTime, Local, Utc};
+use rusqlite::{
+    params, params_from_iter, types::Value, Connection, OptionalExtension, TransactionBehavior,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 
 use crate::{
-    backup, db, location,
+    backup,
+    contracts::CaptureRequest,
+    db, location,
     models::{
         DeleteEntryResponse, Entry, EntryCreate, EntryFilters, EntryHistoryItem,
         EntryHistoryResponse, EntryListResponse, EntryMutationResponse, EntrySort, EntryThreadInfo,
@@ -20,6 +24,67 @@ use crate::{
 
 const DEFAULT_LIMIT: i64 = 40;
 const MAX_LIMIT: i64 = 200;
+
+/// The normalized fields that are written by an entry capture.  Keeping this
+/// projection in the shared entry module means the desktop writer and the
+/// headless capture path cannot drift into subtly different text/tag rules.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NormalizedEntry {
+    pub(crate) text: String,
+    pub(crate) text_plain: String,
+    pub(crate) content_format: String,
+    pub(crate) title: Option<String>,
+    pub(crate) summary: Option<String>,
+    pub(crate) mood: Option<String>,
+    pub(crate) tags: Vec<String>,
+    pub(crate) starred: bool,
+    pub(crate) pinned: bool,
+    pub(crate) continue_from_uuid: Option<String>,
+    pub(crate) created_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct EntryCommit {
+    pub(crate) uuid: String,
+    pub(crate) entry_id: i64,
+    pub(crate) committed_at: DateTime<Utc>,
+}
+
+#[derive(Debug)]
+pub(crate) struct CommitUncertain(pub(crate) String);
+
+impl std::fmt::Display for CommitUncertain {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for CommitUncertain {}
+
+#[derive(Debug)]
+pub(crate) struct ReservedUuidCollision(pub(crate) String);
+
+impl std::fmt::Display for ReservedUuidCollision {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ReservedUuidCollision {}
+
+/// Failure seams used by the capture coordinator.  The default desktop
+/// writer supplies a no-op callback; tests and explicit clients can inject a
+/// callback without any environment-triggered production sabotage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)]
+pub(crate) enum MutationPoint {
+    BeforeBegin,
+    BeforeInsert,
+    BeforeFts,
+    BeforeResequence,
+    BeforeCommit,
+    DuringCommit,
+}
 
 #[derive(Debug, Clone)]
 struct RawEntry {
@@ -353,11 +418,22 @@ fn get_random_entry_for_database_with_repair(
 }
 
 pub fn create_entry(input: EntryCreate) -> Result<EntryMutationResponse> {
-    let guarded = backup::with_database_backup("entry.create", move |db_path| {
-        create_entry_inner(db_path, input)
-    })?;
+    let db_path = db::resolve_database_path();
+    let guarded =
+        backup::with_database_backup_for_database(&db_path, "entry.create", move |db_path| {
+            ensure_entry_ids_for_database_unlocked(db_path)?;
+            create_entry_inner(db_path, input)
+        })?;
+    let commit = guarded.value;
+    if let Err(error) = location::auto_capture_location(&db_path, &commit.uuid) {
+        eprintln!(
+            "[Location] Auto-capture failed for {}: {error}",
+            commit.uuid
+        );
+    }
+    let entry = get_entry_read_only_for_database(&db_path, &commit.uuid)?;
     Ok(EntryMutationResponse {
-        entry: guarded.value,
+        entry,
         audit: guarded.audit,
     })
 }
@@ -366,20 +442,32 @@ pub fn create_entry(input: EntryCreate) -> Result<EntryMutationResponse> {
 fn create_entry_for_database(db_path: &Path, input: EntryCreate) -> Result<EntryMutationResponse> {
     let guarded =
         backup::with_database_backup_for_database(db_path, "entry.create", move |path| {
+            ensure_entry_ids_for_database_unlocked(path)?;
             create_entry_inner(path, input)
         })?;
+    let commit = guarded.value;
+    if let Err(error) = location::auto_capture_location(db_path, &commit.uuid) {
+        eprintln!(
+            "[Location] Auto-capture failed for {}: {error}",
+            commit.uuid
+        );
+    }
+    let entry = get_entry_read_only_for_database(db_path, &commit.uuid)?;
     Ok(EntryMutationResponse {
-        entry: guarded.value,
+        entry,
         audit: guarded.audit,
     })
 }
 
 pub fn update_entry(identifier: String, input: EntryUpdate) -> Result<EntryMutationResponse> {
+    let db_path = db::resolve_database_path();
     let guarded = backup::with_database_backup("entry.update", move |db_path| {
+        ensure_entry_ids_for_database_unlocked(db_path)?;
         update_entry_inner(db_path, &identifier, input)
     })?;
+    let entry = get_entry_read_only_for_database(&db_path, &guarded.value)?;
     Ok(EntryMutationResponse {
-        entry: guarded.value,
+        entry,
         audit: guarded.audit,
     })
 }
@@ -392,16 +480,19 @@ fn update_entry_for_database(
 ) -> Result<EntryMutationResponse> {
     let guarded =
         backup::with_database_backup_for_database(db_path, "entry.update", move |path| {
+            ensure_entry_ids_for_database_unlocked(path)?;
             update_entry_inner(path, identifier, input)
         })?;
+    let entry = get_entry_read_only_for_database(db_path, &guarded.value)?;
     Ok(EntryMutationResponse {
-        entry: guarded.value,
+        entry,
         audit: guarded.audit,
     })
 }
 
 pub fn delete_entry(identifier: String) -> Result<DeleteEntryResponse> {
     let guarded = backup::with_database_backup("entry.delete", move |db_path| {
+        ensure_entry_ids_for_database_unlocked(db_path)?;
         delete_entry_inner(db_path, &identifier)
     })?;
     Ok(DeleteEntryResponse {
@@ -415,6 +506,7 @@ pub fn delete_entry(identifier: String) -> Result<DeleteEntryResponse> {
 fn delete_entry_for_database(db_path: &Path, identifier: &str) -> Result<DeleteEntryResponse> {
     let guarded =
         backup::with_database_backup_for_database(db_path, "entry.delete", move |path| {
+            ensure_entry_ids_for_database_unlocked(path)?;
             delete_entry_inner(path, identifier)
         })?;
     Ok(DeleteEntryResponse {
@@ -556,69 +648,187 @@ fn ensure_read_capabilities(db_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn create_entry_inner(db_path: &Path, input: EntryCreate) -> Result<Entry> {
-    ensure_entry_ids_for_database(db_path)?;
+fn create_entry_inner(db_path: &Path, input: EntryCreate) -> Result<EntryCommit> {
+    let normalized = normalize_entry_create(&input, None)?;
+    let mut no_hook = |_point: MutationPoint| Ok(());
+    let commit = create_entry_commit(db_path, &normalized, None, None, &mut no_hook)?;
+
+    Ok(commit)
+}
+
+/// Normalize an externally supplied capture with the exact same rules used by
+/// the desktop entry writer.  The resulting values are also used for reserved
+/// UUID reconciliation, so a retry never compares raw, differently formatted
+/// input to the stored row.
+pub(crate) fn normalize_capture_request(request: &CaptureRequest) -> Result<NormalizedEntry> {
+    let created_at = request.created_at.format("%Y-%m-%d %H:%M:%S").to_string();
+    let input = EntryCreate {
+        text: request.text.clone(),
+        content_format: Some(request.content_format.clone()),
+        title: request.title.clone(),
+        summary: request.summary.clone(),
+        mood: request.mood.clone(),
+        tags: Some(request.tags.clone()),
+        when: Some(created_at),
+        starred: Some(request.starred),
+        pinned: Some(request.pinned),
+        continue_from_uuid: request.continue_from_uuid.clone(),
+    };
+    normalize_entry_create(&input, None)
+}
+
+fn normalize_entry_create(
+    input: &EntryCreate,
+    created_at_override: Option<&str>,
+) -> Result<NormalizedEntry> {
     let text = normalize_required_text(&input.text)?;
     let content_format = normalize_content_format(input.content_format.as_deref())?;
     let text_plain = build_text_plain(&text);
-    let created_at = normalized_created_at(input.when.as_deref());
-    let updated_at = created_at.clone();
-    let title = normalize_optional_string(input.title);
-    let summary = normalize_optional_string(input.summary);
-    let mood = normalize_optional_string(input.mood);
+    let created_at = created_at_override
+        .map(str::to_string)
+        .unwrap_or_else(|| normalized_created_at(input.when.as_deref()));
+    let title = normalize_optional_string(input.title.clone());
+    let summary = normalize_optional_string(input.summary.clone());
+    let mood = normalize_optional_string(input.mood.clone());
     let tags = normalize_tags(input.tags.as_deref());
     let starred = input.starred.unwrap_or(false);
     let pinned = input.pinned.unwrap_or(false);
-    let continue_from_uuid = normalize_optional_string(input.continue_from_uuid);
+    let continue_from_uuid = normalize_optional_string(input.continue_from_uuid.clone());
+
+    Ok(NormalizedEntry {
+        text,
+        text_plain,
+        content_format,
+        title,
+        summary,
+        mood,
+        tags,
+        starred,
+        pinned,
+        continue_from_uuid,
+        created_at,
+    })
+}
+
+/// Commit an entry using a caller-reserved UUID.  This is the one lower-level
+/// mutation implementation shared by desktop creation and headless capture.
+/// The caller owns the surrounding verified-backup coordination lock.
+pub(crate) fn create_entry_commit_for_capture(
+    db_path: &Path,
+    normalized: &NormalizedEntry,
+    reserved_uuid: &str,
+    expected_identity: Option<&db::FileIdentity>,
+    hook: &mut dyn FnMut(MutationPoint) -> Result<()>,
+) -> Result<EntryCommit> {
+    create_entry_commit(
+        db_path,
+        normalized,
+        Some(reserved_uuid),
+        expected_identity,
+        hook,
+    )
+}
+
+fn create_entry_commit(
+    db_path: &Path,
+    normalized: &NormalizedEntry,
+    reserved_uuid: Option<&str>,
+    expected_identity: Option<&db::FileIdentity>,
+    hook: &mut dyn FnMut(MutationPoint) -> Result<()>,
+) -> Result<EntryCommit> {
+    if let Some(expected) = expected_identity {
+        crate::identity::validate_database_binding(db_path, expected)?;
+    }
 
     let mut connection = db::open_read_write_connection(db_path)?;
     let schema = db::inspect_schema(&connection)?;
     ensure_entries_table(&schema.detected_tables.into_iter().collect())?;
 
-    let tx = connection.transaction()?;
-    let uuid = generate_entry_uuid(&tx)?;
+    hook(MutationPoint::BeforeBegin)?;
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let uuid = match reserved_uuid {
+        Some(uuid) => {
+            let uuid = uuid.trim();
+            let exists = tx
+                .query_row(
+                    "SELECT 1 FROM entries WHERE uuid = ?1 LIMIT 1",
+                    [uuid],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            if exists {
+                return Err(anyhow::Error::new(ReservedUuidCollision(format!(
+                    "reserved entry UUID already exists: {uuid}"
+                ))));
+            }
+            uuid.to_string()
+        }
+        None => generate_entry_uuid(&tx)?,
+    };
     let entry_id = next_entry_id(&tx)?;
+    hook(MutationPoint::BeforeInsert)?;
     tx.execute(
         "INSERT INTO entries
             (id, uuid, created_at, updated_at, text, text_plain, content_format, title, summary, mood, starred, pinned, hidden)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0)",
         params![
             entry_id,
-            uuid,
-            created_at,
-            updated_at,
-            text,
-            text_plain,
-            content_format,
-            title,
-            summary,
-            mood,
-            bool_to_int(starred),
-            bool_to_int(pinned),
+            &uuid,
+            &normalized.created_at,
+            &normalized.created_at,
+            &normalized.text,
+            &normalized.text_plain,
+            &normalized.content_format,
+            &normalized.title,
+            &normalized.summary,
+            &normalized.mood,
+            bool_to_int(normalized.starred),
+            bool_to_int(normalized.pinned),
         ],
     )?;
-    replace_entry_tags(&tx, entry_id, &tags)?;
-    if let Some(parent_uuid) = continue_from_uuid.as_deref() {
+    replace_entry_tags(&tx, entry_id, &normalized.tags)?;
+    if let Some(parent_uuid) = normalized.continue_from_uuid.as_deref() {
         set_entry_continuation(&tx, &uuid, Some(parent_uuid))?;
     }
-    refresh_fts_for_entry(&tx, entry_id, &text_plain)?;
+    hook(MutationPoint::BeforeFts)?;
+    refresh_fts_for_entry(&tx, entry_id, &normalized.text_plain)?;
+    hook(MutationPoint::BeforeResequence)?;
     resequence_entry_ids(&tx)?;
-    tx.commit()?;
 
-    if let Err(error) = location::auto_capture_location(db_path, &uuid) {
-        eprintln!("[Location] Auto-capture failed for {uuid}: {error}");
+    let final_id = tx.query_row(
+        "SELECT id FROM entries WHERE uuid = ?1 LIMIT 1",
+        [&uuid],
+        |row| row.get::<_, i64>(0),
+    )?;
+    hook(MutationPoint::BeforeCommit)?;
+    hook(MutationPoint::DuringCommit).map_err(|error| {
+        anyhow::Error::new(CommitUncertain(format!(
+            "entry commit boundary interrupted: {error}"
+        )))
+    })?;
+    if let Some(expected) = expected_identity {
+        crate::identity::validate_database_binding(db_path, expected)?;
     }
+    tx.commit().map_err(|error| {
+        anyhow::Error::new(CommitUncertain(error.to_string()))
+            .context("entry transaction commit outcome is uncertain")
+    })?;
+    let committed_at = Utc::now();
 
-    get_entry_for_database(db_path, &uuid)
+    Ok(EntryCommit {
+        uuid,
+        entry_id: final_id,
+        committed_at,
+    })
 }
 
-fn update_entry_inner(db_path: &Path, identifier: &str, input: EntryUpdate) -> Result<Entry> {
-    ensure_entry_ids_for_database(db_path)?;
+fn update_entry_inner(db_path: &Path, identifier: &str, input: EntryUpdate) -> Result<String> {
     let mut connection = db::open_read_write_connection(db_path)?;
     let schema = db::inspect_schema(&connection)?;
     ensure_entries_table(&schema.detected_tables.into_iter().collect())?;
 
-    let tx = connection.transaction()?;
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let (entry_id, uuid) = resolve_entry_identity(&tx, identifier)?;
 
     if input.text.is_some()
@@ -693,11 +903,10 @@ fn update_entry_inner(db_path: &Path, identifier: &str, input: EntryUpdate) -> R
     }
 
     tx.commit()?;
-    get_entry_for_database(db_path, &uuid)
+    Ok(uuid)
 }
 
 fn delete_entry_inner(db_path: &Path, identifier: &str) -> Result<DeletedEntry> {
-    ensure_entry_ids_for_database(db_path)?;
     let connection = db::open_read_write_connection(db_path)?;
     let schema = db::inspect_schema(&connection)?;
     ensure_entries_table(&schema.detected_tables.into_iter().collect())?;
@@ -837,28 +1046,41 @@ fn set_entry_flag(
     value: bool,
     operation: &'static str,
 ) -> Result<EntryMutationResponse> {
+    let db_path = db::resolve_database_path();
     let guarded = backup::with_database_backup(operation, move |db_path| {
-        set_entry_flag_inner(db_path, &identifier, column, value)
+        ensure_entry_ids_for_database_unlocked(db_path)?;
+        set_entry_flag_commit(db_path, &identifier, column, value)
     })?;
+    let entry = get_entry_read_only_for_database(&db_path, &guarded.value)?;
     Ok(EntryMutationResponse {
-        entry: guarded.value,
+        entry,
         audit: guarded.audit,
     })
 }
 
+#[cfg(test)]
 fn set_entry_flag_inner(
     db_path: &Path,
     identifier: &str,
     column: &'static str,
     value: bool,
 ) -> Result<Entry> {
-    ensure_entry_ids_for_database(db_path)?;
+    let uuid = set_entry_flag_commit(db_path, identifier, column, value)?;
+    get_entry_for_database(db_path, &uuid)
+}
+
+fn set_entry_flag_commit(
+    db_path: &Path,
+    identifier: &str,
+    column: &'static str,
+    value: bool,
+) -> Result<String> {
     let mut connection = db::open_read_write_connection(db_path)?;
-    let tx = connection.transaction()?;
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let (entry_id, uuid) = resolve_entry_identity(&tx, identifier)?;
     update_flag(&tx, entry_id, column, value)?;
     tx.commit()?;
-    get_entry_for_database(db_path, &uuid)
+    Ok(uuid)
 }
 
 fn update_flag(
@@ -1302,9 +1524,22 @@ pub fn ensure_entry_ids_for_database(db_path: &Path) -> Result<()> {
     }
 
     backup::with_database_backup_for_database(db_path, "entry.ids.repair", |path| {
-        let connection = db::open_read_write_connection(path)?;
-        repair_entry_ids(&connection)
+        ensure_entry_ids_for_database_unlocked(path)
     })?;
+    Ok(())
+}
+
+/// Repair known legacy ID layouts while the caller already holds the
+/// cross-process mutation lock.  Keeping this helper separate prevents a
+/// capture's backup/transaction sequence from recursively acquiring the same
+/// lock and, more importantly, ensures the repair is covered by that backup.
+pub(crate) fn ensure_entry_ids_for_database_unlocked(db_path: &Path) -> Result<()> {
+    let connection = db::open_read_write_connection(db_path)?;
+    let tables = detected_tables(&connection)?;
+    ensure_entries_table(&tables)?;
+    if entry_ids_need_repair(&connection)? {
+        repair_entry_ids(&connection)?;
+    }
     Ok(())
 }
 

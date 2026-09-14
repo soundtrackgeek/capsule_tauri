@@ -1,7 +1,9 @@
 use std::{
-    fs,
+    fs::{self, File, OpenOptions},
+    io::{ErrorKind, Write},
     path::{Path, PathBuf},
-    time::Duration,
+    process, thread,
+    time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -21,6 +23,19 @@ const APP_NAME: &str = "capsule-tauri";
 const BACKUP_PREFIX: &str = "capsule_backup_";
 const BACKUP_DB_EXTENSION: &str = ".db";
 const BACKUP_JSON_EXTENSION: &str = "json";
+const MUTATION_LOCK_WAIT: Duration = Duration::from_secs(15);
+const MUTATION_LOCK_POLL: Duration = Duration::from_millis(20);
+
+#[derive(Debug)]
+pub struct MutationBusy(pub String);
+
+impl std::fmt::Display for MutationBusy {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for MutationBusy {}
 
 pub fn list_backups() -> Result<BackupListResponse> {
     list_backups_for_database(&db::resolve_database_path())
@@ -45,53 +60,91 @@ pub fn create_backup_for_database(
     db_path: &Path,
     input: BackupCreateRequest,
 ) -> Result<BackupCreateResponse> {
+    let _lock = acquire_mutation_lock(db_path)?;
+    create_backup_for_database_unlocked(db_path, input)
+}
+
+fn create_backup_for_database_unlocked(
+    db_path: &Path,
+    input: BackupCreateRequest,
+) -> Result<BackupCreateResponse> {
+    let policy = crate::contracts::BackupPolicy::new(
+        db::backup_directory_for_database(db_path),
+        db::backup_retention_count_for_database(db_path),
+    );
+    with_backup_directory_lock(&policy, || {
+        create_backup_with_policy_locked(db_path, input, &policy)
+    })
+}
+
+fn create_backup_with_policy_locked(
+    db_path: &Path,
+    input: BackupCreateRequest,
+    policy: &crate::contracts::BackupPolicy,
+) -> Result<BackupCreateResponse> {
+    validate_backup_policy(policy)?;
     let metadata = fs::metadata(db_path)
         .with_context(|| format!("database does not exist: {}", db_path.display()))?;
-    let backup_directory = db::backup_directory_for_database(db_path);
-    fs::create_dir_all(&backup_directory)
+    let backup_directory = policy.directory.as_path();
+    fs::create_dir_all(backup_directory)
         .with_context(|| format!("failed to create {}", backup_directory.display()))?;
 
     let now = Utc::now();
-    let backup_path = next_available_backup_path(&backup_directory, now);
+    let reservation = reserve_backup_path(backup_directory, now)?;
+    let backup_path = reservation.final_path.clone();
+    let temporary_path = reservation.temporary_path.clone();
     let manifest_path = backup_path.with_extension(BACKUP_JSON_EXTENSION);
 
-    let source = db::open_read_only_connection(db_path)?;
-    let mut destination = Connection::open(&backup_path)
-        .with_context(|| format!("failed to create {}", backup_path.display()))?;
-    let backup = Backup::new(&source, &mut destination)?;
-    backup.run_to_completion(128, Duration::from_millis(20), None)?;
-    drop(backup);
-    drop(destination);
-    drop(source);
+    let result = (|| -> Result<BackupCreateResponse> {
+        let source = db::open_read_only_connection(db_path)?;
+        let mut destination = Connection::open(&temporary_path)
+            .with_context(|| format!("failed to create {}", temporary_path.display()))?;
+        let backup = Backup::new(&source, &mut destination)?;
+        backup.run_to_completion(128, Duration::from_millis(20), None)?;
+        drop(backup);
+        drop(destination);
+        drop(source);
 
-    verify_backup(&backup_path)?;
+        verify_backup(&temporary_path)?;
+        fs::rename(&temporary_path, &backup_path).with_context(|| {
+            format!(
+                "failed to publish verified backup {}",
+                backup_path.display()
+            )
+        })?;
+        remove_if_exists(&reservation.marker_path)?;
 
-    let operation = input.operation.unwrap_or_else(|| "manual".to_string());
-    let manifest = BackupManifest {
-        created_at: now.to_rfc3339(),
-        operation,
-        app: APP_NAME.to_string(),
-        db_path: db::path_to_string(db_path),
-        db_size_bytes: metadata.len(),
-        backup_path: db::path_to_string(&backup_path),
-    };
-    fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?)
-        .with_context(|| format!("failed to write {}", manifest_path.display()))?;
+        let operation = input.operation.unwrap_or_else(|| "manual".to_string());
+        let manifest = BackupManifest {
+            created_at: now.to_rfc3339(),
+            operation,
+            app: APP_NAME.to_string(),
+            db_path: db::path_to_string(db_path),
+            db_size_bytes: metadata.len(),
+            backup_path: db::path_to_string(&backup_path),
+        };
+        write_manifest_atomically(&manifest_path, &manifest)?;
 
-    let mut backup_info = backup_info_from_path(&backup_path)?;
-    backup_info.manifest_path = Some(db::path_to_string(&manifest_path));
-    backup_info.operation = Some(manifest.operation);
-    backup_info.created_at = Some(manifest.created_at);
-    backup_info.verified = true;
+        let mut backup_info = backup_info_from_path(&backup_path)?;
+        backup_info.manifest_path = Some(db::path_to_string(&manifest_path));
+        backup_info.operation = Some(manifest.operation);
+        backup_info.created_at = Some(manifest.created_at);
+        backup_info.verified = true;
 
-    apply_backup_retention(
-        &backup_directory,
-        db::backup_retention_count_for_database(db_path),
-    )?;
+        apply_backup_retention(backup_directory, policy.retention_count)?;
 
-    Ok(BackupCreateResponse {
-        backup: backup_info,
-    })
+        Ok(BackupCreateResponse {
+            backup: backup_info,
+        })
+    })();
+
+    if result.is_err() {
+        let _ = remove_if_exists(&temporary_path);
+        let _ = remove_if_exists(&backup_path);
+        let _ = remove_if_exists(&reservation.marker_path);
+        let _ = remove_if_exists(&manifest_path);
+    }
+    result
 }
 
 pub fn preview_restore_backup(input: BackupRestorePreviewRequest) -> Result<BackupRestorePreview> {
@@ -150,15 +203,24 @@ pub fn restore_backup_for_database(
     db_path: &Path,
     input: BackupRestoreRequest,
 ) -> Result<BackupRestoreResponse> {
+    let _lock = acquire_mutation_lock(db_path)?;
+    restore_backup_for_database_unlocked(db_path, input)
+}
+
+fn restore_backup_for_database_unlocked(
+    db_path: &Path,
+    input: BackupRestoreRequest,
+) -> Result<BackupRestoreResponse> {
     if input.confirmation.as_deref() != Some("RESTORE") {
         return Err(anyhow!("Restore confirmation must be RESTORE."));
     }
 
+    let original_identity = db::FileIdentity::for_path(db_path);
     let backup_path = validate_restore_backup_path(db_path, &input.backup_path)?;
     verify_backup(&backup_path)?;
     let restored_from = backup_info_from_path(&backup_path)?;
 
-    let safety_backup = create_backup_for_database(
+    let safety_backup = create_backup_for_database_unlocked(
         db_path,
         BackupCreateRequest {
             operation: Some("backup.restore.safety".to_string()),
@@ -166,6 +228,9 @@ pub fn restore_backup_for_database(
     )
     .context("failed to create a safety backup before restore")?
     .backup;
+
+    crate::identity::validate_database_binding(db_path, &original_identity)
+        .context("active database changed while preparing restore")?;
 
     let backup_directory = db::backup_directory_for_database(db_path);
     let temp_restore_path = backup_directory.join("capsule_restore_pending.db");
@@ -223,16 +288,132 @@ pub fn with_database_backup<T>(
     with_database_backup_for_database(&db_path, operation, write_fn)
 }
 
+/// Run a caller-owned database mutation while holding Capsule's cross-process
+/// lock.  This intentionally does not create a backup or read path settings;
+/// context persistence and other narrowly scoped callers can use it when
+/// their own already-verified snapshot/transaction boundary must include
+/// identity validation and the `BEGIN IMMEDIATE` write.
+pub fn with_mutation_lock_for_database<T>(
+    db_path: &Path,
+    write_fn: impl FnOnce(&Path) -> Result<T>,
+) -> Result<T> {
+    let _lock = acquire_mutation_lock(db_path)?;
+    write_fn(db_path)
+}
+
+/// Run a caller-owned database mutation while holding Capsule's cross-process
+/// lock, bounding lock acquisition by `timeout`.  The timeout applies only to
+/// acquiring the lock; the caller remains responsible for checking any wider
+/// operation deadline before and after its write closure.
+pub fn with_mutation_lock_for_database_with_timeout<T>(
+    db_path: &Path,
+    timeout: Duration,
+    write_fn: impl FnOnce(&Path) -> Result<T>,
+) -> Result<T> {
+    let _lock = acquire_mutation_lock_with_timeout(db_path, timeout)?;
+    write_fn(db_path)
+}
+
 pub fn with_database_backup_for_database<T>(
     db_path: &Path,
     operation: &str,
     write_fn: impl FnOnce(&Path) -> Result<T>,
 ) -> Result<GuardedWrite<T>> {
-    let backup = create_backup_for_database(
+    let _lock = acquire_mutation_lock(db_path)?;
+    let policy = crate::contracts::BackupPolicy::new(
+        db::backup_directory_for_database(db_path),
+        db::backup_retention_count_for_database(db_path),
+    );
+    validate_backup_policy(&policy)?;
+    fs::create_dir_all(&policy.directory)
+        .with_context(|| format!("failed to create {}", policy.directory.display()))?;
+    let _backup_lock = acquire_backup_directory_lock(&policy.directory)?;
+    let backup = create_backup_with_policy_locked(
         db_path,
         BackupCreateRequest {
             operation: Some(operation.to_string()),
         },
+        &policy,
+    )
+    .with_context(|| format!("backup failed before {operation}"))?;
+    let backup_path = backup.backup.path;
+    let value = write_fn(db_path)?;
+
+    Ok(GuardedWrite {
+        value,
+        audit: MutationAudit {
+            backup_path,
+            operation: operation.to_string(),
+            completed_at: Utc::now().to_rfc3339(),
+        },
+    })
+}
+
+/// Backup-guarded mutation using a policy captured by the caller.  This is
+/// the headless boundary: no environment or path-settings lookup occurs after
+/// the policy is supplied.
+pub fn with_database_backup_for_database_using_policy<T>(
+    db_path: &Path,
+    operation: &str,
+    policy: &crate::contracts::BackupPolicy,
+    write_fn: impl FnOnce(&Path) -> Result<T>,
+) -> Result<GuardedWrite<T>> {
+    validate_backup_policy(policy)?;
+    let _lock = acquire_mutation_lock(db_path)?;
+    // Keep the backup-directory lock through the guarded write as well as
+    // backup creation.  Distinct databases may intentionally share one
+    // directory; retaining this lock prevents either process from pruning or
+    // replacing the other's just-published snapshot before its audit is
+    // returned.
+    fs::create_dir_all(&policy.directory)
+        .with_context(|| format!("failed to create {}", policy.directory.display()))?;
+    let _backup_lock = acquire_backup_directory_lock(&policy.directory)?;
+    let backup = create_backup_with_policy_locked(
+        db_path,
+        BackupCreateRequest {
+            operation: Some(operation.to_string()),
+        },
+        policy,
+    )
+    .with_context(|| format!("backup failed before {operation}"))?;
+    let backup_path = backup.backup.path;
+    let value = write_fn(db_path)?;
+
+    Ok(GuardedWrite {
+        value,
+        audit: MutationAudit {
+            backup_path,
+            operation: operation.to_string(),
+            completed_at: Utc::now().to_rfc3339(),
+        },
+    })
+}
+
+/// Backup-guarded mutation using a caller-captured policy and a bounded lock
+/// acquisition budget.  The budget is shared by the database and backup
+/// directory locks, so a context worker can pass its remaining coordination
+/// deadline without accidentally waiting once per lock.
+pub fn with_database_backup_for_database_using_policy_with_timeout<T>(
+    db_path: &Path,
+    operation: &str,
+    timeout: Duration,
+    policy: &crate::contracts::BackupPolicy,
+    write_fn: impl FnOnce(&Path) -> Result<T>,
+) -> Result<GuardedWrite<T>> {
+    validate_backup_policy(policy)?;
+    let deadline = lock_deadline(timeout);
+    let _lock = acquire_mutation_lock_until(db_path, deadline, timeout)?;
+    // Keep the backup-directory lock through the guarded write as well as
+    // backup creation, just like the unbounded-budget policy helper.
+    fs::create_dir_all(&policy.directory)
+        .with_context(|| format!("failed to create {}", policy.directory.display()))?;
+    let _backup_lock = acquire_backup_directory_lock_until(&policy.directory, deadline, timeout)?;
+    let backup = create_backup_with_policy_locked(
+        db_path,
+        BackupCreateRequest {
+            operation: Some(operation.to_string()),
+        },
+        policy,
     )
     .with_context(|| format!("backup failed before {operation}"))?;
     let backup_path = backup.backup.path;
@@ -255,17 +436,95 @@ pub fn backup_filename_for(timestamp: DateTime<Utc>) -> String {
     )
 }
 
-fn next_available_backup_path(directory: &Path, timestamp: DateTime<Utc>) -> PathBuf {
-    for offset in 0..3600 {
+#[derive(Debug, Clone)]
+struct BackupPathReservation {
+    final_path: PathBuf,
+    temporary_path: PathBuf,
+    marker_path: PathBuf,
+}
+
+fn reserve_backup_path(
+    directory: &Path,
+    timestamp: DateTime<Utc>,
+) -> Result<BackupPathReservation> {
+    // Names remain Capsule-compatible (second precision), while create_new
+    // makes the reservation itself atomic if another process is already
+    // producing a backup in this directory.
+    for offset in 0..86_400_i64 {
         let candidate = directory.join(backup_filename_for(
             timestamp + chrono::Duration::seconds(offset),
         ));
-        if !candidate.exists() {
-            return candidate;
+        // A published backup owns its second-precision name permanently.
+        // Check the final path before creating a reservation marker; without
+        // this guard a later call could reserve the same name and overwrite
+        // the existing snapshot when running on platforms where rename()
+        // replaces its destination.
+        let manifest = candidate.with_extension(BACKUP_JSON_EXTENSION);
+        if candidate.exists() || manifest.exists() {
+            continue;
+        }
+        let marker = PathBuf::from(format!("{}.reserve", candidate.to_string_lossy()));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&marker)
+        {
+            Ok(_) => {
+                let file_name = candidate
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .ok_or_else(|| anyhow!("backup path is not valid UTF-8"))?;
+                let temporary = directory.join(format!(".{file_name}.tmp-{}", unique_token()));
+                match OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&temporary)
+                {
+                    Ok(_) => {
+                        return Ok(BackupPathReservation {
+                            final_path: candidate,
+                            temporary_path: temporary,
+                            marker_path: marker,
+                        })
+                    }
+                    Err(error) => {
+                        let _ = remove_if_exists(&marker);
+                        if error.kind() == ErrorKind::AlreadyExists {
+                            continue;
+                        }
+                        return Err(error).with_context(|| {
+                            format!(
+                                "failed to reserve temporary backup path {}",
+                                temporary.display()
+                            )
+                        });
+                    }
+                }
+            }
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("failed to reserve backup path {}", candidate.display())
+                })
+            }
         }
     }
 
-    directory.join(backup_filename_for(timestamp))
+    Err(anyhow!(
+        "unable to reserve a unique Capsule backup name in {}",
+        directory.display()
+    ))
+}
+
+fn with_backup_directory_lock<T>(
+    policy: &crate::contracts::BackupPolicy,
+    operation: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    validate_backup_policy(policy)?;
+    fs::create_dir_all(&policy.directory)
+        .with_context(|| format!("failed to create {}", policy.directory.display()))?;
+    let _lock = acquire_backup_directory_lock(&policy.directory)?;
+    operation()
 }
 
 fn apply_backup_retention(backup_directory: &Path, retention_count: usize) -> Result<()> {
@@ -330,7 +589,213 @@ fn verify_backup(path: &Path) -> Result<()> {
         ));
     }
 
+    let integrity =
+        connection.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))?;
+    if !integrity.eq_ignore_ascii_case("ok") {
+        return Err(anyhow!(
+            "backup verification failed integrity_check: {integrity}"
+        ));
+    }
+
+    let mut foreign_keys = connection.prepare("PRAGMA foreign_key_check")?;
+    let mut rows = foreign_keys.query([])?;
+    if rows.next()?.is_some() {
+        return Err(anyhow!(
+            "backup verification failed because foreign-key violations were found"
+        ));
+    }
+
     Ok(())
+}
+
+fn write_manifest_atomically(path: &Path, manifest: &BackupManifest) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow!("manifest path has no parent: {}", path.display()))?;
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| anyhow!("manifest path is not valid UTF-8: {}", path.display()))?;
+    let temporary = parent.join(format!(".{file_name}.tmp-{}", unique_token()));
+    let bytes = serde_json::to_vec_pretty(manifest)?;
+    let result = (|| -> Result<()> {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .with_context(|| format!("failed to create {}", temporary.display()))?;
+        file.write_all(&bytes)
+            .with_context(|| format!("failed to write {}", temporary.display()))?;
+        file.sync_all()
+            .with_context(|| format!("failed to flush {}", temporary.display()))?;
+        drop(file);
+        fs::rename(&temporary, path)
+            .with_context(|| format!("failed to publish {}", path.display()))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = remove_if_exists(&temporary);
+    }
+    result
+}
+
+fn unique_token() -> String {
+    let nanos = Utc::now()
+        .timestamp_nanos_opt()
+        .unwrap_or_else(|| Utc::now().timestamp_micros() * 1_000);
+    format!("{}-{nanos}", process::id())
+}
+
+fn validate_backup_policy(policy: &crate::contracts::BackupPolicy) -> Result<()> {
+    if policy.directory.as_os_str().is_empty() || !policy.directory.is_absolute() {
+        return Err(anyhow!("backup policy directory must be an absolute path"));
+    }
+    if policy.retention_count == 0 || policy.retention_count > db::MAX_BACKUP_RETENTION_COUNT {
+        return Err(anyhow!(
+            "backup retention count must be between 1 and {}",
+            db::MAX_BACKUP_RETENTION_COUNT
+        ));
+    }
+    Ok(())
+}
+
+struct MutationLock {
+    file: Option<File>,
+}
+
+impl Drop for MutationLock {
+    fn drop(&mut self) {
+        if let Some(file) = self.file.take() {
+            let _ = file.unlock();
+        }
+    }
+}
+
+/// Serialize backup + mutation + retention/restore operations across
+/// processes.  SQLite WAL serializes writers only after the backup phase; this
+/// lock closes that pre-backup race while retaining the existing 15-second
+/// bounded wait policy.
+fn acquire_mutation_lock(db_path: &Path) -> Result<MutationLock> {
+    acquire_mutation_lock_with_timeout(db_path, MUTATION_LOCK_WAIT)
+}
+
+fn acquire_mutation_lock_with_timeout(db_path: &Path, timeout: Duration) -> Result<MutationLock> {
+    let deadline = lock_deadline(timeout);
+    acquire_mutation_lock_until(db_path, deadline, timeout)
+}
+
+fn acquire_mutation_lock_until(
+    db_path: &Path,
+    deadline: Instant,
+    timeout: Duration,
+) -> Result<MutationLock> {
+    let canonical = fs::canonicalize(db_path).unwrap_or_else(|_| db_path.to_path_buf());
+    let parent = canonical
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    fs::create_dir_all(&parent)
+        .with_context(|| format!("failed to create {}", parent.display()))?;
+    let path = PathBuf::from(format!("{}.capsule-lock", canonical.to_string_lossy()));
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .with_context(|| format!("failed to open mutation lock {}", path.display()))?;
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(MutationLock { file: Some(file) }),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                if Instant::now() >= deadline {
+                    return Err(anyhow::Error::new(MutationBusy(format!(
+                        "database mutation is busy (lock held for more than {})",
+                        lock_timeout_description(timeout)
+                    ))));
+                }
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                thread::sleep(MUTATION_LOCK_POLL.min(remaining));
+            }
+            Err(std::fs::TryLockError::Error(error)) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "failed to acquire database mutation lock {}",
+                        path.display()
+                    )
+                })
+            }
+        }
+    }
+}
+
+/// Serialize publication and retention when independent databases share a
+/// backup directory.  The sidecar is deliberately persistent; the OS lock is
+/// the ownership mechanism, so a process crash cannot leave an orphaned lock
+/// state that blocks future work.
+fn acquire_backup_directory_lock(directory: &Path) -> Result<MutationLock> {
+    acquire_backup_directory_lock_with_timeout(directory, MUTATION_LOCK_WAIT)
+}
+
+fn acquire_backup_directory_lock_with_timeout(
+    directory: &Path,
+    timeout: Duration,
+) -> Result<MutationLock> {
+    let deadline = lock_deadline(timeout);
+    acquire_backup_directory_lock_until(directory, deadline, timeout)
+}
+
+fn acquire_backup_directory_lock_until(
+    directory: &Path,
+    deadline: Instant,
+    timeout: Duration,
+) -> Result<MutationLock> {
+    let canonical = fs::canonicalize(directory).unwrap_or_else(|_| directory.to_path_buf());
+    let path = PathBuf::from(format!(
+        "{}.capsule-backup-lock",
+        canonical.to_string_lossy()
+    ));
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .with_context(|| format!("failed to open backup directory lock {}", path.display()))?;
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(MutationLock { file: Some(file) }),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                if Instant::now() >= deadline {
+                    return Err(anyhow::Error::new(MutationBusy(format!(
+                        "backup directory is busy (lock held for more than {})",
+                        lock_timeout_description(timeout)
+                    ))));
+                }
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                thread::sleep(MUTATION_LOCK_POLL.min(remaining));
+            }
+            Err(std::fs::TryLockError::Error(error)) => {
+                return Err(error).with_context(|| {
+                    format!("failed to acquire backup directory lock {}", path.display())
+                })
+            }
+        }
+    }
+}
+
+fn lock_deadline(timeout: Duration) -> Instant {
+    Instant::now()
+        .checked_add(timeout)
+        .unwrap_or_else(Instant::now)
+}
+
+fn lock_timeout_description(timeout: Duration) -> String {
+    if timeout.as_secs() > 0 && timeout.subsec_millis() == 0 {
+        format!("{} seconds", timeout.as_secs())
+    } else {
+        format!("{} ms", timeout.as_millis())
+    }
 }
 
 fn backup_info_from_path(path: &Path) -> Result<BackupInfo> {
@@ -575,6 +1040,152 @@ mod tests {
 
         assert!(result.is_err());
         assert!(!write_ran);
+    }
+
+    #[test]
+    fn timed_mutation_lock_honors_caller_budget() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("capsule.db");
+        Connection::open(&db_path).expect("open db");
+
+        let held = acquire_mutation_lock(&db_path).expect("hold mutation lock");
+        let started = Instant::now();
+        let mut write_ran = false;
+        let result = with_mutation_lock_for_database_with_timeout(
+            &db_path,
+            Duration::from_millis(80),
+            |_| {
+                write_ran = true;
+                Ok(())
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(!write_ran);
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(result
+            .expect_err("held lock must time out")
+            .downcast_ref::<MutationBusy>()
+            .is_some());
+        drop(held);
+    }
+
+    #[test]
+    fn explicit_policy_publishes_distinct_verified_backups_and_retains_count() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("capsule.db");
+        let backup_directory = temp_dir.path().join("shared-backups");
+        let connection = Connection::open(&db_path).expect("open db");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE entries (id INTEGER PRIMARY KEY, text TEXT);
+                INSERT INTO entries (text) VALUES ('safe');
+                ",
+            )
+            .expect("fixture");
+        drop(connection);
+        let policy = crate::contracts::BackupPolicy::new(&backup_directory, 2);
+
+        let mut published = Vec::new();
+        for index in 0..4 {
+            let guarded = with_database_backup_for_database_using_policy(
+                &db_path,
+                &format!("test.explicit.{index}"),
+                &policy,
+                |_| Ok(()),
+            )
+            .expect("explicit backup");
+            let path = PathBuf::from(&guarded.audit.backup_path);
+            assert!(path.exists());
+            let connection =
+                Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                    .expect("open verified backup");
+            assert_eq!(
+                connection
+                    .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                    .unwrap(),
+                "ok"
+            );
+            published.push(path);
+
+            let leftovers = fs::read_dir(&backup_directory)
+                .unwrap()
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    name.contains(".tmp-") || name.ends_with(".reserve")
+                })
+                .count();
+            assert_eq!(leftovers, 0);
+        }
+
+        let backups = backup_infos_in_directory(&backup_directory).expect("list explicit backups");
+        assert_eq!(backups.len(), 2);
+        assert_eq!(
+            published
+                .iter()
+                .filter(|path| path.exists())
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn shared_backup_directory_lock_keeps_concurrent_databases_distinct() {
+        use std::sync::{Arc, Barrier};
+
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let backup_directory = temp_dir.path().join("shared-backups");
+        let mut requests = Vec::new();
+        for index in 0..2 {
+            let db_path = temp_dir.path().join(format!("capsule-{index}.db"));
+            let connection = Connection::open(&db_path).expect("open db");
+            connection
+                .execute_batch(
+                    "CREATE TABLE entries (id INTEGER PRIMARY KEY, text TEXT);
+                     INSERT INTO entries (text) VALUES ('safe');",
+                )
+                .expect("fixture");
+            drop(connection);
+            requests.push(db_path);
+        }
+        let policy = crate::contracts::BackupPolicy::new(&backup_directory, 10);
+        let barrier = Arc::new(Barrier::new(2));
+        let handles = requests
+            .into_iter()
+            .map(|db_path| {
+                let barrier = barrier.clone();
+                let policy = policy.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    with_database_backup_for_database_using_policy(
+                        &db_path,
+                        "test.shared",
+                        &policy,
+                        |_| Ok(()),
+                    )
+                    .expect("shared backup")
+                })
+            })
+            .collect::<Vec<_>>();
+        let responses = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>();
+        let paths = responses
+            .iter()
+            .map(|response| response.audit.backup_path.clone())
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(paths.len(), 2);
+        assert_eq!(
+            backup_infos_in_directory(&backup_directory).unwrap().len(),
+            2
+        );
+        for path in paths {
+            assert!(PathBuf::from(path).exists());
+        }
     }
 
     #[test]
