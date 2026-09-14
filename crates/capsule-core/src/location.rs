@@ -66,8 +66,20 @@ pub fn auto_capture_location_with_config_path(
     }
 
     let request = crate::context::ContextRequest::capture(db_path, entry_uuid, settings.policy);
-    let result = crate::context::ContextService::default().capture(&request)?;
-    Ok(result.location.is_some())
+    let service = crate::context::ContextService::default();
+    let preparation = service.prepare(&request)?;
+    if !preparation.is_persistable() {
+        return Ok(false);
+    }
+    let timeout = preparation.remaining().unwrap_or_default();
+    if timeout.is_zero() {
+        return Ok(false);
+    }
+    let result =
+        crate::backup::with_mutation_lock_for_database_with_timeout(db_path, timeout, move |_| {
+            service.persist_prepared(&request, preparation)
+        })?;
+    Ok(result.result.location.is_some())
 }
 
 /// Report whether mobile rows still have missing context.  This is a strict
@@ -97,8 +109,9 @@ pub fn has_pending_mobile_location_enrichment(db_path: &Path) -> Result<bool> {
 }
 
 /// Enrich pending mobile rows without reserving a second backup.  The sync
-/// workflow already wraps its entire operation in Capsule's verified backup
-/// helper; explicit `cap enrich` uses the context module's backup wrapper.
+/// workflow creates the verified backup for its mutation first, releases that
+/// guard while providers run, and this helper uses a bounded lock-only merge.
+/// Explicit `cap enrich` uses the context module's policy-aware backup wrapper.
 pub fn enrich_pending_mobile_locations(db_path: &Path) -> Result<usize> {
     crate::context::enrich_pending_mobile_locations(db_path)
 }

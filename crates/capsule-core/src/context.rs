@@ -24,6 +24,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBeha
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    backup,
     contracts::{ContextLocation, ContextPolicy, ContextResult, ContextStatus, WeatherObservation},
     location, providers,
 };
@@ -333,6 +334,10 @@ pub struct ContextRequest {
     pub skip: bool,
     pub config_valid: bool,
     pub enrich: bool,
+    /// Optional immutable backup destination/retention snapshot.  Explicit
+    /// enrichment uses this policy rather than consulting process settings
+    /// after provider work has started.
+    pub backup_policy: Option<crate::contracts::BackupPolicy>,
 }
 
 impl ContextRequest {
@@ -348,6 +353,7 @@ impl ContextRequest {
             skip: false,
             config_valid: true,
             enrich: false,
+            backup_policy: None,
         }
     }
 
@@ -359,6 +365,11 @@ impl ContextRequest {
 
     pub fn without_context(mut self) -> Self {
         self.skip = true;
+        self
+    }
+
+    pub fn with_backup_policy(mut self, policy: crate::contracts::BackupPolicy) -> Self {
+        self.backup_policy = Some(policy);
         self
     }
 }
@@ -416,6 +427,7 @@ pub struct ContextPreparation {
     entry_uuid: String,
     database_identity: Option<crate::db::FileIdentity>,
     enrich: bool,
+    backup_policy: Option<crate::contracts::BackupPolicy>,
 }
 
 impl ContextPreparation {
@@ -425,6 +437,10 @@ impl ContextPreparation {
 
     pub fn remaining(&self) -> Option<Duration> {
         self.deadline.remaining()
+    }
+
+    pub fn is_persistable(&self) -> bool {
+        self.persistable
     }
 
     pub fn into_report(self) -> ContextReport {
@@ -441,6 +457,7 @@ impl ContextPreparation {
             entry_uuid: String::new(),
             database_identity: None,
             enrich: false,
+            backup_policy: None,
         }
     }
 
@@ -449,6 +466,7 @@ impl ContextPreparation {
             && self.entry_uuid == request.entry_uuid
             && self.enrich == request.enrich
             && self.database_identity == request.database_identity
+            && self.backup_policy == request.backup_policy
     }
 }
 
@@ -639,6 +657,7 @@ impl ContextService {
             entry_uuid: request.entry_uuid.clone(),
             database_identity: request.database_identity.clone(),
             enrich: request.enrich,
+            backup_policy: request.backup_policy.clone(),
         })
     }
 
@@ -1211,15 +1230,28 @@ pub fn enrich_context_with_dependencies(
     dependencies: ContextDependencies,
 ) -> Result<ContextReport> {
     let service = ContextService::new(dependencies);
-    let request = request.clone();
+    let mut request = request.clone();
+    if request.backup_policy.is_none() {
+        request.backup_policy = Some(default_backup_policy(&request.db_path));
+    }
     let preparation = service.prepare(&request)?;
-    if !preparation.persistable {
+    if !preparation.is_persistable() {
         return Ok(preparation.into_report());
     }
+    let timeout = preparation.remaining().unwrap_or_default();
+    if timeout.is_zero() {
+        return Ok(preparation.into_report());
+    }
+    let backup_policy = request
+        .backup_policy
+        .clone()
+        .expect("context enrichment sets a backup policy before prepare");
     let db_path = request.db_path.clone();
-    let guarded = crate::backup::with_database_backup_for_database(
+    let guarded = crate::backup::with_database_backup_for_database_using_policy_with_timeout(
         &db_path,
         "context.enrich",
+        timeout,
+        &backup_policy,
         move |_path| service.persist_prepared(&request, preparation),
     )?;
     Ok(guarded.value)
@@ -1227,28 +1259,46 @@ pub fn enrich_context_with_dependencies(
 
 /// Explicit enrichment creates one verified fresh backup, then fills only
 /// missing fields.  The sync workflow calls the lower-level pending helper
-/// inside its already-guarded backup instead.
+/// after its sync backup has been released; that helper uses a lock-only
+/// persistence phase.
 pub fn enrich_context(
     db_path: &Path,
     entry_uuid: &str,
     policy: ContextPolicy,
 ) -> Result<ContextResult> {
     let service = ContextService::default();
-    let request = ContextRequest::enrich(db_path, entry_uuid, policy);
+    let backup_policy = default_backup_policy(db_path);
+    let request = ContextRequest::enrich(db_path, entry_uuid, policy)
+        .with_backup_policy(backup_policy.clone());
     let preparation = service.prepare(&request)?;
-    if !preparation.persistable {
+    if !preparation.is_persistable() {
         return Ok(preparation.into_report().result);
     }
-    let guarded = crate::backup::with_database_backup_for_database(
+    let timeout = preparation.remaining().unwrap_or_default();
+    if timeout.is_zero() {
+        return Ok(preparation.into_report().result);
+    }
+    let guarded = crate::backup::with_database_backup_for_database_using_policy_with_timeout(
         db_path,
         "context.enrich",
+        timeout,
+        &backup_policy,
         move |_path| service.persist_prepared(&request, preparation),
     )?;
     Ok(guarded.value.result)
 }
 
-/// Enrich all pending mobile rows for the existing desktop sync wrapper.  No
-/// backup is made here because the wrapper has already reserved one.
+fn default_backup_policy(db_path: &Path) -> crate::contracts::BackupPolicy {
+    crate::contracts::BackupPolicy::new(
+        crate::db::backup_directory_for_database(db_path),
+        crate::db::backup_retention_count_for_database(db_path),
+    )
+}
+
+/// Enrich all pending mobile rows for the existing desktop sync wrapper.
+/// Provider work is prepared before acquiring the caller-owned mutation lock;
+/// only the short merge/persist phase runs under that lock.  No backup is made
+/// here because the sync wrapper already reserved one for its mutation.
 pub fn enrich_pending_mobile_locations(db_path: &Path) -> Result<usize> {
     let settings = location::load_context_settings(db_path, None)?;
     if !settings.valid || !settings.policy.auto_capture {
@@ -1274,16 +1324,36 @@ pub fn enrich_pending_mobile_locations(db_path: &Path) -> Result<usize> {
     drop(read);
 
     let service = ContextService::default();
-    let mut enriched = 0;
+    let mut prepared = Vec::new();
     for uuid in uuids {
         let mut request = ContextRequest::enrich(db_path, &uuid, settings.policy.clone());
         request.config_valid = settings.valid;
-        let report = service.capture_report(&request)?;
-        if report.result.persisted_at.is_some() {
-            enriched += 1;
+        let preparation = service.prepare(&request)?;
+        if preparation.is_persistable() {
+            prepared.push((request, preparation));
         }
     }
-    Ok(enriched)
+    if prepared.is_empty() {
+        return Ok(0);
+    }
+    let timeout = prepared
+        .iter()
+        .filter_map(|(_, preparation)| preparation.remaining())
+        .min()
+        .unwrap_or_default();
+    if timeout.is_zero() {
+        return Ok(0);
+    }
+    backup::with_mutation_lock_for_database_with_timeout(db_path, timeout, move |_| {
+        let mut enriched = 0;
+        for (request, preparation) in prepared {
+            let report = service.persist_prepared(&request, preparation)?;
+            if report.result.persisted_at.is_some() {
+                enriched += 1;
+            }
+        }
+        Ok(enriched)
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -1468,6 +1538,13 @@ fn persist_context(
         return Ok(None);
     }
     let mut connection = open_read_write_with_timeout(path, timeout)?;
+    // Opening/configuring SQLite can consume a meaningful part of the
+    // invocation budget (notably while switching journal mode).  Refresh the
+    // busy timeout from the live deadline immediately before BEGIN so that a
+    // contended writer cannot wait on the stale pre-open timeout.
+    if !refresh_write_timeout(&connection, deadline, cancellation)? {
+        return Ok(None);
+    }
     let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     if cancellation.is_cancelled() || deadline.expired() {
         return Ok(None);
@@ -1814,6 +1891,31 @@ fn open_read_write_with_timeout(path: &Path, timeout: Duration) -> Result<Connec
     Ok(connection)
 }
 
+fn refresh_write_timeout(
+    connection: &Connection,
+    deadline: &ContextDeadline,
+    cancellation: &dyn Cancellation,
+) -> Result<bool> {
+    if cancellation.is_cancelled() {
+        return Ok(false);
+    }
+    let Some(timeout) = deadline.remaining() else {
+        return Ok(false);
+    };
+    connection.busy_timeout(timeout)?;
+    // A cancellation/deadline transition can happen while configuring the
+    // connection.  Do not enter BEGIN after that transition, and reset the
+    // timeout once more from the final remaining budget.
+    if cancellation.is_cancelled() {
+        return Ok(false);
+    }
+    let Some(timeout) = deadline.remaining() else {
+        return Ok(false);
+    };
+    connection.busy_timeout(timeout)?;
+    Ok(true)
+}
+
 fn local_timestamp(value: DateTime<Utc>) -> String {
     value
         .with_timezone(&chrono::Local)
@@ -2053,6 +2155,125 @@ mod tests {
     }
 
     #[test]
+    fn explicit_enrichment_uses_frozen_backup_policy_after_provider_work() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = fixture_database(temp_dir.path(), "2026-09-14 11:59");
+        let backup_dir = temp_dir.path().join("backups");
+        let connection = Connection::open(&db_path).expect("db");
+        location::ensure_schema(&connection).expect("location schema");
+        connection
+            .execute(
+                "INSERT INTO plugin_entry_locations
+                    (entry_uuid, latitude, longitude, source, created_at)
+                 VALUES ('entry_test', 69.65, 18.96, 'mobile', '2026-09-14 11:59')",
+                [],
+            )
+            .expect("location");
+        drop(connection);
+        location::set_test_auto_capture_fixture(Some(location::TestAutoCaptureFixture {
+            latitude: 69.65,
+            longitude: 18.96,
+            place_name: Some("Tromso, Norway".to_string()),
+            source: "mobile".to_string(),
+            weather_temp_c: Some(12.8),
+            weather_condition: Some("Partly cloudy".to_string()),
+        }));
+        let request = ContextRequest::enrich(
+            &db_path,
+            "entry_test",
+            ContextPolicy {
+                database_path: db_path.clone(),
+                ..ContextPolicy::default()
+            },
+        )
+        .with_backup_policy(crate::contracts::BackupPolicy::new(&backup_dir, 2));
+        let dependencies = ContextDependencies {
+            http: Arc::new(FakeHttp::new(Vec::new())),
+            clock: Arc::new(ManualClock::new(
+                Utc.with_ymd_and_hms(2026, 9, 14, 12, 0, 0).unwrap(),
+            )),
+            cache: Arc::new(NoopContextCache),
+            cancellation: Arc::new(NeverCancel),
+        };
+        let report =
+            enrich_context_with_dependencies(&request, dependencies).expect("explicit enrich");
+        location::set_test_auto_capture_fixture(None);
+        assert!(report.result.persisted_at.is_some());
+        assert!(report.result.location.is_some());
+        assert!(backup_dir.exists());
+        assert_eq!(
+            std::fs::read_dir(&backup_dir)
+                .expect("backup directory")
+                .filter_map(Result::ok)
+                .count(),
+            2,
+            "database and manifest are published together",
+        );
+    }
+
+    #[test]
+    fn prepared_context_cannot_be_persisted_for_a_different_request_binding() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = fixture_database(temp_dir.path(), "2026-09-14 11:59");
+        location::set_test_auto_capture_fixture(Some(location::TestAutoCaptureFixture {
+            latitude: 69.65,
+            longitude: 18.96,
+            place_name: Some("Tromso, Norway".to_string()),
+            source: "ip".to_string(),
+            weather_temp_c: Some(12.8),
+            weather_condition: Some("Partly cloudy".to_string()),
+        }));
+        let clock = Arc::new(ManualClock::new(
+            Utc.with_ymd_and_hms(2026, 9, 14, 12, 0, 0).unwrap(),
+        ));
+        let dependencies = ContextDependencies {
+            http: Arc::new(FakeHttp::new(Vec::new())),
+            clock: clock.clone(),
+            cache: Arc::new(NoopContextCache),
+            cancellation: Arc::new(NeverCancel),
+        };
+        let service = ContextService::new(dependencies);
+        let original = ContextRequest::capture(
+            &db_path,
+            "entry_test",
+            ContextPolicy {
+                database_path: db_path.clone(),
+                ..ContextPolicy::default()
+            },
+        );
+        let preparation = service.prepare(&original).expect("prepare");
+        let different = ContextRequest::capture(
+            &db_path,
+            "different_entry",
+            ContextPolicy {
+                database_path: db_path.clone(),
+                ..ContextPolicy::default()
+            },
+        );
+        let report = service
+            .persist_prepared(&different, preparation)
+            .expect("binding check");
+        location::set_test_auto_capture_fixture(None);
+        assert!(report.result.persisted_at.is_none());
+        assert!(report.result.location.is_none());
+        assert!(report
+            .result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("does not match")));
+        let connection = Connection::open(&db_path).expect("db");
+        let table_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'table' AND name = 'plugin_entry_locations'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("table count");
+        assert_eq!(table_count, 0);
+    }
+
+    #[test]
     fn deadline_is_single_budget_not_multiplied() {
         let clock = Arc::new(ManualClock::new(Utc::now()));
         let deadline = ContextDeadline::new(clock.clone(), 8_000);
@@ -2061,6 +2282,29 @@ mod tests {
         assert!(deadline.remaining().unwrap() <= Duration::from_secs(1));
         clock.advance(Duration::from_secs(1));
         assert!(deadline.expired());
+    }
+
+    #[test]
+    fn persistence_refreshes_busy_timeout_after_connection_setup_consumes_budget() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = fixture_database(temp_dir.path(), "2026-09-14 11:59");
+        let clock = Arc::new(ManualClock::new(Utc::now()));
+        let deadline = ContextDeadline::new(clock.clone(), 8_000);
+        let initial_timeout = deadline.remaining().expect("initial budget");
+        let connection =
+            open_read_write_with_timeout(&db_path, initial_timeout).expect("write connection");
+
+        // Simulate journal-mode setup consuming most of the invocation budget
+        // before BEGIN IMMEDIATE is attempted.
+        clock.advance(Duration::from_millis(7_500));
+        assert!(refresh_write_timeout(&connection, &deadline, &NeverCancel).expect("refresh"));
+        let busy_timeout_ms: i64 = connection
+            .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
+            .expect("busy timeout");
+        assert!(
+            busy_timeout_ms <= 500,
+            "BEGIN must use the remaining budget, not the pre-open timeout"
+        );
     }
 
     #[test]
