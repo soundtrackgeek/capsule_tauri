@@ -1094,22 +1094,30 @@ fn run_sync_with_backup_if_needed(db_path: &Path, sync_dir: &Path) -> Result<Syn
     }
 
     let sync_dir = sync_dir.to_path_buf();
+    let sync_dir_for_run = sync_dir.clone();
     let guarded = backup::with_database_backup_for_database(db_path, "sync.run", move |path| {
-        let mut response = run_sync_with_retries(path, &sync_dir)?;
-        let enriched = location::enrich_pending_mobile_locations(path)?;
-        if enriched > 0 {
-            response.exported_count = refresh_sync_files_from_database(path, &sync_dir)?;
-            let label = if enriched == 1 {
-                "1 mobile location enriched".to_string()
-            } else {
-                format!("{enriched} mobile locations enriched")
-            };
-            response.summary = append_summary_note(&response.summary, &label);
-            record_sync_summary_override(path, &response.completed_at, &response.summary)?;
-        }
-        Ok(response)
+        run_sync_with_retries(path, &sync_dir_for_run)
     })?;
-    Ok(guarded.value)
+    let mut response = guarded.value;
+
+    // Provider work must not run while the sync backup/mutation guard is held.
+    // The shared context adapter re-reads and writes each pending row with its
+    // own bounded SQLite transaction after this guard is released.  The
+    // already-created sync backup still covers the completed sync mutation;
+    // WP02's lock-only helper can be used by the adapter when the shared
+    // capture guard is integrated.
+    let enriched = location::enrich_pending_mobile_locations(db_path)?;
+    if enriched > 0 {
+        response.exported_count = refresh_sync_files_from_database(db_path, &sync_dir)?;
+        let label = if enriched == 1 {
+            "1 mobile location enriched".to_string()
+        } else {
+            format!("{enriched} mobile locations enriched")
+        };
+        response.summary = append_summary_note(&response.summary, &label);
+        record_sync_summary_override(db_path, &response.completed_at, &response.summary)?;
+    }
+    Ok(response)
 }
 
 fn run_sync_without_backup_if_unchanged(

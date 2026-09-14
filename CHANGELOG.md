@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.37.1-dev.3 - 2026-09-14
+
+### Added
+
+- Added the shared bounded context service with injectable HTTP, clock,
+  cancellation, and weather-cache seams for location and weather capture.
+- Added structured provider outcomes, Open-Meteo/MET Norway adapters, shared
+  geocoding-cache persistence, fifteen-minute weather-cache handling, and
+  missing-field mobile enrichment.
+
+### Fixed
+
+- Preserved manual context during concurrent enrichment, rejected stale
+  database identities, prevented deleted location rows from being resurrected,
+  and avoided attaching weather to coordinates changed during provider work.
+
 ## 0.37.1 - 2026-09-14
 
 ### Added
