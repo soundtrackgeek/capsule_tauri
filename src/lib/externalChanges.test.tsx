@@ -318,9 +318,28 @@ describe("external refresh scroll snapshots", () => {
 
     const snapshot = captureScrollPosition();
     container.scrollTop = 0;
-    restoreScrollPosition(snapshot);
+    const tracker = trackScrollIntent();
+    restoreScrollPosition(snapshot, tracker);
 
     expect(container.scrollTop).toBe(100);
+    tracker.dispose();
+    container.remove();
+  });
+
+  test("restores an explicit tracked container after a layout clamp", () => {
+    vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+    const container = document.createElement("div");
+    container.dataset.externalScroll = "entries";
+    container.scrollTop = 100;
+    document.body.append(container);
+
+    const snapshot = captureScrollPosition();
+    container.scrollTop = 40;
+    const tracker = trackScrollIntent();
+    restoreScrollPosition(snapshot, tracker);
+
+    expect(container.scrollTop).toBe(100);
+    tracker.dispose();
     container.remove();
   });
 
@@ -355,6 +374,36 @@ describe("external refresh scroll snapshots", () => {
     restoreScrollPosition(snapshot, tracker);
 
     expect(container.scrollTop).toBe(260);
+    tracker.dispose();
+    container.remove();
+  });
+
+  test("does not mistake a trusted browser scroll event for user intent", () => {
+    vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+    const scrollListeners: EventListener[] = [];
+    const nativeAddEventListener = window.addEventListener;
+    vi.spyOn(window, "addEventListener").mockImplementation((type, listener, options) => {
+      if (type === "scroll" && typeof listener === "function") {
+        scrollListeners.push(listener);
+      }
+      nativeAddEventListener.call(window, type, listener, options);
+    });
+    const container = document.createElement("div");
+    container.dataset.externalScroll = "entries";
+    container.scrollTop = 100;
+    document.body.append(container);
+
+    const snapshot = captureScrollPosition();
+    const tracker = trackScrollIntent();
+    container.scrollTop = 40;
+    // jsdom exposes isTrusted as a non-configurable false getter, so invoke
+    // any captured scroll handler with the faithful user-agent event shape.
+    for (const listener of scrollListeners) {
+      listener({ isTrusted: true } as Event);
+    }
+    restoreScrollPosition(snapshot, tracker);
+
+    expect(container.scrollTop).toBe(100);
     tracker.dispose();
     container.remove();
   });

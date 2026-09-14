@@ -1452,7 +1452,8 @@ function App() {
       externalRefreshScrollIntentRef.current = scrollIntent;
       const selectedUuid = selectedEntry?.uuid ?? null;
       const editingUuid = editingEntry?.uuid ?? null;
-      const operation = (async () => {
+      let operation: Promise<void> = Promise.resolve();
+      operation = (async () => {
         try {
           // `refresh` updates status/dashboard/path projections but does not
           // touch filters, ordering, selection, composer drafts, or scroll.
@@ -1546,7 +1547,10 @@ function App() {
             if (externalRefreshScrollIntentRef.current === scrollIntent) {
               externalRefreshScrollIntentRef.current = null;
             }
-            externalRefreshInFlightRef.current = null;
+            if (externalRefreshInFlightRef.current === operation) {
+              externalRefreshInFlightRef.current = null;
+              externalRefreshPendingRef.current = null;
+            }
           } else {
             // React may commit the refreshed list on the next animation frame.
             // Restore after that commit, but only when the user has not scrolled
@@ -1561,22 +1565,34 @@ function App() {
                 }
               }
             };
+            const finishRefresh = () => {
+              try {
+                restore();
+              } finally {
+                // Keep the refresh marked in-flight until the restoration
+                // lifecycle completes. A queued external change must not
+                // capture a layout-reset zero before this snapshot is restored.
+                if (externalRefreshInFlightRef.current === operation) {
+                  externalRefreshInFlightRef.current = null;
+                  const pendingChange = externalRefreshPendingRef.current;
+                  externalRefreshPendingRef.current = null;
+                  if (pendingChange && externalRefreshMountedRef.current) {
+                    const replay = externalRefreshCallbackRef.current?.(pendingChange);
+                    void replay?.catch(() => undefined);
+                  }
+                }
+              }
+            };
             if (typeof window.requestAnimationFrame === "function") {
               if (externalRefreshFrameRef.current !== null) {
                 window.cancelAnimationFrame(externalRefreshFrameRef.current);
               }
               externalRefreshFrameRef.current = window.requestAnimationFrame(() => {
                 externalRefreshFrameRef.current = null;
-                restore();
+                finishRefresh();
               });
             } else {
-              restore();
-            }
-            externalRefreshInFlightRef.current = null;
-            const pendingChange = externalRefreshPendingRef.current;
-            externalRefreshPendingRef.current = null;
-            if (pendingChange) {
-              void externalRefreshCallbackRef.current?.(pendingChange);
+              finishRefresh();
             }
           }
         }
