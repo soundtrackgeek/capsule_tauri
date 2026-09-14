@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.37.1-dev.13 - 2026-09-14
+
+### Added
+
+- Complete response parity checks between the legacy desktop writing calendar
+  and the shared core, including image totals and custom mood sentiments.
+
 ## 0.37.1-dev.11 - 2026-09-14
 
 ### Added

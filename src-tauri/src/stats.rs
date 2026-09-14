@@ -2731,6 +2731,14 @@ mod tests {
 
         let response = get_writing_calendar_for_database(&db_path, Some(2026)).expect("calendar");
 
+        let shared = capsule_core::stats::get_writing_calendar_for_database(&db_path, Some(2026))
+            .expect("shared calendar");
+        assert_eq!(
+            serde_json::to_value(&response).unwrap(),
+            serde_json::to_value(&shared).unwrap(),
+            "shared calendar must preserve the complete desktop response"
+        );
+
         assert_eq!(response.year, 2026);
         assert_eq!(response.active_days, 3);
         assert_eq!(response.max_entry_count, 2);
@@ -2769,6 +2777,12 @@ mod tests {
         assert_close(analytics.monthly_trend[0].average_mood_sentiment, 0.75);
 
         let calendar = get_writing_calendar_for_database(&db_path, Some(2026)).expect("calendar");
+        let shared = capsule_core::stats::get_writing_calendar_for_database(&db_path, Some(2026))
+            .expect("shared custom mood calendar");
+        assert_eq!(
+            serde_json::to_value(&calendar).unwrap(),
+            serde_json::to_value(&shared).unwrap()
+        );
         let focused_day = calendar
             .days
             .iter()
