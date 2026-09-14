@@ -36,7 +36,9 @@ explicit capability-gated AI/sync surfaces:
 - Automatic external-journal change detection while data views are visible,
   with a persistent read-only SQLite probe, WAL-aware replacement handling,
   focus/tray rechecks, and refreshes that preserve filters, selection, scroll,
-  and unsaved composer drafts. It does not start `cap` or require a daemon.
+  and unsaved composer drafts, including layout-reset/remounted scroll panels
+  without overriding newer user scroll intent. It does not start `cap` or
+  require a daemon.
 - Dashboard “Simply the Best!” cards for six all-time records—most capsules and
   words in a day, most tags and words on one capsule, and biggest months by
   capsules and words—plus counts for total entries, total tags, total words

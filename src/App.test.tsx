@@ -148,6 +148,73 @@ describe("App Writer settings", () => {
     ).toBeInTheDocument();
   });
 
+  test("keeps a newer entry selection while an external refresh for the prior entry is deferred", async () => {
+    const externalProbe = vi
+      .spyOn(backend, "checkExternalChanges")
+      .mockResolvedValueOnce({
+        changed: false,
+        available: true,
+        reopened: false,
+        databasePath: "fixture.db",
+        reason: null,
+      })
+      .mockResolvedValueOnce({
+        changed: true,
+        available: true,
+        reopened: false,
+        databasePath: "fixture.db",
+        reason: "data_version",
+      })
+      .mockResolvedValue({
+        changed: false,
+        available: true,
+        reopened: false,
+        databasePath: "fixture.db",
+        reason: null,
+      });
+    const originalGetDatabaseStatus = backend.getDatabaseStatus;
+    let deferExternalRefresh = false;
+    let releaseRefresh: () => void = () => {};
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    let resolveRefreshStarted: () => void = () => {};
+    const refreshStarted = new Promise<void>((resolve) => {
+      resolveRefreshStarted = resolve;
+    });
+    vi.spyOn(backend, "getDatabaseStatus").mockImplementation(async () => {
+      if (deferExternalRefresh) {
+        resolveRefreshStarted();
+        await refreshGate;
+      }
+      return originalGetDatabaseStatus();
+    });
+
+    try {
+      render(<App />);
+      await waitFor(() => expect(externalProbe).toHaveBeenCalledTimes(1));
+      fireEvent.click(screen.getByRole("button", { name: "Entries" }));
+      const entriesView = await screen.findByRole("region", { name: "Entries" });
+      fireEvent.click(await within(entriesView).findByRole("button", { name: /Phase 1 shape/ }));
+      await within(entriesView).findByRole("heading", { name: "Phase 1 shape", level: 3 });
+
+      deferExternalRefresh = true;
+      window.dispatchEvent(new Event("focus"));
+      await refreshStarted;
+
+      fireEvent.click(within(entriesView).getByRole("button", { name: /Art note/ }));
+      await within(entriesView).findByRole("heading", { name: "Art note", level: 3 });
+      releaseRefresh();
+
+      await screen.findByText("Updated from an external journal change.", {}, { timeout: 5000 });
+      expect(
+        within(entriesView).getByRole("heading", { name: "Art note", level: 3 }),
+      ).toBeInTheDocument();
+    } finally {
+      releaseRefresh();
+    }
+  });
+
   test("shows the full random entry above the compact recent entries", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     render(<App />);

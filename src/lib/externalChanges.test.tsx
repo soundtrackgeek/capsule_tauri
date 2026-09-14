@@ -6,6 +6,7 @@ import {
   EXTERNAL_CHANGE_POLL_INTERVAL_MS,
   captureScrollPosition,
   restoreScrollPosition,
+  trackScrollIntent,
   useExternalChanges,
 } from "./externalChanges";
 import type { ExternalChangeStatus } from "../types";
@@ -305,6 +306,56 @@ describe("external refresh scroll snapshots", () => {
 
     expect(container.scrollTop).toBe(260);
     expect(scrollTo).toHaveBeenCalledTimes(1);
+    container.remove();
+  });
+
+  test("restores a tracked container after a layout reset", () => {
+    vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+    const container = document.createElement("div");
+    container.dataset.externalScroll = "entries";
+    container.scrollTop = 100;
+    document.body.append(container);
+
+    const snapshot = captureScrollPosition();
+    container.scrollTop = 0;
+    restoreScrollPosition(snapshot);
+
+    expect(container.scrollTop).toBe(100);
+    container.remove();
+  });
+
+  test("restores a remounted tracked container by marker and occurrence", () => {
+    vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+    const original = document.createElement("div");
+    original.dataset.externalScroll = "entries";
+    original.scrollTop = 100;
+    document.body.append(original);
+
+    const snapshot = captureScrollPosition();
+    original.remove();
+    const remounted = document.createElement("div");
+    remounted.dataset.externalScroll = "entries";
+    document.body.append(remounted);
+    restoreScrollPosition(snapshot);
+
+    expect(remounted.scrollTop).toBe(100);
+    remounted.remove();
+  });
+
+  test("keeps a newer user wheel scroll instead of restoring the snapshot", () => {
+    const container = document.createElement("div");
+    container.dataset.externalScroll = "entries";
+    container.scrollTop = 100;
+    document.body.append(container);
+
+    const snapshot = captureScrollPosition();
+    const tracker = trackScrollIntent();
+    container.scrollTop = 260;
+    container.dispatchEvent(new Event("wheel", { bubbles: true }));
+    restoreScrollPosition(snapshot, tracker);
+
+    expect(container.scrollTop).toBe(260);
+    tracker.dispose();
     container.remove();
   });
 });

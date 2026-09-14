@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.37.1-dev.12 - 2026-09-14
+
+### Fixed
+
+- External-refresh scroll snapshots now restore layout-reset or remounted
+  panels while honoring newer user scroll intent, and deferred refreshes keep
+  a newer entry selection from being replaced by an older request.
+
 ## 0.37.1-dev.8 - 2026-09-14
 
 ### Added
