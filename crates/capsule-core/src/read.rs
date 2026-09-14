@@ -8,7 +8,6 @@
 
 use std::{
     collections::BTreeMap,
-    fs,
     path::{Path, PathBuf},
 };
 
@@ -16,10 +15,9 @@ use anyhow::{anyhow, Context, Result};
 use chrono::{Local, NaiveDate};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 
 use crate::{
-    db::{self, CapabilityReport, PathSource},
+    db::{self, CapabilityReport},
     entries,
     models::{
         Entry, EntryFilters, EntryListResponse, EntrySort, MoodUsage, SearchRequest,
@@ -111,23 +109,6 @@ impl EntryKey {
         }
         Ok(Self::Uuid(value.to_owned()))
     }
-}
-
-/// Safe, non-network context settings report used by `cap context`.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ContextReport {
-    pub config_path: Option<String>,
-    pub config_source: PathSource,
-    pub config_exists: bool,
-    pub config_valid: bool,
-    pub auto_capture: bool,
-    pub use_default_location: bool,
-    pub default_location_name: Option<String>,
-    pub auto_capture_method: String,
-    pub weather_provider: String,
-    pub geocoding_cache_hours: i64,
-    pub warnings: Vec<String>,
 }
 
 /// A path-bound reader.  No method re-resolves environment variables or
@@ -406,72 +387,15 @@ impl JournalReader {
         Ok(metadata_page(items, total, options, warnings))
     }
 
-    pub fn context_report(&self, config_path: Option<&Path>) -> Result<ContextReport> {
-        let (path, source) = match config_path {
-            Some(path) => (Some(path.to_path_buf()), PathSource::Explicit),
-            None => (
-                Some(db::database_directory_for_database(&self.db_path).join("config.json")),
-                PathSource::Fallback,
-            ),
-        };
-        let mut report = ContextReport {
-            config_path: path.as_deref().map(db::path_to_string),
-            config_source: source,
-            config_exists: false,
-            config_valid: false,
-            auto_capture: true,
-            use_default_location: false,
-            default_location_name: None,
-            auto_capture_method: "ip".to_string(),
-            weather_provider: "open_meteo".to_string(),
-            geocoding_cache_hours: 720,
-            warnings: Vec::new(),
-        };
-        let Some(path) = path else {
-            report
-                .warnings
-                .push("No location configuration path was resolved.".to_string());
-            return Ok(report);
-        };
-        if !path.is_file() {
-            report.warnings.push(format!(
-                "Location configuration file is missing: {}",
-                path.display()
-            ));
-            return Ok(report);
-        }
-        report.config_exists = true;
-        let raw = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
-        let value: JsonValue = serde_json::from_slice(&raw)
-            .with_context(|| format!("failed to parse {} as JSON", path.display()))?;
-        let object = value
-            .as_object()
-            .ok_or_else(|| anyhow!("location configuration must be a JSON object"))?;
-        report.config_valid = true;
-        report.auto_capture = bool_value(object, "location.auto_capture", true);
-        report.use_default_location = bool_value(object, "location.use_default_location", false);
-        report.default_location_name = string_value(object, "location.default_location_name");
-        report.auto_capture_method = string_value(object, "location.auto_capture_method")
-            .unwrap_or_else(|| "ip".to_string());
-        report.weather_provider = string_value(object, "location.weather_provider")
-            .unwrap_or_else(|| "open_meteo".to_string());
-        report.geocoding_cache_hours = string_value(object, "location.geocoding_cache_hours")
-            .and_then(|value| value.parse::<i64>().ok())
-            .filter(|value| *value > 0)
-            .unwrap_or(720);
-        if !object.contains_key("location.auto_capture") {
-            report.warnings.push(
-                "location.auto_capture is not configured; Capsule default true is active."
-                    .to_string(),
-            );
-        }
-        if !object.contains_key("location.weather_provider") {
-            report.warnings.push(
-                "location.weather_provider is not configured; Open-Meteo default is active."
-                    .to_string(),
-            );
-        }
-        Ok(report)
+    /// Load the shared, safe context policy for this bound database.  The
+    /// caller supplies the resolver's exact config path, so this method never
+    /// re-resolves process environment or sibling candidates.
+    pub fn context_settings(
+        &self,
+        config_path: Option<&Path>,
+    ) -> Result<crate::location::ContextSettings> {
+        self.ensure_readable_schema()?;
+        crate::location::load_context_settings(&self.db_path, config_path)
     }
 
     fn list_with_filters(
@@ -596,30 +520,6 @@ fn resolve_entry_key(
     Ok((display_uuid, selected.0, selected.1, selected.2))
 }
 
-fn bool_value(object: &serde_json::Map<String, JsonValue>, key: &str, default: bool) -> bool {
-    match object.get(key) {
-        Some(JsonValue::Bool(value)) => *value,
-        Some(JsonValue::String(value)) => matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "true" | "1" | "yes" | "on"
-        ),
-        Some(JsonValue::Number(value)) => value.as_i64().unwrap_or(0) != 0,
-        _ => default,
-    }
-}
-
-fn string_value(object: &serde_json::Map<String, JsonValue>, key: &str) -> Option<String> {
-    let value = object.get(key)?;
-    let value = match value {
-        JsonValue::String(value) => value.clone(),
-        JsonValue::Bool(value) => value.to_string(),
-        JsonValue::Number(value) => value.to_string(),
-        _ => return None,
-    };
-    let value = value.trim().to_string();
-    (!value.is_empty()).then_some(value)
-}
-
 fn labelize(value: &str) -> String {
     value
         .split_whitespace()
@@ -729,18 +629,21 @@ mod tests {
     fn context_report_is_safe_and_never_reads_network() {
         let (dir, db_path) = fixture(false);
         let config = dir.path().join("config.json");
-        fs::write(
+        std::fs::write(
             &config,
             br#"{"location.auto_capture":false,"location.default_location_name":"Bergen","token":"secret"}"#,
         )
         .expect("config");
-        let report = JournalReader::open(&db_path)
+        let settings = JournalReader::open(&db_path)
             .expect("reader")
-            .context_report(Some(&config))
-            .expect("report");
-        assert!(!report.auto_capture);
-        assert_eq!(report.default_location_name.as_deref(), Some("Bergen"));
-        let serialized = serde_json::to_string(&report).expect("json");
+            .context_settings(Some(&config))
+            .expect("settings");
+        assert!(!settings.policy.auto_capture);
+        assert_eq!(
+            settings.policy.default_location_name.as_deref(),
+            Some("Bergen")
+        );
+        let serialized = serde_json::to_string(&settings.policy).expect("json");
         assert!(!serialized.contains("secret"));
     }
 }
