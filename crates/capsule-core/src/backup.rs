@@ -8,7 +8,10 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
-use rusqlite::{backup::Backup, Connection};
+use rusqlite::{
+    backup::{Backup, StepResult},
+    Connection,
+};
 
 use crate::{
     db,
@@ -82,12 +85,27 @@ fn create_backup_with_policy_locked(
     input: BackupCreateRequest,
     policy: &crate::contracts::BackupPolicy,
 ) -> Result<BackupCreateResponse> {
+    create_backup_with_policy_locked_until(db_path, input, policy, None)
+}
+
+/// Create and publish a verified backup, optionally bounded by a caller's
+/// absolute deadline.  The default APIs retain their historical unbounded
+/// backup stepping; capture supplies a deadline so a busy source cannot leave
+/// the database sidecar held forever waiting on SQLite.
+fn create_backup_with_policy_locked_until(
+    db_path: &Path,
+    input: BackupCreateRequest,
+    policy: &crate::contracts::BackupPolicy,
+    deadline: Option<(Instant, Duration)>,
+) -> Result<BackupCreateResponse> {
     validate_backup_policy(policy)?;
+    check_backup_deadline(deadline, "backup preparation")?;
     let metadata = fs::metadata(db_path)
         .with_context(|| format!("database does not exist: {}", db_path.display()))?;
     let backup_directory = policy.directory.as_path();
     fs::create_dir_all(backup_directory)
         .with_context(|| format!("failed to create {}", backup_directory.display()))?;
+    check_backup_deadline(deadline, "backup reservation")?;
 
     let now = Utc::now();
     let reservation = reserve_backup_path(backup_directory, now)?;
@@ -96,16 +114,41 @@ fn create_backup_with_policy_locked(
     let manifest_path = backup_path.with_extension(BACKUP_JSON_EXTENSION);
 
     let result = (|| -> Result<BackupCreateResponse> {
-        let source = db::open_read_only_connection(db_path)?;
+        let source = match deadline {
+            Some((deadline, _)) => db::open_read_only_connection_with_timeout(
+                db_path,
+                remaining_backup_deadline(deadline),
+            )?,
+            None => db::open_read_only_connection(db_path)?,
+        };
         let mut destination = Connection::open(&temporary_path)
             .with_context(|| format!("failed to create {}", temporary_path.display()))?;
+        if let Some((deadline, timeout)) = deadline {
+            check_backup_deadline(Some((deadline, timeout)), "backup connection setup")?;
+            // Keep each SQLite backup step short so the loop can re-check the
+            // absolute deadline instead of allowing a single busy handler to
+            // consume the whole remaining budget after prior work elapsed.
+            source.busy_timeout(MUTATION_LOCK_POLL)?;
+            destination.busy_timeout(MUTATION_LOCK_POLL)?;
+        }
         let backup = Backup::new(&source, &mut destination)?;
-        backup.run_to_completion(128, Duration::from_millis(20), None)?;
+        match deadline {
+            Some((deadline, timeout)) => {
+                run_backup_to_completion_until(&backup, deadline, timeout)?;
+            }
+            None => backup.run_to_completion(128, Duration::from_millis(20), None)?,
+        }
         drop(backup);
         drop(destination);
         drop(source);
 
-        verify_backup(&temporary_path)?;
+        match deadline {
+            Some((deadline, timeout)) => {
+                verify_backup_until(&temporary_path, deadline, timeout)?;
+            }
+            None => verify_backup(&temporary_path)?,
+        }
+        check_backup_deadline(deadline, "backup publication")?;
         fs::rename(&temporary_path, &backup_path).with_context(|| {
             format!(
                 "failed to publish verified backup {}",
@@ -113,6 +156,7 @@ fn create_backup_with_policy_locked(
             )
         })?;
         remove_if_exists(&reservation.marker_path)?;
+        check_backup_deadline(deadline, "backup manifest")?;
 
         let operation = input.operation.unwrap_or_else(|| "manual".to_string());
         let manifest = BackupManifest {
@@ -124,6 +168,7 @@ fn create_backup_with_policy_locked(
             backup_path: db::path_to_string(&backup_path),
         };
         write_manifest_atomically(&manifest_path, &manifest)?;
+        check_backup_deadline(deadline, "backup retention")?;
 
         let mut backup_info = backup_info_from_path(&backup_path)?;
         backup_info.manifest_path = Some(db::path_to_string(&manifest_path));
@@ -132,6 +177,7 @@ fn create_backup_with_policy_locked(
         backup_info.verified = true;
 
         apply_backup_retention(backup_directory, policy.retention_count)?;
+        check_backup_deadline(deadline, "backup completion")?;
 
         Ok(BackupCreateResponse {
             backup: backup_info,
@@ -400,6 +446,29 @@ pub fn with_database_backup_for_database_using_policy_with_timeout<T>(
     policy: &crate::contracts::BackupPolicy,
     write_fn: impl FnOnce(&Path) -> Result<T>,
 ) -> Result<GuardedWrite<T>> {
+    with_database_backup_for_database_using_policy_with_timeout_and_preflight(
+        db_path,
+        operation,
+        timeout,
+        policy,
+        |_| Ok(()),
+        write_fn,
+    )
+}
+
+/// Backup-guarded mutation with one bounded operation budget and a callback
+/// that runs after both cross-process locks are acquired but before any
+/// snapshot is created.  Capture uses this boundary to revalidate the frozen
+/// database identity after lock contention, preventing a replaced database
+/// from being backed up before the write is rejected.
+pub fn with_database_backup_for_database_using_policy_with_timeout_and_preflight<T>(
+    db_path: &Path,
+    operation: &str,
+    timeout: Duration,
+    policy: &crate::contracts::BackupPolicy,
+    pre_backup_fn: impl FnOnce(&Path) -> Result<()>,
+    write_fn: impl FnOnce(&Path) -> Result<T>,
+) -> Result<GuardedWrite<T>> {
     validate_backup_policy(policy)?;
     let deadline = lock_deadline(timeout);
     let _lock = acquire_mutation_lock_until(db_path, deadline, timeout)?;
@@ -408,15 +477,20 @@ pub fn with_database_backup_for_database_using_policy_with_timeout<T>(
     fs::create_dir_all(&policy.directory)
         .with_context(|| format!("failed to create {}", policy.directory.display()))?;
     let _backup_lock = acquire_backup_directory_lock_until(&policy.directory, deadline, timeout)?;
-    let backup = create_backup_with_policy_locked(
+    check_backup_deadline(Some((deadline, timeout)), "pre-backup validation")?;
+    pre_backup_fn(db_path)?;
+    check_backup_deadline(Some((deadline, timeout)), "backup start")?;
+    let backup = create_backup_with_policy_locked_until(
         db_path,
         BackupCreateRequest {
             operation: Some(operation.to_string()),
         },
         policy,
+        Some((deadline, timeout)),
     )
     .with_context(|| format!("backup failed before {operation}"))?;
     let backup_path = backup.backup.path;
+    check_backup_deadline(Some((deadline, timeout)), "guarded mutation start")?;
     let value = write_fn(db_path)?;
 
     Ok(GuardedWrite {
@@ -605,6 +679,82 @@ fn verify_backup(path: &Path) -> Result<()> {
         ));
     }
 
+    Ok(())
+}
+
+fn verify_backup_until(path: &Path, deadline: Instant, timeout: Duration) -> Result<()> {
+    check_backup_deadline(Some((deadline, timeout)), "backup verification")?;
+    let metadata = fs::metadata(path)
+        .with_context(|| format!("backup was not created: {}", path.display()))?;
+    if metadata.len() == 0 {
+        return Err(anyhow!("backup is empty: {}", path.display()));
+    }
+
+    let connection =
+        db::open_read_only_connection_with_timeout(path, remaining_backup_deadline(deadline))?;
+    check_backup_deadline(Some((deadline, timeout)), "backup schema verification")?;
+    let schema = db::inspect_schema(&connection)?;
+    if !schema.has_entries_table {
+        return Err(anyhow!(
+            "backup verification failed because entries table was not found"
+        ));
+    }
+
+    check_backup_deadline(Some((deadline, timeout)), "backup integrity verification")?;
+    connection.busy_timeout(remaining_backup_deadline(deadline))?;
+    let integrity =
+        connection.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))?;
+    if !integrity.eq_ignore_ascii_case("ok") {
+        return Err(anyhow!(
+            "backup verification failed integrity_check: {integrity}"
+        ));
+    }
+
+    check_backup_deadline(Some((deadline, timeout)), "backup foreign-key verification")?;
+    connection.busy_timeout(remaining_backup_deadline(deadline))?;
+    let mut foreign_keys = connection.prepare("PRAGMA foreign_key_check")?;
+    let mut rows = foreign_keys.query([])?;
+    if rows.next()?.is_some() {
+        return Err(anyhow!(
+            "backup verification failed because foreign-key violations were found"
+        ));
+    }
+
+    Ok(())
+}
+
+fn run_backup_to_completion_until(
+    backup: &Backup<'_, '_>,
+    deadline: Instant,
+    timeout: Duration,
+) -> Result<()> {
+    loop {
+        check_backup_deadline(Some((deadline, timeout)), "backup stepping")?;
+        match backup.step(128)? {
+            StepResult::Done => return Ok(()),
+            StepResult::More | StepResult::Busy | StepResult::Locked => {
+                check_backup_deadline(Some((deadline, timeout)), "backup stepping")?;
+                let remaining = remaining_backup_deadline(deadline);
+                thread::sleep(MUTATION_LOCK_POLL.min(remaining));
+            }
+            _ => return Err(anyhow!("backup returned an unsupported step result")),
+        }
+    }
+}
+
+fn remaining_backup_deadline(deadline: Instant) -> Duration {
+    deadline.saturating_duration_since(Instant::now())
+}
+
+fn check_backup_deadline(deadline: Option<(Instant, Duration)>, phase: &str) -> Result<()> {
+    if let Some((deadline, timeout)) = deadline {
+        if Instant::now() >= deadline {
+            return Err(anyhow::Error::new(MutationBusy(format!(
+                "backup operation exceeded its {} deadline during {phase}",
+                lock_timeout_description(timeout)
+            ))));
+        }
+    }
     Ok(())
 }
 

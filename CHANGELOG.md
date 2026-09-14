@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.37.1-dev.3 - 2026-09-14
+
+### Fixed
+
+- Bounded each durable capture by one 15-second operation deadline across
+  cross-process locks, SQLite busy waits, backup stepping/publication, legacy
+  ID repair, and commit preparation; database replacement is revalidated after
+  lock acquisition before a backup is created.
+
 ## 0.37.1-dev.2 - 2026-09-14
 
 ### Added
