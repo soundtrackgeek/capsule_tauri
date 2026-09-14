@@ -4,12 +4,16 @@ mod ai_metadata;
 mod ai_providers;
 mod debug;
 mod images;
-mod mood_sentiment;
+// Mood lookup and the small read-only memory metrics surface are shared with
+// headless clients.  The legacy analytics adapter remains below as
+// `legacy_stats` until the larger dashboard model is extracted separately.
+pub use capsule_core::{mood_sentiment, stats};
+#[path = "stats.rs"]
+mod legacy_stats;
 mod phase6;
 mod search;
 mod security;
 mod settings;
-mod stats;
 mod sync;
 mod threads;
 
@@ -349,7 +353,7 @@ async fn search_entries(input: SearchRequest) -> Result<SearchResponse, String> 
 
 #[tauri::command]
 async fn get_analytics(input: Option<AnalyticsPeriodRequest>) -> Result<AnalyticsResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || stats::get_analytics(input))
+    tauri::async_runtime::spawn_blocking(move || legacy_stats::get_analytics(input))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())
@@ -357,7 +361,7 @@ async fn get_analytics(input: Option<AnalyticsPeriodRequest>) -> Result<Analytic
 
 #[tauri::command]
 async fn get_dashboard_best_of() -> Result<DashboardBestOf, String> {
-    tauri::async_runtime::spawn_blocking(stats::get_dashboard_best_of)
+    tauri::async_runtime::spawn_blocking(legacy_stats::get_dashboard_best_of)
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())
@@ -365,7 +369,7 @@ async fn get_dashboard_best_of() -> Result<DashboardBestOf, String> {
 
 #[tauri::command]
 async fn get_wrapped(input: WrappedRequest) -> Result<WrappedResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || stats::get_wrapped(input))
+    tauri::async_runtime::spawn_blocking(move || legacy_stats::get_wrapped(input))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())

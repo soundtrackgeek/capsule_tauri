@@ -22,7 +22,7 @@ dotenvy = "0.15"
 keyring-core = "1.0"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "native-tls-no-alpn"] }
 rfd = "0.15"
-rusqlite = { version = "0.37", features = ["backup", "bundled"] }
+rusqlite = { version = "0.37", features = ["backup", "bundled", "hooks"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
