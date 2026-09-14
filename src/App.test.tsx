@@ -215,7 +215,7 @@ describe("App Writer settings", () => {
     }
   });
 
-  test("restores the first scroll snapshot before replaying a queued refresh", async () => {
+  test.each([false, true])("restores scroll before queued refresh, newer user intent: %s", async (newerUserIntent) => {
     const externalProbe = vi
       .spyOn(backend, "checkExternalChanges")
       .mockResolvedValueOnce({
@@ -330,6 +330,11 @@ describe("App Writer settings", () => {
       await new Promise((resolve) => window.setTimeout(resolve, 300));
       expect(secondRefreshStarted).toBe(false);
 
+      if (newerUserIntent) {
+        window.dispatchEvent(new Event("wheel"));
+        Object.defineProperty(window, "scrollY", { configurable: true, value: 260 });
+      }
+
       const firstFrame = queuedFrames.entries().next().value as
         | [number, FrameRequestCallback]
         | undefined;
@@ -353,8 +358,9 @@ describe("App Writer settings", () => {
         secondFrame[1](performance.now());
       }
 
-      expect(scrollTo).toHaveBeenCalledWith(0, 100);
-      expect(window.scrollY).toBe(100);
+      const expectedScroll = newerUserIntent ? 260 : 100;
+      expect(scrollTo).toHaveBeenCalledWith(0, expectedScroll);
+      expect(window.scrollY).toBe(expectedScroll);
     } finally {
       releaseFirstRefresh();
       releaseSecondRefresh();

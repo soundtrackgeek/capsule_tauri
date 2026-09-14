@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.37.1-dev.15 - 2026-09-14
+
+### Added
+
+- Integrated regression proving that newer user scrolling survives two queued
+  external journal refreshes, alongside the original-position restoration case.
+
 ## 0.37.1-dev.14 - 2026-09-14
 
 ### Fixed
