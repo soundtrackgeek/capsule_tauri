@@ -93,6 +93,26 @@ writer may use this snapshot; quick capture deliberately stays available for
 short notes. Resolving these values never returns sync credentials or rereads
 settings during an editing session.
 
+## Memory metrics
+
+`stats` provides the shared, query-only projection used by cap's R2 memory
+commands. `memory_calendar_for_database`, `memory_stats_for_database`, and
+`memory_garden_for_database` use stored local dates, exclude hidden entries by
+default, count words from `text_plain` (falling back to authored text), and
+return complete calendar/garden day grids. Aggregate paths stream their
+date/text projection without an implicit cap; full entry projections support
+explicit `MemoryQuery::page(limit, offset)`. Recall reservoir-samples bounded
+metadata before fetching selected bodies, and on-this-day pages fetch bodies
+only after metadata pagination. `get_writing_calendar_for_database` is the
+desktop-compatible calendar model and keeps mood catalog overrides/image
+counts in the shared path. `current_streak` remains current when the latest
+writing day is today or yesterday, including month boundaries.
+`milestone_crossing_for_database` subtracts the exact committed UUID
+contribution before testing the 50-word daily and 500-word weekly thresholds,
+using a progress-handler deadline plus bounded busy wait so pre-existing
+totals never create a false glint. All these functions accept an explicit
+database path and do not write the journal or Capsule gamification tables.
+
 ```rust
 use capsule_core::{JournalReader, ReadOptions};
 

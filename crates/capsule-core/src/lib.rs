@@ -13,9 +13,11 @@ pub mod entries;
 pub mod identity;
 pub mod location;
 pub mod models;
+pub mod mood_sentiment;
 pub mod providers;
 pub mod read;
 pub mod search;
+pub mod stats;
 
 pub use backup::{
     with_database_backup_for_database_using_policy_with_timeout, with_mutation_lock_for_database,
@@ -48,3 +50,8 @@ pub use db::{
 };
 pub use location::{load_context_settings, ContextSettings};
 pub use read::{EntryKey, JournalReader, MetadataPage, ReadOptions, ReadPage};
+pub use stats::{
+    get_writing_calendar, get_writing_calendar_for_database, ActivityDay, GardenDay, GardenGrowth,
+    MemoryCalendar, MemoryEntry, MemoryGarden, MemoryPage, MemoryQuery, MemoryStats,
+    MilestoneCrossing, MilestoneInputs, StatsPeriod, DAILY_MILESTONE_WORDS, WEEKLY_MILESTONE_WORDS,
+};

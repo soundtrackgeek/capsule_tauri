@@ -1161,10 +1161,12 @@ fn plural(value: i64, singular: &str) -> String {
     }
 }
 
+#[allow(dead_code)]
 pub fn get_writing_calendar(year: Option<i32>) -> Result<WritingCalendarResponse> {
     get_writing_calendar_for_database(&db::resolve_database_path(), year)
 }
 
+#[allow(dead_code)]
 pub(crate) fn get_writing_calendar_for_database(
     db_path: &Path,
     year: Option<i32>,
@@ -1297,6 +1299,7 @@ fn image_counts(connection: &Connection, period: &AnalyticsPeriodRequest) -> Res
         .context("failed to count image attachments")
 }
 
+#[allow(dead_code)]
 fn image_counts_by_date(
     connection: &Connection,
     period: &AnalyticsPeriodRequest,
@@ -2458,6 +2461,7 @@ fn streaks(active_dates: &HashSet<NaiveDate>) -> (i64, i64) {
     (longest, current)
 }
 
+#[allow(dead_code)]
 fn days_in_year(year: i32) -> i64 {
     let start = NaiveDate::from_ymd_opt(year, 1, 1).expect("valid year");
     let next = NaiveDate::from_ymd_opt(year + 1, 1, 1).expect("valid next year");

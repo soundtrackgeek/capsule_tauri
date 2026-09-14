@@ -40,6 +40,23 @@
   preparation; revalidate the frozen database before a backup is created.
 - Apply the same pre-backup identity check to explicit context enrichment.
 
+### Changed
+
+- Streamed shared memory aggregates and added explicit full-projection paging,
+  preserving complete counts without implicit truncation.
+- Shared the desktop writing calendar projection and bounded milestone
+  crossing with a monotonic SQLite progress deadline.
+
+## 0.37.1-dev.6 - 2026-09-14
+
+### Added
+
+- Added the shared query-only memory metrics surface for calendar, period
+  stats, streaks, seven-day garden tiers, recall candidates, and true
+  committed-entry milestone crossings.
+- Moved bundled mood sentiment lookup into `capsule-core` for desktop and
+  headless clients while preserving database catalog overrides.
+
 ## 0.37.1-dev.5 - 2026-09-14
 
 ### Fixed
