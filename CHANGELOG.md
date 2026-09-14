@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.37.1-dev.7 - 2026-09-14
+
+### Fixed
+
+- Bounded durable capture across coordination, SQLite waits, backups and commit
+  preparation; revalidate the frozen database before a backup is created.
+- Apply the same pre-backup identity check to explicit context enrichment.
+
 ## 0.37.1-dev.5 - 2026-09-14
 
 ### Fixed

@@ -52,12 +52,21 @@ the existing UUID once, while changed content or a replaced database is
 reported explicitly. `CaptureRequest`, `CommitReceipt`, and context DTOs are
 renderer-independent seams for desktop and non-desktop clients.
 
+Capture has one 15-second operation budget. The same deadline covers preflight,
+database and backup-directory lock acquisition, SQLite busy waits (including
+`BEGIN IMMEDIATE` and legacy ID repair), backup stepping/verification,
+publication, and commit preparation; there are no stacked per-stage waits.
+CPU work and filesystem I/O consume that budget too, so a large or slow backup
+can report `database_busy` once the deadline expires.
+
 Context or other deadline-bound workers can use
 `with_mutation_lock_for_database_with_timeout` or
 `with_database_backup_for_database_using_policy_with_timeout` to bound lock
 coordination by their remaining budget. The latter shares one timeout across
-the database and backup-directory locks and keeps both locks through backup
-publication and the caller's transaction closure.
+the database and backup-directory locks, bounds backup stepping/publication,
+and keeps both locks through the caller's transaction closure. Its timeout
+does not interrupt arbitrary closure CPU/I/O; callers with a wider deadline
+should check it inside that closure (as capture does).
 
 `JournalReader` adds an explicit-path, query-only boundary with bounded entry
 lists, exact UUID/number lookup, tag and mood discovery, and date/search

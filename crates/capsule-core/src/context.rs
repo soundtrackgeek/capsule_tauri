@@ -545,6 +545,15 @@ impl ContextService {
             )
         })?;
         let preparation = self.prepare(request)?;
+        self.persist_with_backup(request, preparation, &backup_policy)
+    }
+
+    fn persist_with_backup(
+        &self,
+        request: &ContextRequest,
+        preparation: ContextPreparation,
+        backup_policy: &crate::contracts::BackupPolicy,
+    ) -> Result<ContextReport> {
         if !preparation.is_persistable() {
             return Ok(preparation.into_report());
         }
@@ -553,13 +562,20 @@ impl ContextService {
             return Ok(preparation.into_report());
         }
         let db_path = request.db_path.clone();
-        let guarded = backup::with_database_backup_for_database_using_policy_with_timeout(
-            &db_path,
-            "context.enrich",
-            timeout,
-            &backup_policy,
-            move |_path| self.persist_prepared(request, preparation),
-        )?;
+        let guarded =
+            backup::with_database_backup_for_database_using_policy_with_timeout_and_preflight(
+                &db_path,
+                "context.enrich",
+                timeout,
+                backup_policy,
+                |path| {
+                    let expected = request.database_identity.as_ref().ok_or_else(|| {
+                        anyhow!("context enrichment requires a frozen database identity")
+                    })?;
+                    crate::identity::validate_database_binding(path, expected)
+                },
+                move |_path| self.persist_prepared(request, preparation),
+            )?;
         Ok(guarded.value)
     }
 
@@ -2258,6 +2274,42 @@ mod tests {
             backup_count, 0,
             "capture convenience must not create a backup"
         );
+    }
+
+    #[test]
+    fn enrichment_revalidates_identity_before_snapshot_or_retention() {
+        let directory = tempfile::tempdir().unwrap();
+        let db_path = fixture_database(directory.path(), "2026-09-14 11:59");
+        let policy = crate::contracts::BackupPolicy::new(directory.path().join("backups"), 1);
+        let mut request = ContextRequest::enrich(&db_path, "entry_test", ContextPolicy::default());
+        request.backup_policy = Some(policy.clone());
+        let service = ContextService::new(dependencies(
+            Arc::new(FakeHttp::new(ip_weather_fixtures())),
+            Arc::new(ManualClock::new(
+                Utc.with_ymd_and_hms(2026, 9, 14, 12, 0, 0).unwrap(),
+            )),
+        ));
+        let preparation = service.prepare(&request).unwrap();
+        assert!(preparation.is_persistable());
+        let replacement = directory.path().join("replacement.db");
+        std::fs::copy(&db_path, &replacement).unwrap();
+        std::fs::remove_file(&db_path).unwrap();
+        std::fs::rename(replacement, &db_path).unwrap();
+        let before = std::fs::read(&db_path).unwrap();
+        let error = service
+            .persist_with_backup(&request, preparation, &policy)
+            .unwrap_err();
+        assert!(error
+            .downcast_ref::<crate::identity::DatabaseBindingError>()
+            .is_some());
+        assert_eq!(std::fs::read(&db_path).unwrap(), before);
+        assert!(!std::fs::read_dir(&policy.directory).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("capsule_backup_")
+        }));
     }
 
     #[test]

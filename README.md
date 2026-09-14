@@ -16,7 +16,9 @@ explicit capability-gated AI/sync surfaces:
   desktop-only shell actions remain in the Tauri adapter. Durable capture uses
   caller-reserved UUIDs, frozen database identity and explicit backup policy,
   with verified atomic snapshots, bounded cross-process coordination, and
-  read-only reconciliation for safe retries.
+  read-only reconciliation for safe retries. Each capture uses one 15-second
+  operation budget spanning lock acquisition, SQLite busy waits, backup I/O,
+  and commit preparation, with no stacked per-stage waits.
 - Native window restoration for the last size, position, maximized, and
   fullscreen state used before closing the app, while every fresh launch opens
   the main window even if the previous session ended from the tray.

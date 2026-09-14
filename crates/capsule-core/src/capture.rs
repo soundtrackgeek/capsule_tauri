@@ -8,7 +8,10 @@
 
 #![allow(clippy::result_large_err)]
 
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 use anyhow::{anyhow, Result};
 use rusqlite::{Connection, OptionalExtension};
@@ -130,6 +133,8 @@ impl std::error::Error for CaptureError {}
 
 pub type CaptureResult<T> = std::result::Result<T, CaptureError>;
 
+const CAPTURE_OPERATION_TIMEOUT: Duration = Duration::from_secs(15);
+
 /// Capture with a request whose database and backup policies are already
 /// frozen.  No location/weather/provider work is performed here.
 pub fn capture_entry(request: CaptureRequest) -> CaptureResult<CommitReceipt> {
@@ -151,8 +156,10 @@ pub fn capture_entry_with_hooks_for_database(
     request: CaptureRequest,
     hooks: &dyn CaptureHooks,
 ) -> CaptureResult<CommitReceipt> {
+    let deadline = capture_deadline();
     let normalized = entries::normalize_capture_request(&request)
         .map_err(|error| not_committed(&request, error.to_string()))?;
+    ensure_capture_deadline(&request, deadline, "request normalization")?;
     identity::validate_capture_request(&request)
         .map_err(|error| not_committed(&request, error.to_string()))?;
     let expected_identity = identity::bind_request_database(&request).map_err(|error| {
@@ -175,15 +182,21 @@ pub fn capture_entry_with_hooks_for_database(
     validate_backup_policy(&policy).map_err(|error| not_committed(&request, error.to_string()))?;
     let reserved_uuid = identity::validate_reserved_uuid(&request.reserved_uuid)
         .map_err(|error| not_committed(&request, error.to_string()))?;
+    ensure_capture_deadline(&request, deadline, "capture preflight")?;
 
     // Reconcile before making a backup.  A retry of a known committed UUID
     // must remain successful even if the backup directory is currently
     // unavailable; only a new write needs a fresh verified snapshot.
-    match reconcile_normalized(
+    match reconcile_normalized_with_timeout(
         &request.database_path,
         &request,
         &normalized,
         &expected_identity,
+        Some(remaining_capture_timeout(
+            &request,
+            deadline,
+            "capture preflight",
+        )?),
     ) {
         Ok(Reconciliation::Committed(receipt)) => return Ok(receipt),
         Ok(Reconciliation::NotCommitted) => {}
@@ -197,45 +210,66 @@ pub fn capture_entry_with_hooks_for_database(
         {
             return Err(database_replaced(&request, error.to_string()))
         }
+        Err(error)
+            if error.downcast_ref::<backup::MutationBusy>().is_some() || is_sqlite_busy(&error) =>
+        {
+            return Err(database_busy(&request, error.to_string()))
+        }
         Err(error) => return Err(not_committed(&request, error.to_string())),
     }
 
+    ensure_capture_deadline(&request, deadline, "capture backup checkpoint")?;
     hooks
         .checkpoint(CaptureHookPoint::BeforeBackup)
         .map_err(|error| not_committed(&request, error.to_string()))?;
+    ensure_capture_deadline(&request, deadline, "capture backup checkpoint")?;
 
     let path = request.database_path.clone();
     let request_for_closure = request.clone();
+    let expected_for_pre_backup = expected_identity.clone();
     let expected_for_closure = expected_identity.clone();
     let normalized_for_closure = normalized.clone();
-    let guarded = backup::with_database_backup_for_database_using_policy(
+    let guarded = backup::with_database_backup_for_database_using_policy_with_timeout_and_preflight(
         &path,
         "entry.create",
+        remaining_capture_timeout(&request, deadline, "capture backup")?,
         &policy,
+        |db_path| identity::validate_database_binding(db_path, &expected_for_pre_backup),
         |db_path| {
+            ensure_capture_deadline_anyhow(deadline, "database identity validation")?;
             identity::validate_database_binding(db_path, &expected_for_closure)?;
             hooks
                 .checkpoint(CaptureHookPoint::AfterBackup)
                 .map_err(|error| anyhow!(error.to_string()))?;
+            ensure_capture_deadline_anyhow(deadline, "post-backup checkpoint")?;
 
             // Legacy ID repairs are part of the same guarded operation.  They
             // run before the immediate creation transaction and cannot race a
             // second Capsule writer because the database sidecar lock is held.
-            entries::ensure_entry_ids_for_database_unlocked(db_path)?;
+            entries::ensure_entry_ids_for_database_unlocked_with_timeout(
+                db_path,
+                remaining_capture_timeout_anyhow(deadline, "legacy ID repair")?,
+            )?;
+            ensure_capture_deadline_anyhow(deadline, "legacy ID repair")?;
             identity::validate_database_binding(db_path, &expected_for_closure)?;
 
             // A second process may have committed this reserved UUID while the
             // first process was waiting for the lock.  Reconcile under the
             // lock before attempting an INSERT so matching retries resolve to
             // one entry and conflicting requests fail explicitly.
-            match reconcile_normalized(
+            match reconcile_normalized_with_timeout(
                 db_path,
                 &request_for_closure,
                 &normalized_for_closure,
                 &expected_for_closure,
+                Some(remaining_capture_timeout_anyhow(
+                    deadline,
+                    "locked reconciliation",
+                )?),
             )? {
                 Reconciliation::Committed(receipt) => Ok(CaptureCommit::Existing(receipt)),
                 Reconciliation::NotCommitted => {
+                    ensure_capture_deadline_anyhow(deadline, "entry transaction")?;
                     let mut mutation_hook = |point: MutationPoint| {
                         hooks.checkpoint(match point {
                             MutationPoint::BeforeBegin => CaptureHookPoint::BeforeBegin,
@@ -246,11 +280,12 @@ pub fn capture_entry_with_hooks_for_database(
                             MutationPoint::DuringCommit => CaptureHookPoint::DuringCommit,
                         })
                     };
-                    entries::create_entry_commit_for_capture(
+                    entries::create_entry_commit_for_capture_with_timeout(
                         db_path,
                         &normalized_for_closure,
                         &reserved_uuid,
                         Some(&expected_for_closure),
+                        remaining_capture_timeout_anyhow(deadline, "entry transaction")?,
                         &mut mutation_hook,
                     )
                     .map(CaptureCommit::Created)
@@ -344,6 +379,10 @@ pub fn reconcile_capture_for_database(request: &CaptureRequest) -> CaptureResult
                     .is_some()
                 {
                     database_replaced(request, error.to_string())
+                } else if error.downcast_ref::<backup::MutationBusy>().is_some()
+                    || is_sqlite_busy(&error)
+                {
+                    database_busy(request, error.to_string())
                 } else {
                     not_committed(request, error.to_string())
                 }
@@ -384,8 +423,21 @@ fn reconcile_normalized(
     normalized: &NormalizedEntry,
     expected: &db::FileIdentity,
 ) -> Result<Reconciliation> {
+    reconcile_normalized_with_timeout(db_path, request, normalized, expected, None)
+}
+
+fn reconcile_normalized_with_timeout(
+    db_path: &std::path::Path,
+    request: &CaptureRequest,
+    normalized: &NormalizedEntry,
+    expected: &db::FileIdentity,
+    timeout: Option<Duration>,
+) -> Result<Reconciliation> {
     identity::validate_database_binding(db_path, expected)?;
-    let connection = db::open_read_only_connection(db_path)?;
+    let connection = match timeout {
+        Some(timeout) => db::open_read_only_connection_with_timeout(db_path, timeout)?,
+        None => db::open_read_only_connection(db_path)?,
+    };
     let row = connection
         .query_row(
             "SELECT id, created_at, text, text_plain, content_format, title, summary, mood,
@@ -523,6 +575,61 @@ fn receipt_from_commit(
         backup_path: Some(PathBuf::from(backup_path)),
         backup_operation: Some("entry.create".to_string()),
         committed: true,
+    }
+}
+
+fn capture_deadline() -> Instant {
+    Instant::now()
+        .checked_add(CAPTURE_OPERATION_TIMEOUT)
+        .unwrap_or_else(Instant::now)
+}
+
+fn remaining_capture_timeout(
+    request: &CaptureRequest,
+    deadline: Instant,
+    phase: &str,
+) -> CaptureResult<Duration> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining == Duration::ZERO {
+        return Err(database_busy(
+            request,
+            format!(
+                "capture operation exceeded its {} deadline during {phase}",
+                capture_timeout_description()
+            ),
+        ));
+    }
+    Ok(remaining)
+}
+
+fn remaining_capture_timeout_anyhow(deadline: Instant, phase: &str) -> Result<Duration> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining == Duration::ZERO {
+        return Err(anyhow::Error::new(backup::MutationBusy(format!(
+            "capture operation exceeded its {} deadline during {phase}",
+            capture_timeout_description()
+        ))));
+    }
+    Ok(remaining)
+}
+
+fn ensure_capture_deadline(
+    request: &CaptureRequest,
+    deadline: Instant,
+    phase: &str,
+) -> CaptureResult<()> {
+    remaining_capture_timeout(request, deadline, phase).map(|_| ())
+}
+
+fn ensure_capture_deadline_anyhow(deadline: Instant, phase: &str) -> Result<()> {
+    remaining_capture_timeout_anyhow(deadline, phase).map(|_| ())
+}
+
+fn capture_timeout_description() -> String {
+    if CAPTURE_OPERATION_TIMEOUT.as_secs() > 0 && CAPTURE_OPERATION_TIMEOUT.subsec_millis() == 0 {
+        format!("{} seconds", CAPTURE_OPERATION_TIMEOUT.as_secs())
+    } else {
+        format!("{} ms", CAPTURE_OPERATION_TIMEOUT.as_millis())
     }
 }
 

@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -1059,24 +1059,55 @@ fn consume_show_window_after_update_restart_at_path(path: &Path) -> Result<bool>
 }
 
 pub fn open_read_only_connection(path: &Path) -> Result<Connection> {
+    open_read_only_connection_with_timeout(path, Duration::from_secs(15))
+}
+
+/// Open a read-only connection with an explicit SQLite busy timeout.  Capture
+/// uses this variant to spend only the remaining operation budget waiting on
+/// SQLite instead of starting a fresh fixed 15-second wait at each phase.
+pub fn open_read_only_connection_with_timeout(
+    path: &Path,
+    timeout: Duration,
+) -> Result<Connection> {
     let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .with_context(|| format!("failed to open {}", path.display()))?;
-    connection.busy_timeout(std::time::Duration::from_millis(15_000))?;
+    connection.busy_timeout(timeout)?;
     connection.pragma_update(None, "query_only", "ON")?;
     Ok(connection)
 }
 
 pub fn open_read_write_connection(path: &Path) -> Result<Connection> {
+    open_read_write_connection_configured(path, Duration::from_secs(15), Duration::from_secs(15))
+}
+
+/// Open a read-write connection with an explicit SQLite busy timeout.
+pub fn open_read_write_connection_with_timeout(
+    path: &Path,
+    timeout: Duration,
+) -> Result<Connection> {
+    open_read_write_connection_configured(path, timeout, timeout.min(Duration::from_millis(20)))
+}
+
+fn open_read_write_connection_configured(
+    path: &Path,
+    timeout: Duration,
+    setup_timeout: Duration,
+) -> Result<Connection> {
     let connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .with_context(|| format!("failed to open {}", path.display()))?;
-    connection.busy_timeout(std::time::Duration::from_millis(15_000))?;
+    // The setup pragmas below are independent SQLite calls.  Timed callers
+    // pass a short setup timeout and we restore their full remaining budget
+    // for the actual schema/transaction work; otherwise each pragma could
+    // consume a fresh full timeout and defeat a single operation budget.
+    connection.busy_timeout(setup_timeout)?;
     connection.pragma_update(None, "foreign_keys", "ON")?;
     connection.pragma_update(None, "journal_mode", "WAL")?;
     connection.pragma_update(None, "synchronous", "NORMAL")?;
     connection.pragma_update(None, "temp_store", "MEMORY")?;
+    connection.busy_timeout(timeout)?;
     Ok(connection)
 }
 

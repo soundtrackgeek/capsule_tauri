@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
+    time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -720,6 +721,7 @@ fn normalize_entry_create(
 /// Commit an entry using a caller-reserved UUID.  This is the one lower-level
 /// mutation implementation shared by desktop creation and headless capture.
 /// The caller owns the surrounding verified-backup coordination lock.
+#[allow(dead_code)]
 pub(crate) fn create_entry_commit_for_capture(
     db_path: &Path,
     normalized: &NormalizedEntry,
@@ -727,11 +729,30 @@ pub(crate) fn create_entry_commit_for_capture(
     expected_identity: Option<&db::FileIdentity>,
     hook: &mut dyn FnMut(MutationPoint) -> Result<()>,
 ) -> Result<EntryCommit> {
-    create_entry_commit(
+    create_entry_commit_with_timeout(
         db_path,
         normalized,
         Some(reserved_uuid),
         expected_identity,
+        None,
+        hook,
+    )
+}
+
+pub(crate) fn create_entry_commit_for_capture_with_timeout(
+    db_path: &Path,
+    normalized: &NormalizedEntry,
+    reserved_uuid: &str,
+    expected_identity: Option<&db::FileIdentity>,
+    timeout: Duration,
+    hook: &mut dyn FnMut(MutationPoint) -> Result<()>,
+) -> Result<EntryCommit> {
+    create_entry_commit_with_timeout(
+        db_path,
+        normalized,
+        Some(reserved_uuid),
+        expected_identity,
+        Some(timeout),
         hook,
     )
 }
@@ -743,15 +764,43 @@ fn create_entry_commit(
     expected_identity: Option<&db::FileIdentity>,
     hook: &mut dyn FnMut(MutationPoint) -> Result<()>,
 ) -> Result<EntryCommit> {
+    create_entry_commit_with_timeout(
+        db_path,
+        normalized,
+        reserved_uuid,
+        expected_identity,
+        None,
+        hook,
+    )
+}
+
+fn create_entry_commit_with_timeout(
+    db_path: &Path,
+    normalized: &NormalizedEntry,
+    reserved_uuid: Option<&str>,
+    expected_identity: Option<&db::FileIdentity>,
+    timeout: Option<Duration>,
+    hook: &mut dyn FnMut(MutationPoint) -> Result<()>,
+) -> Result<EntryCommit> {
     if let Some(expected) = expected_identity {
         crate::identity::validate_database_binding(db_path, expected)?;
     }
 
-    let mut connection = db::open_read_write_connection(db_path)?;
+    let deadline = timeout.and_then(|timeout| Instant::now().checked_add(timeout));
+    let mut connection = match timeout {
+        Some(timeout) => db::open_read_write_connection_with_timeout(db_path, timeout)?,
+        None => db::open_read_write_connection(db_path)?,
+    };
+    ensure_entry_deadline(deadline, "entry schema inspection")?;
     let schema = db::inspect_schema(&connection)?;
     ensure_entries_table(&schema.detected_tables.into_iter().collect())?;
 
+    ensure_entry_deadline(deadline, "entry transaction start")?;
     hook(MutationPoint::BeforeBegin)?;
+    ensure_entry_deadline(deadline, "entry transaction start")?;
+    if let Some(deadline) = deadline {
+        connection.busy_timeout(remaining_entry_deadline(deadline))?;
+    }
     let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let uuid = match reserved_uuid {
         Some(uuid) => {
@@ -774,7 +823,9 @@ fn create_entry_commit(
         None => generate_entry_uuid(&tx)?,
     };
     let entry_id = next_entry_id(&tx)?;
+    ensure_entry_deadline(deadline, "entry insert")?;
     hook(MutationPoint::BeforeInsert)?;
+    ensure_entry_deadline(deadline, "entry insert")?;
     tx.execute(
         "INSERT INTO entries
             (id, uuid, created_at, updated_at, text, text_plain, content_format, title, summary, mood, starred, pinned, hidden)
@@ -798,9 +849,13 @@ fn create_entry_commit(
     if let Some(parent_uuid) = normalized.continue_from_uuid.as_deref() {
         set_entry_continuation(&tx, &uuid, Some(parent_uuid))?;
     }
+    ensure_entry_deadline(deadline, "entry FTS update")?;
     hook(MutationPoint::BeforeFts)?;
+    ensure_entry_deadline(deadline, "entry FTS update")?;
     refresh_fts_for_entry(&tx, entry_id, &normalized.text_plain)?;
+    ensure_entry_deadline(deadline, "entry resequence")?;
     hook(MutationPoint::BeforeResequence)?;
+    ensure_entry_deadline(deadline, "entry resequence")?;
     resequence_entry_ids(&tx)?;
 
     let final_id = tx.query_row(
@@ -808,14 +863,21 @@ fn create_entry_commit(
         [&uuid],
         |row| row.get::<_, i64>(0),
     )?;
+    ensure_entry_deadline(deadline, "entry commit preparation")?;
     hook(MutationPoint::BeforeCommit)?;
+    ensure_entry_deadline(deadline, "entry commit preparation")?;
     hook(MutationPoint::DuringCommit).map_err(|error| {
         anyhow::Error::new(CommitUncertain(format!(
             "entry commit boundary interrupted: {error}"
         )))
     })?;
+    ensure_entry_deadline(deadline, "entry commit")?;
     if let Some(expected) = expected_identity {
         crate::identity::validate_database_binding(db_path, expected)?;
+    }
+    if let Some(deadline) = deadline {
+        tx.busy_timeout(remaining_entry_deadline(deadline))?;
+        ensure_entry_deadline(Some(deadline), "entry commit")?;
     }
     tx.commit().map_err(|error| {
         anyhow::Error::new(CommitUncertain(error.to_string()))
@@ -1541,11 +1603,50 @@ pub fn ensure_entry_ids_for_database(db_path: &Path) -> Result<()> {
 /// capture's backup/transaction sequence from recursively acquiring the same
 /// lock and, more importantly, ensures the repair is covered by that backup.
 pub(crate) fn ensure_entry_ids_for_database_unlocked(db_path: &Path) -> Result<()> {
-    let connection = db::open_read_write_connection(db_path)?;
+    ensure_entry_ids_for_database_unlocked_with_timeout_option(db_path, None)
+}
+
+pub(crate) fn ensure_entry_ids_for_database_unlocked_with_timeout(
+    db_path: &Path,
+    timeout: Duration,
+) -> Result<()> {
+    ensure_entry_ids_for_database_unlocked_with_timeout_option(db_path, Some(timeout))
+}
+
+fn ensure_entry_ids_for_database_unlocked_with_timeout_option(
+    db_path: &Path,
+    timeout: Option<Duration>,
+) -> Result<()> {
+    let deadline = timeout.and_then(|timeout| Instant::now().checked_add(timeout));
+    let connection = match timeout {
+        Some(timeout) => db::open_read_write_connection_with_timeout(db_path, timeout)?,
+        None => db::open_read_write_connection(db_path)?,
+    };
+    ensure_entry_deadline(deadline, "legacy ID schema inspection")?;
     let tables = detected_tables(&connection)?;
     ensure_entries_table(&tables)?;
     if entry_ids_need_repair(&connection)? {
+        ensure_entry_deadline(deadline, "legacy ID repair preparation")?;
+        if let Some(deadline) = deadline {
+            connection.busy_timeout(remaining_entry_deadline(deadline))?;
+        }
         repair_entry_ids(&connection)?;
+        ensure_entry_deadline(deadline, "legacy ID repair")?;
+    }
+    Ok(())
+}
+
+fn remaining_entry_deadline(deadline: Instant) -> Duration {
+    deadline.saturating_duration_since(Instant::now())
+}
+
+fn ensure_entry_deadline(deadline: Option<Instant>, phase: &str) -> Result<()> {
+    if let Some(deadline) = deadline {
+        if Instant::now() >= deadline {
+            return Err(anyhow::Error::new(backup::MutationBusy(format!(
+                "capture operation deadline exceeded during {phase}"
+            ))));
+        }
     }
     Ok(())
 }
