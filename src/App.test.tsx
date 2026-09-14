@@ -215,6 +215,164 @@ describe("App Writer settings", () => {
     }
   });
 
+  test("restores the first scroll snapshot before replaying a queued refresh", async () => {
+    const externalProbe = vi
+      .spyOn(backend, "checkExternalChanges")
+      .mockResolvedValueOnce({
+        changed: false,
+        available: true,
+        reopened: false,
+        databasePath: "fixture.db",
+        reason: null,
+      })
+      .mockResolvedValueOnce({
+        changed: true,
+        available: true,
+        reopened: false,
+        databasePath: "fixture.db",
+        reason: "data_version",
+      })
+      .mockResolvedValueOnce({
+        changed: true,
+        available: true,
+        reopened: false,
+        databasePath: "fixture.db",
+        reason: "data_version",
+      })
+      .mockResolvedValue({
+        changed: false,
+        available: true,
+        reopened: false,
+        databasePath: "fixture.db",
+        reason: null,
+      });
+    const originalGetDatabaseStatus = backend.getDatabaseStatus;
+    let deferExternalRefresh = false;
+    let refreshStage = 0;
+    let releaseFirstRefresh: () => void = () => {};
+    const firstRefreshGate = new Promise<void>((resolve) => {
+      releaseFirstRefresh = resolve;
+    });
+    let resolveFirstRefreshStarted: () => void = () => {};
+    const firstRefreshStarted = new Promise<void>((resolve) => {
+      resolveFirstRefreshStarted = resolve;
+    });
+    let releaseSecondRefresh: () => void = () => {};
+    const secondRefreshGate = new Promise<void>((resolve) => {
+      releaseSecondRefresh = resolve;
+    });
+    let secondRefreshStarted = false;
+    vi.spyOn(backend, "getDatabaseStatus").mockImplementation(async () => {
+      if (deferExternalRefresh && refreshStage === 0) {
+        refreshStage = 1;
+        resolveFirstRefreshStarted();
+        await firstRefreshGate;
+      } else if (refreshStage === 1) {
+        refreshStage = 2;
+        secondRefreshStarted = true;
+        await secondRefreshGate;
+      }
+      return originalGetDatabaseStatus();
+    });
+
+    const originalRequestAnimationFrame = Object.getOwnPropertyDescriptor(
+      window,
+      "requestAnimationFrame",
+    );
+    const originalCancelAnimationFrame = Object.getOwnPropertyDescriptor(
+      window,
+      "cancelAnimationFrame",
+    );
+    const queuedFrames = new Map<number, FrameRequestCallback>();
+    let nextFrameId = 1;
+    Object.defineProperty(window, "requestAnimationFrame", {
+      configurable: true,
+      value: (callback: FrameRequestCallback) => {
+        const frameId = nextFrameId++;
+        queuedFrames.set(frameId, callback);
+        return frameId;
+      },
+    });
+    Object.defineProperty(window, "cancelAnimationFrame", {
+      configurable: true,
+      value: (frameId: number) => {
+        queuedFrames.delete(frameId);
+      },
+    });
+
+    const originalScrollX = window.scrollX;
+    const originalScrollY = window.scrollY;
+    Object.defineProperty(window, "scrollX", { configurable: true, value: 0 });
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 100 });
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation((x, y) => {
+      Object.defineProperty(window, "scrollX", { configurable: true, value: x });
+      Object.defineProperty(window, "scrollY", { configurable: true, value: y });
+    });
+
+    try {
+      render(<App />);
+      await waitFor(() => expect(externalProbe).toHaveBeenCalledTimes(1));
+      fireEvent.click(screen.getByRole("button", { name: "Entries" }));
+      const entriesView = await screen.findByRole("region", { name: "Entries" });
+      await within(entriesView).findByRole("button", { name: /Phase 1 shape/ });
+
+      deferExternalRefresh = true;
+      window.dispatchEvent(new Event("focus"));
+      await firstRefreshStarted;
+      Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
+
+      window.dispatchEvent(new Event("focus"));
+      await waitFor(() => expect(externalProbe).toHaveBeenCalledTimes(3));
+      releaseFirstRefresh();
+
+      await screen.findByText("Updated from an external journal change.", {}, { timeout: 5000 });
+      await waitFor(() => expect(queuedFrames.size).toBeGreaterThan(0));
+      await new Promise((resolve) => window.setTimeout(resolve, 300));
+      expect(secondRefreshStarted).toBe(false);
+
+      const firstFrame = queuedFrames.entries().next().value as
+        | [number, FrameRequestCallback]
+        | undefined;
+      expect(firstFrame).toBeDefined();
+      if (firstFrame) {
+        queuedFrames.delete(firstFrame[0]);
+        firstFrame[1](performance.now());
+      }
+
+      await waitFor(() => expect(secondRefreshStarted).toBe(true));
+      Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
+      releaseSecondRefresh();
+      await waitFor(() => expect(queuedFrames.size).toBeGreaterThan(0));
+
+      const secondFrame = queuedFrames.entries().next().value as
+        | [number, FrameRequestCallback]
+        | undefined;
+      expect(secondFrame).toBeDefined();
+      if (secondFrame) {
+        queuedFrames.delete(secondFrame[0]);
+        secondFrame[1](performance.now());
+      }
+
+      expect(scrollTo).toHaveBeenCalledWith(0, 100);
+      expect(window.scrollY).toBe(100);
+    } finally {
+      releaseFirstRefresh();
+      releaseSecondRefresh();
+      if (originalRequestAnimationFrame) {
+        Object.defineProperty(window, "requestAnimationFrame", originalRequestAnimationFrame);
+      } else {
+        delete (window as Partial<Window>).requestAnimationFrame;
+      }
+      if (originalCancelAnimationFrame) {
+        Object.defineProperty(window, "cancelAnimationFrame", originalCancelAnimationFrame);
+      } else {
+        delete (window as Partial<Window>).cancelAnimationFrame;
+      }
+      Object.defineProperty(window, "scrollX", { configurable: true, value: originalScrollX });
+      Object.defineProperty(window, "scrollY", { configurable: true, value: originalScrollY });
+    }
+  });
+
   test("shows the full random entry above the compact recent entries", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     render(<App />);

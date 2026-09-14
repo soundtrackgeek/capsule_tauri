@@ -197,20 +197,10 @@ export function trackScrollIntent(): ScrollIntentTracker {
       markIntent();
     }
   };
-  const markTrustedScroll = (event: Event) => {
-    if (event.isTrusted) {
-      markIntent();
-    }
-  };
-
   for (const eventName of ["pointerdown", "touchmove", "touchstart", "wheel"] as const) {
     window.addEventListener(eventName, markIntent, captureOptions);
   }
   window.addEventListener("keydown", markKeyIntent, captureOptions);
-  window.addEventListener("scroll", markTrustedScroll, captureOptions);
-  if (typeof document !== "undefined") {
-    document.addEventListener("scroll", markTrustedScroll, captureOptions);
-  }
 
   return {
     hasUserIntent: () => userIntent,
@@ -223,10 +213,6 @@ export function trackScrollIntent(): ScrollIntentTracker {
         window.removeEventListener(eventName, markIntent, captureOptions);
       }
       window.removeEventListener("keydown", markKeyIntent, captureOptions);
-      window.removeEventListener("scroll", markTrustedScroll, captureOptions);
-      if (typeof document !== "undefined") {
-        document.removeEventListener("scroll", markTrustedScroll, captureOptions);
-      }
     },
   };
 }
@@ -281,14 +267,18 @@ export function restoreScrollPosition(
     return;
   }
 
-  // A refresh can reset an existing layout to zero or remount a marked
-  // container. Restore those resets, but keep a newer user offset or input.
+  // A refresh can reset an existing layout, clamp an offset, or remount a
+  // marked container. With an explicit input tracker, restore any offset
+  // that changed without newer user intent. The no-tracker path retains the
+  // original zero-or-unchanged guard for callers that cannot observe input.
   const hasUserIntent = intentTracker?.hasUserIntent() ?? false;
+  const hasExplicitTracker = intentTracker !== undefined;
   const shouldRestoreWindow =
     !hasUserIntent &&
     typeof window.scrollTo === "function" &&
-    (window.scrollX === position.x || window.scrollX === 0) &&
-    (window.scrollY === position.y || window.scrollY === 0);
+    (hasExplicitTracker ||
+      (window.scrollX === position.x || window.scrollX === 0) &&
+        (window.scrollY === position.y || window.scrollY === 0));
   if (shouldRestoreWindow) {
     try {
       window.scrollTo(position.x, position.y);
@@ -307,8 +297,9 @@ export function restoreScrollPosition(
       continue;
     }
     const shouldRestore =
-      (element.scrollLeft === container.left || element.scrollLeft === 0) &&
-      (element.scrollTop === container.top || element.scrollTop === 0);
+      hasExplicitTracker ||
+      ((element.scrollLeft === container.left || element.scrollLeft === 0) &&
+        (element.scrollTop === container.top || element.scrollTop === 0));
     if (shouldRestore) {
       element.scrollLeft = container.left;
       element.scrollTop = container.top;

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.37.1-dev.14 - 2026-09-14
+
+### Fixed
+
+- External-refresh scroll restoration now treats only explicit pointer, wheel,
+  touch, or scroll-key input as newer user intent, restores layout-clamped
+  offsets, and replays queued refreshes only after the prior restore lifecycle.
+
 ## 0.37.1-dev.13 - 2026-09-14
 
 ### Added
