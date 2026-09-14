@@ -17,9 +17,12 @@ renderer-independent seams for capture/context implementations.
 Create a `ContextRequest` with `ContextRequest::capture` or
 `ContextRequest::enrich`, then call `capture_report` or `enrich` with optional
 injected `HttpClient`, `Clock`, `Cancellation`, and `ContextCache`
-implementations. Integrations that own a backup/mutation guard can call
-`ContextService::prepare` before acquiring it and `persist_prepared` inside
-the short write phase; provider work never needs the guard. Provider work
+implementations. `capture_report` owns a short mutation-lock phase; headless
+`enrich` requires an explicit frozen `BackupPolicy` on the request and owns a
+fresh verified-backup phase. Integrations that already own a backup/mutation
+guard can call `ContextService::prepare` before acquiring it and
+`persist_prepared` inside the short write phase; provider work never needs the
+guard. Provider work
 shares one deadline capped at eight seconds;
 offline, disabled, skipped, cancelled, malformed, and unavailable outcomes are
 reported independently for location and weather. Enrichment re-reads the

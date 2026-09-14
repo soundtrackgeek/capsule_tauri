@@ -25,6 +25,10 @@
 - Preserved manual context during concurrent enrichment, rejected stale
   database identities, prevented deleted location rows from being resurrected,
   and avoided attaching weather to coordinates changed during provider work.
+- Made convenience capture/enrichment honor their documented lock/backup
+  ownership, fail closed for missing database identity or backup policy, clear
+  cancelled provider payloads, and refresh SQLite wait timeouts from the live
+  deadline before `BEGIN IMMEDIATE`.
 
 ## 0.37.1-dev.2 - 2026-09-14
 

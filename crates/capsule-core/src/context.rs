@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Duration as ChronoDuration, TimeZone, Utc};
 use reqwest::blocking::Client;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
@@ -492,21 +492,69 @@ impl ContextService {
         &self.dependencies
     }
 
+    /// Convenience capture: provider work is prepared first, then the
+    /// service acquires only a short mutation lock for persistence.  Callers
+    /// that already own a guard should use [`Self::prepare`] and
+    /// [`Self::persist_prepared`] instead.
     pub fn capture(&self, request: &ContextRequest) -> Result<ContextResult> {
         Ok(self.capture_report(request)?.result)
     }
 
+    /// Report-returning form of [`Self::capture`].
     pub fn capture_report(&self, request: &ContextRequest) -> Result<ContextReport> {
-        self.run(request)
-    }
-
-    pub fn enrich(&self, request: &ContextRequest) -> Result<ContextResult> {
-        Ok(self.run(request)?.result)
-    }
-
-    fn run(&self, request: &ContextRequest) -> Result<ContextReport> {
         let preparation = self.prepare(request)?;
-        self.persist_prepared(request, preparation)
+        self.persist_with_mutation_lock(request, preparation)
+    }
+
+    /// Convenience enrichment: the request must carry a frozen backup
+    /// policy, which is used after provider work completes.  Callers that
+    /// already own a guard should use [`Self::prepare`] and
+    /// [`Self::persist_prepared`] instead.
+    pub fn enrich(&self, request: &ContextRequest) -> Result<ContextResult> {
+        Ok(self.enrich_report(request)?.result)
+    }
+
+    fn persist_with_mutation_lock(
+        &self,
+        request: &ContextRequest,
+        preparation: ContextPreparation,
+    ) -> Result<ContextReport> {
+        if !preparation.is_persistable() {
+            return Ok(preparation.into_report());
+        }
+        let timeout = preparation.remaining().unwrap_or_default();
+        if timeout.is_zero() {
+            return Ok(preparation.into_report());
+        }
+        let db_path = request.db_path.clone();
+        backup::with_mutation_lock_for_database_with_timeout(&db_path, timeout, move |_path| {
+            self.persist_prepared(request, preparation)
+        })
+    }
+
+    fn enrich_report(&self, request: &ContextRequest) -> Result<ContextReport> {
+        let backup_policy = request.backup_policy.clone().ok_or_else(|| {
+            anyhow!(
+                "headless context enrichment requires a frozen backup policy; resolve it at the application boundary"
+            )
+        })?;
+        let preparation = self.prepare(request)?;
+        if !preparation.is_persistable() {
+            return Ok(preparation.into_report());
+        }
+        let timeout = preparation.remaining().unwrap_or_default();
+        if timeout.is_zero() {
+            return Ok(preparation.into_report());
+        }
+        let db_path = request.db_path.clone();
+        let guarded = backup::with_database_backup_for_database_using_policy_with_timeout(
+            &db_path,
+            "context.enrich",
+            timeout,
+            &backup_policy,
+            move |_path| self.persist_prepared(request, preparation),
+        )?;
+        Ok(guarded.value)
     }
 
     /// Resolve location/weather without holding a backup or mutation lock.
@@ -606,12 +654,7 @@ impl ContextService {
 
         let mut report = self.collect(request, &entry_created_at, existing.as_ref(), &deadline);
         if self.dependencies.cancellation.is_cancelled() {
-            report
-                .result
-                .warnings
-                .push("context capture cancelled".to_string());
-            report.result.location_status = ContextStatus::Skipped;
-            report.result.weather_status = ContextStatus::Skipped;
+            clear_cancelled_context(&mut report);
             return Ok(ContextPreparation::finished(
                 report,
                 self.dependencies.clock.clone(),
@@ -679,15 +722,7 @@ impl ContextService {
             return Ok(preparation.report);
         }
         if self.dependencies.cancellation.is_cancelled() {
-            preparation.report.result.location = None;
-            preparation.report.result.weather = None;
-            preparation.report.result.location_status = ContextStatus::Skipped;
-            preparation.report.result.weather_status = ContextStatus::Skipped;
-            preparation
-                .report
-                .result
-                .warnings
-                .push("context capture cancelled".to_string());
+            clear_cancelled_context(&mut preparation.report);
             return Ok(preparation.report);
         }
         if preparation.deadline.expired() {
@@ -1205,6 +1240,17 @@ fn clear_unpersisted_context(report: &mut ContextReport, warning: &str) {
     report.result.warnings.push(warning.to_string());
 }
 
+fn clear_cancelled_context(report: &mut ContextReport) {
+    report.result.location = None;
+    report.result.weather = None;
+    report.result.location_status = ContextStatus::Skipped;
+    report.result.weather_status = ContextStatus::Skipped;
+    report
+        .result
+        .warnings
+        .push("context capture cancelled".to_string());
+}
+
 /// Capture context with production dependencies.
 pub fn capture_context(
     db_path: &Path,
@@ -1229,32 +1275,7 @@ pub fn enrich_context_with_dependencies(
     request: &ContextRequest,
     dependencies: ContextDependencies,
 ) -> Result<ContextReport> {
-    let service = ContextService::new(dependencies);
-    let mut request = request.clone();
-    if request.backup_policy.is_none() {
-        request.backup_policy = Some(default_backup_policy(&request.db_path));
-    }
-    let preparation = service.prepare(&request)?;
-    if !preparation.is_persistable() {
-        return Ok(preparation.into_report());
-    }
-    let timeout = preparation.remaining().unwrap_or_default();
-    if timeout.is_zero() {
-        return Ok(preparation.into_report());
-    }
-    let backup_policy = request
-        .backup_policy
-        .clone()
-        .expect("context enrichment sets a backup policy before prepare");
-    let db_path = request.db_path.clone();
-    let guarded = crate::backup::with_database_backup_for_database_using_policy_with_timeout(
-        &db_path,
-        "context.enrich",
-        timeout,
-        &backup_policy,
-        move |_path| service.persist_prepared(&request, preparation),
-    )?;
-    Ok(guarded.value)
+    ContextService::new(dependencies).enrich_report(request)
 }
 
 /// Explicit enrichment creates one verified fresh backup, then fills only
@@ -1268,24 +1289,9 @@ pub fn enrich_context(
 ) -> Result<ContextResult> {
     let service = ContextService::default();
     let backup_policy = default_backup_policy(db_path);
-    let request = ContextRequest::enrich(db_path, entry_uuid, policy)
-        .with_backup_policy(backup_policy.clone());
-    let preparation = service.prepare(&request)?;
-    if !preparation.is_persistable() {
-        return Ok(preparation.into_report().result);
-    }
-    let timeout = preparation.remaining().unwrap_or_default();
-    if timeout.is_zero() {
-        return Ok(preparation.into_report().result);
-    }
-    let guarded = crate::backup::with_database_backup_for_database_using_policy_with_timeout(
-        db_path,
-        "context.enrich",
-        timeout,
-        &backup_policy,
-        move |_path| service.persist_prepared(&request, preparation),
-    )?;
-    Ok(guarded.value.result)
+    let request =
+        ContextRequest::enrich(db_path, entry_uuid, policy).with_backup_policy(backup_policy);
+    Ok(service.enrich_report(&request)?.result)
 }
 
 fn default_backup_policy(db_path: &Path) -> crate::contracts::BackupPolicy {
@@ -1515,10 +1521,14 @@ fn load_existing_location_from_connection(
 }
 
 fn database_identity_matches(request: &ContextRequest) -> bool {
-    request.database_identity.as_ref().is_none_or(|expected| {
-        request.db_path.exists()
-            && crate::db::FileIdentity::for_path(&request.db_path).same_file(expected)
-    })
+    let Some(expected) = request.database_identity.as_ref() else {
+        return false;
+    };
+    if expected.stable_id.is_none() || !request.db_path.exists() {
+        return false;
+    }
+    let current = crate::db::FileIdentity::for_path(&request.db_path);
+    current.stable_id.is_some() && current.same_file(expected)
 }
 
 fn persist_context(
@@ -1935,7 +1945,7 @@ fn round4(value: f64) -> f64 {
 mod tests {
     use super::*;
     use chrono::TimeZone;
-    use std::sync::Mutex;
+    use std::sync::{atomic::AtomicUsize, Mutex};
 
     struct FakeHttp {
         responses: Mutex<Vec<(String, String)>>,
@@ -2004,6 +2014,29 @@ mod tests {
             let response = self.inner.get(request, timeout);
             self.clock.advance(self.advance);
             response
+        }
+    }
+
+    struct CancelAfterChecks {
+        checks: AtomicUsize,
+        cancel_at: usize,
+    }
+
+    impl CancelAfterChecks {
+        fn new(cancel_at: usize) -> Self {
+            Self {
+                checks: AtomicUsize::new(0),
+                cancel_at,
+            }
+        }
+    }
+
+    impl Cancellation for CancelAfterChecks {
+        fn is_cancelled(&self) -> bool {
+            self.checks
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                + 1
+                >= self.cancel_at
         }
     }
 
@@ -2152,6 +2185,148 @@ mod tests {
                 .and_then(|value| value.temp_c),
             Some(8.5)
         );
+    }
+
+    #[test]
+    fn convenience_capture_uses_lock_only_persistence_guard() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = fixture_database(temp_dir.path(), "2026-09-14 11:59");
+        let http = Arc::new(FakeHttp::new(ip_weather_fixtures()));
+        let policy = ContextPolicy {
+            database_path: db_path.clone(),
+            deadline_ms: 150,
+            ..ContextPolicy::default()
+        };
+        let request = ContextRequest::capture(&db_path, "entry_test", policy);
+        let dependencies = dependencies(
+            http,
+            Arc::new(ManualClock::new(
+                Utc.with_ymd_and_hms(2026, 9, 14, 12, 0, 0).unwrap(),
+            )),
+        );
+
+        let nested = backup::with_mutation_lock_for_database(&db_path, |_| {
+            Ok(ContextService::new(dependencies).capture_report(&request))
+        })
+        .expect("outer mutation lock");
+        let error = nested.expect_err("convenience capture must honor the held lock");
+        assert!(error.to_string().contains("busy"));
+        let backup_count = std::fs::read_dir(temp_dir.path())
+            .expect("database directory")
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("capsule_backup_")
+            })
+            .count();
+        assert_eq!(
+            backup_count, 0,
+            "capture convenience must not create a backup"
+        );
+    }
+
+    #[test]
+    fn headless_enrichment_requires_a_frozen_backup_policy() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = fixture_database(temp_dir.path(), "2026-09-14 11:59");
+        let http = Arc::new(FakeHttp::new(ip_weather_fixtures()));
+        let request = ContextRequest::enrich(
+            &db_path,
+            "entry_test",
+            ContextPolicy {
+                database_path: db_path.clone(),
+                ..ContextPolicy::default()
+            },
+        );
+        let error = enrich_context_with_dependencies(
+            &request,
+            dependencies(
+                http.clone(),
+                Arc::new(ManualClock::new(
+                    Utc.with_ymd_and_hms(2026, 9, 14, 12, 0, 0).unwrap(),
+                )),
+            ),
+        )
+        .expect_err("headless enrichment must reject a mutable policy lookup");
+        assert!(error.to_string().contains("frozen backup policy"));
+        assert_eq!(http.request_count(), 0, "provider work must not start");
+    }
+
+    #[test]
+    fn cancellation_after_provider_work_clears_unpersisted_payload() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = fixture_database(temp_dir.path(), "2026-09-14 11:59");
+        let http = Arc::new(FakeHttp::new(ip_weather_fixtures()));
+        let cancellation = Arc::new(CancelAfterChecks::new(8));
+        let service = ContextService::new(ContextDependencies {
+            http: http.clone(),
+            clock: Arc::new(ManualClock::new(
+                Utc.with_ymd_and_hms(2026, 9, 14, 12, 0, 0).unwrap(),
+            )),
+            cache: Arc::new(NoopContextCache),
+            cancellation,
+        });
+        let request = ContextRequest::capture(
+            &db_path,
+            "entry_test",
+            ContextPolicy {
+                database_path: db_path.clone(),
+                ..ContextPolicy::default()
+            },
+        );
+        let report = service
+            .capture_report(&request)
+            .expect("cancelled capture report");
+        assert_eq!(
+            http.request_count(),
+            3,
+            "providers completed before cancellation"
+        );
+        assert_eq!(report.result.location_status, ContextStatus::Skipped);
+        assert_eq!(report.result.weather_status, ContextStatus::Skipped);
+        assert!(report.result.location.is_none());
+        assert!(report.result.weather.is_none());
+        assert!(report
+            .result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("cancelled")));
+    }
+
+    #[test]
+    fn missing_database_identity_fails_closed_before_provider_work() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = fixture_database(temp_dir.path(), "2026-09-14 11:59");
+        let http = Arc::new(FakeHttp::new(ip_weather_fixtures()));
+        let mut request = ContextRequest::capture(
+            &db_path,
+            "entry_test",
+            ContextPolicy {
+                database_path: db_path.clone(),
+                ..ContextPolicy::default()
+            },
+        );
+        request.database_identity = None;
+        let report = ContextService::new(dependencies(
+            http.clone(),
+            Arc::new(ManualClock::new(
+                Utc.with_ymd_and_hms(2026, 9, 14, 12, 0, 0).unwrap(),
+            )),
+        ))
+        .capture_report(&request)
+        .expect("fail-closed report");
+        assert_eq!(http.request_count(), 0);
+        assert_eq!(report.result.location_status, ContextStatus::Unavailable);
+        assert_eq!(report.result.weather_status, ContextStatus::Unavailable);
+        assert!(report.result.location.is_none());
+        assert!(report.result.weather.is_none());
+        assert!(report
+            .result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("database changed")));
     }
 
     #[test]
