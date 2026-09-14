@@ -153,6 +153,7 @@ pub fn get_path_settings() -> Result<PathSettingsResponse> {
     let db_path = db::resolve_database_path();
     let backup_directory = db::backup_directory_for_database(&db_path);
     let local_settings = db::read_local_path_settings();
+    let writer_preferences = db::WriterPreferences::from(&local_settings);
     let sync_path = env::var("CAPSULE_SYNC_PATH")
         .ok()
         .and_then(|value| normalize_string(Some(&value)))
@@ -184,11 +185,9 @@ pub fn get_path_settings() -> Result<PathSettingsResponse> {
         minimize_to_tray_on_close: local_settings.minimize_to_tray_on_close.unwrap_or(false),
         start_with_windows: false,
         debug_menu_enabled: local_settings.debug_menu_enabled.unwrap_or(false),
-        word_target_enabled: local_settings.word_target_enabled.unwrap_or(false),
-        word_target: local_settings
-            .word_target
-            .unwrap_or(db::DEFAULT_WORD_TARGET),
-        gauntlet_mode_enabled: local_settings.gauntlet_mode_enabled.unwrap_or(false),
+        word_target_enabled: writer_preferences.word_target_enabled,
+        word_target: writer_preferences.word_target,
+        gauntlet_mode_enabled: writer_preferences.gauntlet_mode_enabled,
         settings_path: db::path_to_string(&db::local_path_settings_path()),
         warnings,
     })

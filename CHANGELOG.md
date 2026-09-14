@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.37.1-dev.11 - 2026-09-14
+
+### Added
+
+- Safe writer-target and Gauntlet preference snapshots in the shared resolver,
+  using the same defaults and bounds as desktop settings.
+
 ## 0.37.1-dev.10 - 2026-09-14
 
 ### Added

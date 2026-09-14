@@ -9,6 +9,8 @@ location-aware browsing, analytics, Writer Mode, a visual cover wall, and
 explicit capability-gated AI/sync surfaces:
 
 - Tauri 2 desktop configuration.
+- Shared writer-target/Gauntlet preference interpretation for the desktop and
+  headless clients, without exposing unrelated settings or credentials.
 - A headless `capsule-core` crate containing the shared database, backup,
   entries, location, and model behavior. It exposes explicit-path resolution,
   read-only schema capability diagnostics, a bounded `JournalReader` for

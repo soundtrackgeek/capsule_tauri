@@ -85,6 +85,14 @@ lists, exact UUID/number lookup, tag and mood discovery, and date/search
 metadata pages. `search` keeps Capsule's structured tokens and FTS fallback
 diagnostics without invoking repair.
 
+`ResolvedCapsule.settings.writer` is a safe `db::WriterPreferences` snapshot
+of Capsule's local word target and Gauntlet preferences. Defaults (disabled,
+500 words) and the 1–100,000 range are shared with the desktop adapter.
+`blocks_save(words)` requires both target and Gauntlet to be enabled. The CLI
+writer may use this snapshot; quick capture deliberately stays available for
+short notes. Resolving these values never returns sync credentials or rereads
+settings during an editing session.
+
 ```rust
 use capsule_core::{JournalReader, ReadOptions};
 

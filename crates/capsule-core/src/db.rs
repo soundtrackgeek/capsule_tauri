@@ -126,6 +126,44 @@ pub struct SafePathSettings {
     pub cover_wall_root: Option<PathBuf>,
     pub backup_directory: Option<PathBuf>,
     pub backup_retention_count: Option<usize>,
+    /// Writer-only preferences from the same validated settings snapshot.
+    #[serde(default)]
+    pub writer: WriterPreferences,
+}
+
+/// Capsule's local writing target, with shared defaults and bounds. This DTO
+/// deliberately carries no sync credentials or unrelated raw settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WriterPreferences {
+    pub word_target_enabled: bool,
+    pub word_target: usize,
+    pub gauntlet_mode_enabled: bool,
+}
+
+impl Default for WriterPreferences {
+    fn default() -> Self {
+        Self::from(&LocalPathSettings::default())
+    }
+}
+
+impl From<&LocalPathSettings> for WriterPreferences {
+    fn from(settings: &LocalPathSettings) -> Self {
+        Self {
+            word_target_enabled: settings.word_target_enabled.unwrap_or(false),
+            word_target: settings
+                .word_target
+                .unwrap_or(DEFAULT_WORD_TARGET)
+                .clamp(1, MAX_WORD_TARGET),
+            gauntlet_mode_enabled: settings.gauntlet_mode_enabled.unwrap_or(false),
+        }
+    }
+}
+
+impl WriterPreferences {
+    pub fn blocks_save(&self, word_count: usize) -> bool {
+        self.word_target_enabled && self.gauntlet_mode_enabled && word_count < self.word_target
+    }
 }
 
 impl From<&LocalPathSettings> for SafePathSettings {
@@ -136,6 +174,7 @@ impl From<&LocalPathSettings> for SafePathSettings {
             cover_wall_root: settings.cover_wall_root.as_deref().map(PathBuf::from),
             backup_directory: settings.backup_directory.as_deref().map(PathBuf::from),
             backup_retention_count: settings.backup_retention_count,
+            writer: WriterPreferences::from(settings),
         }
     }
 }
@@ -1482,6 +1521,60 @@ mod tests {
         assert_eq!(stored.word_target_enabled, Some(true));
         assert_eq!(stored.word_target, Some(MAX_WORD_TARGET));
         assert_eq!(stored.gauntlet_mode_enabled, Some(true));
+    }
+
+    #[test]
+    fn shared_writer_preferences_keep_defaults_bounds_and_gauntlet_semantics() {
+        let defaults = WriterPreferences::default();
+        assert_eq!(defaults.word_target, DEFAULT_WORD_TARGET);
+        assert!(!defaults.blocks_save(0));
+        let mut settings = LocalPathSettings {
+            word_target_enabled: Some(true),
+            word_target: Some(0),
+            gauntlet_mode_enabled: Some(true),
+            ..LocalPathSettings::default()
+        };
+        let writer = WriterPreferences::from(&settings);
+        assert_eq!(writer.word_target, 1);
+        assert!(writer.blocks_save(0));
+        assert!(!writer.blocks_save(1));
+        settings.word_target = Some(MAX_WORD_TARGET + 1);
+        assert_eq!(
+            WriterPreferences::from(&settings).word_target,
+            MAX_WORD_TARGET
+        );
+        settings.word_target_enabled = Some(false);
+        assert!(!WriterPreferences::from(&settings).blocks_save(0));
+    }
+
+    #[test]
+    fn resolver_freezes_safe_writer_preferences_without_exposing_credentials() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = create_capability_fixture(temp.path().join("journal.db"));
+        let settings_path = temp.path().join("paths.json");
+        let settings = LocalPathSettings {
+            word_target_enabled: Some(true),
+            word_target: Some(123),
+            gauntlet_mode_enabled: Some(true),
+            github_gist_token: Some("synthetic-secret-do-not-expose".to_owned()),
+            ..LocalPathSettings::default()
+        };
+        write_local_path_settings_to_path(&settings_path, &settings).unwrap();
+        let resolved = resolve_capsule(
+            ResolveRequest::explicit_database(&db_path).with_path_settings_path(&settings_path),
+        )
+        .unwrap();
+        // An editor keeps this immutable snapshot even if the desktop later
+        // changes its preferences. A later writer launch resolves afresh.
+        write_local_path_settings_to_path(&settings_path, &LocalPathSettings::default()).unwrap();
+        assert_eq!(resolved.settings.writer.word_target, 123);
+        assert!(resolved.settings.writer.blocks_save(122));
+        let safe_json = serde_json::to_string(&resolved).unwrap();
+        assert!(!safe_json.contains("synthetic-secret"));
+        assert!(!safe_json.contains("githubGistToken"));
+        assert!(safe_json.contains("wordTarget"));
+        let legacy: SafePathSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(legacy.writer, WriterPreferences::default());
     }
 
     #[test]
