@@ -142,6 +142,9 @@ export function useExternalChanges({
       if (pendingReplayRef.current === replayPending) {
         pendingReplayRef.current = null;
       }
+      if (pendingStatus?.changed) {
+        pendingChangeRef.current = pendingStatus;
+      }
       if (debounceTimer !== null) {
         window.clearTimeout(debounceTimer);
       }

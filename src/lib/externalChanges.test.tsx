@@ -195,6 +195,30 @@ describe("useExternalChanges", () => {
     expect(onChange).toHaveBeenCalledWith(changed);
   });
 
+  test("preserves a debounced change when the view is disabled before flush", async () => {
+    vi.useFakeTimers();
+    const checker = vi
+      .fn<() => Promise<ExternalChangeStatus>>()
+      .mockResolvedValueOnce(changed)
+      .mockResolvedValue(unchanged);
+    const onChange = vi.fn();
+    const view = render(<Harness checker={checker} onChange={onChange} />);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(onChange).not.toHaveBeenCalled();
+
+    view.rerender(<Harness checker={checker} enabled={false} onChange={onChange} />);
+    view.rerender(<Harness checker={checker} onChange={onChange} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(EXTERNAL_CHANGE_DEBOUNCE_MS);
+    });
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(changed);
+  });
+
   test("defers a changed result received while hidden until visible", async () => {
     vi.useFakeTimers();
     let resolveProbe: ((status: ExternalChangeStatus) => void) | undefined;
