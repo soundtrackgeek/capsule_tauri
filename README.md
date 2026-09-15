@@ -21,6 +21,9 @@ explicit capability-gated AI/sync surfaces:
   read-only reconciliation for safe retries. Each capture uses one 15-second
   operation budget spanning lock acquisition, SQLite busy waits, backup I/O,
   and commit preparation, with no stacked per-stage waits.
+  Backup creation compares foreign-key diagnostics with the same source read
+  snapshot: existing orphaned metadata is preserved, while mismatches and failed
+  integrity checks still stop writes. Restore validation remains strict.
 - Native window restoration for the last size, position, maximized, and
   fullscreen state used before closing the app, while every fresh launch opens
   the main window even if the previous session ended from the tray.

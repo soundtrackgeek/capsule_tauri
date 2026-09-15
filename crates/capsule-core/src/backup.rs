@@ -121,6 +121,15 @@ fn create_backup_with_policy_locked_until(
             )?,
             None => db::open_read_only_connection(db_path)?,
         };
+        let source_deadline = deadline
+            .map(|(deadline, _)| db::SqliteDeadline::install(&source, deadline))
+            .transpose()?;
+        // Pin the reference check and the online backup to the same SQLite
+        // snapshot, including committed WAL pages. Old orphaned plugin rows
+        // are source data to preserve, not evidence of a damaged backup.
+        source.execute_batch("BEGIN DEFERRED")?;
+        let source_foreign_keys = foreign_key_violations(&source)?;
+        check_backup_deadline(deadline, "source foreign-key verification")?;
         let mut destination = Connection::open(&temporary_path)
             .with_context(|| format!("failed to create {}", temporary_path.display()))?;
         if let Some((deadline, timeout)) = deadline {
@@ -140,14 +149,10 @@ fn create_backup_with_policy_locked_until(
         }
         drop(backup);
         drop(destination);
+        drop(source_deadline);
         drop(source);
 
-        match deadline {
-            Some((deadline, timeout)) => {
-                verify_backup_until(&temporary_path, deadline, timeout)?;
-            }
-            None => verify_backup(&temporary_path)?,
-        }
+        verify_backup_against(&temporary_path, &source_foreign_keys, deadline)?;
         check_backup_deadline(deadline, "backup publication")?;
         fs::rename(&temporary_path, &backup_path).with_context(|| {
             format!(
@@ -649,51 +654,59 @@ fn backup_infos_in_directory(backup_directory: &Path) -> Result<Vec<BackupInfo>>
 }
 
 fn verify_backup(path: &Path) -> Result<()> {
-    let metadata = fs::metadata(path)
-        .with_context(|| format!("backup was not created: {}", path.display()))?;
-    if metadata.len() == 0 {
-        return Err(anyhow!("backup is empty: {}", path.display()));
-    }
-
-    let connection = db::open_read_only_connection(path)?;
-    let schema = db::inspect_schema(&connection)?;
-    if !schema.has_entries_table {
-        return Err(anyhow!(
-            "backup verification failed because entries table was not found"
-        ));
-    }
-
-    let integrity =
-        connection.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))?;
-    if !integrity.eq_ignore_ascii_case("ok") {
-        return Err(anyhow!(
-            "backup verification failed integrity_check: {integrity}"
-        ));
-    }
-
-    let mut foreign_keys = connection.prepare("PRAGMA foreign_key_check")?;
-    let mut rows = foreign_keys.query([])?;
-    if rows.next()?.is_some() {
-        return Err(anyhow!(
-            "backup verification failed because foreign-key violations were found"
-        ));
-    }
-
-    Ok(())
+    // Restore validation has no source snapshot to compare against and keeps
+    // its existing requirement that the candidate has no foreign-key issues.
+    verify_backup_against(path, &[], None)
 }
 
-fn verify_backup_until(path: &Path, deadline: Instant, timeout: Duration) -> Result<()> {
-    check_backup_deadline(Some((deadline, timeout)), "backup verification")?;
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ForeignKeyViolation {
+    table: String,
+    rowid: Option<i64>,
+    parent: String,
+    constraint: i64,
+}
+
+fn foreign_key_violations(connection: &Connection) -> Result<Vec<ForeignKeyViolation>> {
+    let mut statement = connection.prepare("PRAGMA foreign_key_check")?;
+    let mut violations = statement
+        .query_map([], |row| {
+            Ok(ForeignKeyViolation {
+                table: row.get(0)?,
+                rowid: row.get(1)?,
+                parent: row.get(2)?,
+                constraint: row.get(3)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    // Keep duplicates (WITHOUT ROWID tables report NULL rowids) and compare
+    // full diagnostics, not merely counts or PRAGMA's incidental row order.
+    violations.sort();
+    Ok(violations)
+}
+
+fn verify_backup_against(
+    path: &Path,
+    expected_foreign_keys: &[ForeignKeyViolation],
+    deadline: Option<(Instant, Duration)>,
+) -> Result<()> {
+    check_backup_deadline(deadline, "backup verification")?;
     let metadata = fs::metadata(path)
         .with_context(|| format!("backup was not created: {}", path.display()))?;
     if metadata.len() == 0 {
         return Err(anyhow!("backup is empty: {}", path.display()));
     }
 
-    let connection =
-        db::open_read_only_connection_with_timeout(path, remaining_backup_deadline(deadline))?;
-    let _busy_guard = db::SqliteDeadline::install(&connection, deadline)?;
-    check_backup_deadline(Some((deadline, timeout)), "backup schema verification")?;
+    let connection = match deadline {
+        Some((deadline, _)) => {
+            db::open_read_only_connection_with_timeout(path, remaining_backup_deadline(deadline))?
+        }
+        None => db::open_read_only_connection(path)?,
+    };
+    let _busy_guard = deadline
+        .map(|(deadline, _)| db::SqliteDeadline::install(&connection, deadline))
+        .transpose()?;
+    check_backup_deadline(deadline, "backup schema verification")?;
     let schema = db::inspect_schema(&connection)?;
     if !schema.has_entries_table {
         return Err(anyhow!(
@@ -701,7 +714,7 @@ fn verify_backup_until(path: &Path, deadline: Instant, timeout: Duration) -> Res
         ));
     }
 
-    check_backup_deadline(Some((deadline, timeout)), "backup integrity verification")?;
+    check_backup_deadline(deadline, "backup integrity verification")?;
     let integrity =
         connection.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))?;
     if !integrity.eq_ignore_ascii_case("ok") {
@@ -710,12 +723,10 @@ fn verify_backup_until(path: &Path, deadline: Instant, timeout: Duration) -> Res
         ));
     }
 
-    check_backup_deadline(Some((deadline, timeout)), "backup foreign-key verification")?;
-    let mut foreign_keys = connection.prepare("PRAGMA foreign_key_check")?;
-    let mut rows = foreign_keys.query([])?;
-    if rows.next()?.is_some() {
+    check_backup_deadline(deadline, "backup foreign-key verification")?;
+    if foreign_key_violations(&connection)? != expected_foreign_keys {
         return Err(anyhow!(
-            "backup verification failed because foreign-key violations were found"
+            "backup verification failed because foreign-key violations differ from the source snapshot"
         ));
     }
 
@@ -1134,6 +1145,91 @@ mod tests {
             })
             .expect("count backup entries");
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn creation_preserves_existing_foreign_key_violations_including_wal() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("capsule.db");
+        let source = Connection::open(&path).unwrap();
+        source
+            .execute_batch(
+                "PRAGMA journal_mode=WAL;
+             PRAGMA wal_autocheckpoint=0;
+             PRAGMA foreign_keys=OFF;
+             CREATE TABLE entries (id INTEGER PRIMARY KEY, text TEXT);
+             INSERT INTO entries VALUES (1, 'original');
+             CREATE TABLE plugin_entry_locations (
+                 id INTEGER PRIMARY KEY, entry_id INTEGER REFERENCES entries(id));
+             INSERT INTO plugin_entry_locations VALUES (1, 999);
+             CREATE TABLE legacy_links (
+                 id TEXT PRIMARY KEY, entry_id INTEGER REFERENCES entries(id)) WITHOUT ROWID;
+             INSERT INTO legacy_links VALUES ('a', 998), ('b', 997);",
+            )
+            .unwrap();
+        let expected = foreign_key_violations(&source).unwrap();
+        assert_eq!(expected.len(), 3);
+        assert_eq!(expected.iter().filter(|row| row.rowid.is_none()).count(), 2);
+        assert!(sidecar_path(&path, "-wal").metadata().unwrap().len() > 0);
+        let policy = crate::contracts::BackupPolicy::new(root.path().join("backups"), 5);
+        for deadline in [
+            None,
+            Some((
+                Instant::now() + Duration::from_secs(15),
+                Duration::from_secs(15),
+            )),
+        ] {
+            let result = create_backup_with_policy_locked_until(
+                &path,
+                BackupCreateRequest::default(),
+                &policy,
+                deadline,
+            )
+            .unwrap();
+            let copied = db::open_read_only_connection(Path::new(&result.backup.path)).unwrap();
+            assert_eq!(foreign_key_violations(&copied).unwrap(), expected);
+            assert_eq!(
+                copied
+                    .query_row("SELECT text FROM entries", [], |row| row
+                        .get::<_, String>(0))
+                    .unwrap(),
+                "original"
+            );
+            assert!(result.backup.verified);
+            // No source baseline is available for arbitrary restore candidates.
+            assert!(verify_backup(Path::new(&result.backup.path)).is_err());
+        }
+        assert_eq!(foreign_key_violations(&source).unwrap(), expected);
+    }
+
+    #[test]
+    fn verification_rejects_changed_violations_and_damaged_databases() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("candidate.db");
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch(
+            "PRAGMA foreign_keys=OFF;
+             CREATE TABLE entries (id INTEGER PRIMARY KEY, text TEXT);
+             CREATE TABLE plugin_entry_locations (
+                 id INTEGER PRIMARY KEY, entry_id INTEGER REFERENCES entries(id));
+             INSERT INTO plugin_entry_locations VALUES (1, 999);",
+        )
+        .unwrap();
+        let expected = foreign_key_violations(&db).unwrap();
+        verify_backup_against(&path, &expected, None).unwrap();
+        assert!(verify_backup_against(&path, &[], None).is_err());
+        db.execute("UPDATE plugin_entry_locations SET id=2", [])
+            .unwrap();
+        assert_eq!(foreign_key_violations(&db).unwrap().len(), expected.len());
+        assert!(verify_backup_against(&path, &expected, None).is_err());
+        db.execute("DELETE FROM plugin_entry_locations", [])
+            .unwrap();
+        assert!(verify_backup_against(&path, &expected, None).is_err());
+        drop(db);
+        fs::write(&path, b"damaged SQLite backup").unwrap();
+        assert!(verify_backup_against(&path, &[], None).is_err());
+        fs::write(&path, b"").unwrap();
+        assert!(verify_backup_against(&path, &[], None).is_err());
     }
 
     #[test]

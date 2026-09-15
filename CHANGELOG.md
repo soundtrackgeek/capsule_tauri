@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.37.1-dev.12 - 2026-09-15
+
+### Fixed
+
+- Shared-core backup creation now preserves existing foreign-key violations by
+  comparing complete diagnostics against the same SQLite source snapshot,
+  including WAL data, while retaining integrity and restore checks.
+- Capture backup and contention errors retain the underlying error chain.
+
 ## 0.37.1-dev.11 - 2026-09-14
 
 ### Added

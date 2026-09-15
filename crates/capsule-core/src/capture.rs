@@ -345,12 +345,12 @@ pub fn capture_entry_with_hooks_for_database(
                 return Err(database_replaced(&request, error.to_string()));
             }
             if error.downcast_ref::<backup::MutationBusy>().is_some() {
-                return Err(database_busy(&request, error.to_string()));
+                return Err(database_busy(&request, format!("{error:#}")));
             }
             if is_sqlite_busy(&error) {
-                return Err(database_busy(&request, error.to_string()));
+                return Err(database_busy(&request, format!("{error:#}")));
             }
-            return Err(backup_failed(&request, error.to_string()));
+            return Err(backup_failed(&request, format!("{error:#}")));
         }
     };
 
