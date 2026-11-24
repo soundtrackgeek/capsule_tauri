@@ -30,24 +30,41 @@ struct ThreadMetadataChanges {
     summary: Option<Option<String>>,
 }
 
-pub fn list_threads(limit: Option<i64>, offset: Option<i64>) -> Result<ThreadListResponse> {
-    list_threads_for_database(&db::resolve_database_path(), limit, offset)
+pub fn list_threads(
+    limit: Option<i64>,
+    offset: Option<i64>,
+    include_root_uuid: Option<&str>,
+) -> Result<ThreadListResponse> {
+    list_threads_for_database(
+        &db::resolve_database_path(),
+        limit,
+        offset,
+        include_root_uuid,
+    )
 }
 
 pub(crate) fn list_threads_for_database(
     db_path: &Path,
     limit: Option<i64>,
     offset: Option<i64>,
+    include_root_uuid: Option<&str>,
 ) -> Result<ThreadListResponse> {
     let limit = limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let offset = offset.unwrap_or(0).max(0);
     let groups = load_thread_groups(db_path)?;
     let total = groups.len() as i64;
-    let threads = groups
-        .into_iter()
-        .skip(offset as usize)
-        .take(limit as usize)
-        .collect();
+    let mut threads = Vec::new();
+    let mut requested = None;
+    for (index, group) in groups.into_iter().enumerate() {
+        if (offset..offset.saturating_add(limit)).contains(&(index as i64)) {
+            threads.push(group);
+        } else if include_root_uuid == Some(group.root_uuid.as_str()) {
+            requested = Some(group);
+        }
+    }
+    if let Some(group) = requested {
+        threads.insert(0, group);
+    }
 
     Ok(ThreadListResponse {
         threads,
@@ -833,7 +850,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let db_path = create_thread_fixture(temp_dir.path());
 
-        let response = list_threads_for_database(&db_path, Some(20), Some(0)).expect("threads");
+        let response =
+            list_threads_for_database(&db_path, Some(20), Some(0), None).expect("threads");
 
         assert_eq!(response.total, 1);
         assert_eq!(response.threads[0].root_uuid, "entry_root");
@@ -846,6 +864,21 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["entry_root", "entry_middle", "entry_leaf"]
         );
+    }
+
+    #[test]
+    fn list_threads_includes_the_requested_thread_on_or_outside_the_page() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_thread_fixture(temp_dir.path());
+
+        for offset in [0, 1] {
+            let response =
+                list_threads_for_database(&db_path, Some(1), Some(offset), Some("entry_root"))
+                    .expect("threads");
+            assert_eq!(response.total, 1);
+            assert_eq!(response.threads.len(), 1);
+            assert_eq!(response.threads[0].root_uuid, "entry_root");
+        }
     }
 
     #[test]
@@ -905,7 +938,8 @@ mod tests {
             .expect("detach");
         assert_eq!(detached.value.1, vec!["entry_leaf".to_string()]);
 
-        let after_detach = list_threads_for_database(&db_path, Some(20), Some(0)).expect("threads");
+        let after_detach =
+            list_threads_for_database(&db_path, Some(20), Some(0), None).expect("threads");
         assert_eq!(after_detach.threads[0].entry_count, 2);
 
         let disbanded =
@@ -916,7 +950,7 @@ mod tests {
         assert_eq!(disbanded.value.len(), 2);
 
         let after_disband =
-            list_threads_for_database(&db_path, Some(20), Some(0)).expect("threads");
+            list_threads_for_database(&db_path, Some(20), Some(0), None).expect("threads");
         assert_eq!(after_disband.total, 0);
     }
 

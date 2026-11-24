@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use chrono::{Local, Utc};
+use chrono::{Local, NaiveDate, Utc};
 use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
@@ -1531,14 +1531,22 @@ fn build_query(filters: &EntryFilters, tables: &HashSet<String>) -> QueryParts {
         params.push(Value::Text(pattern));
     }
 
-    if let Some(since) = normalized_string(filters.since.as_deref()) {
-        conditions.push("datetime(e.created_at) >= datetime(?)".to_string());
-        params.push(Value::Text(since));
+    if let Some(uuid) = normalized_string(filters.entry_uuid.as_deref()) {
+        conditions.push("e.uuid = ?".to_string());
+        params.push(Value::Text(uuid));
     }
 
-    if let Some(until) = normalized_string(filters.until.as_deref()) {
-        conditions.push("datetime(e.created_at) <= datetime(?)".to_string());
-        params.push(Value::Text(until));
+    for (bound, comparison) in [(&filters.since, ">="), (&filters.until, "<=")] {
+        if let Some(value) = normalized_string(bound.as_deref()) {
+            let condition =
+                if value.len() == 10 && NaiveDate::parse_from_str(&value, "%Y-%m-%d").is_ok() {
+                    format!("substr(e.created_at, 1, 10) {comparison} ?")
+                } else {
+                    format!("datetime(e.created_at) {comparison} datetime(?)")
+                };
+            conditions.push(condition);
+            params.push(Value::Text(value));
+        }
     }
 
     if let Some(starred) = filters.starred {
@@ -2433,6 +2441,36 @@ mod tests {
     use super::*;
     use crate::models::NullableStringUpdate;
     use rusqlite::Connection;
+
+    #[test]
+    fn entry_drill_down_filters_by_uuid_and_full_calendar_day() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = create_fixture_database(temp_dir.path());
+        let date = Some("2026-01-02".to_string());
+        let day = list_entries_for_database(
+            &db_path,
+            EntryFilters {
+                since: date.clone(),
+                until: date,
+                ..EntryFilters::default()
+            },
+        )
+        .expect("day entries");
+        assert_eq!(day.total, 1);
+        assert_eq!(day.entries[0].uuid, "entry_middle");
+
+        let entry = list_entries_for_database(
+            &db_path,
+            EntryFilters {
+                entry_uuid: Some("entry_root".to_string()),
+                limit: Some(1),
+                ..EntryFilters::default()
+            },
+        )
+        .expect("exact entry");
+        assert_eq!(entry.total, 1);
+        assert_eq!(entry.entries[0].uuid, "entry_root");
+    }
 
     #[test]
     fn list_entries_returns_visible_entries_with_relations() {

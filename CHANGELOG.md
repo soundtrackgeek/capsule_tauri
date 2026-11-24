@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.40.0 - 2026-11-24
+
+### Added
+
+- Open entries directly from the Dashboard's random, pinned, and recent cards.
+  All-time records open the matching entry, day, or month.
+- Open a full day's entries from an active Writing Calendar cell.
+- Click a tag, mood, or thread in the entry reader to browse that part of the journal.
+- Filter Entries with **Starred only**, **Pinned only**, or both.
+
+### Fixed
+
+- Date filters in Entries now include the entire end date, including entries
+  written after midnight.
+
+### Changed
+
+- Bumped the app version to 0.40.0.
+
 ## 0.39.0 - 2026-11-24
 
 ### Added

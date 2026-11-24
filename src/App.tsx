@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { listen } from "@tauri-apps/api/event";
 import changelogMarkdown from "../CHANGELOG.md?raw";
 import { RetroWriterShell } from "./components/retro/RetroWriterShell";
@@ -223,6 +223,7 @@ import type {
   ExportFormat,
   EntryCover,
   GamificationOverviewResponse,
+  JournalDrillDown,
   GamificationQuest,
   ImageAttachment,
   ImageEntryListResponse,
@@ -276,6 +277,9 @@ type EntryFilterForm = {
   until: string;
   includeHidden: boolean;
   hasImages: boolean;
+  starred: boolean;
+  pinned: boolean;
+  focus?: JournalDrillDown;
   sort: "asc" | "desc";
 };
 
@@ -624,6 +628,8 @@ const defaultEntryFilters: EntryFilterForm = {
   until: "",
   includeHidden: false,
   hasImages: false,
+  starred: false,
+  pinned: false,
   sort: "desc",
 };
 
@@ -750,6 +756,7 @@ function App() {
   const [selectedCoverEntry, setSelectedCoverEntry] = useState<Entry | null>(null);
   const [threadResponse, setThreadResponse] = useState<ThreadListResponse | null>(null);
   const [selectedThreadRoot, setSelectedThreadRoot] = useState<string | null>(null);
+  const [threadJumpRoot, setThreadJumpRoot] = useState<string>();
   const [threadDraft, setThreadDraft] = useState<ThreadMetadataDraft>(emptyThreadDraft);
   const [threadEntryPickerOpen, setThreadEntryPickerOpen] = useState(false);
   const [composerMode, setComposerMode] = useState<ComposerMode>("create");
@@ -811,6 +818,12 @@ function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const autoSyncRunningRef = useRef(false);
   const coverEntryLoadIdRef = useRef(0);
+  const entryListLoadIdRef = useRef(0);
+  const entryDetailLoadIdRef = useRef(0);
+  const searchLoadIdRef = useRef(0);
+  const threadsLoadIdRef = useRef(0);
+  const drillDownHeadingRef = useRef<HTMLHeadingElement>(null);
+  const focusDrillDownRef = useRef(false);
   const updateCheckRunningRef = useRef(false);
 
   const statusTone = useMemo(() => {
@@ -865,9 +878,11 @@ function App() {
   }, [availableUpdate, updateInstalling, updateProgress]);
 
   const builtEntryFilters = useMemo<EntryFilters>(() => {
-    const tags = splitFilter(entryFilters.tag);
-    const moods = splitFilter(entryFilters.mood);
+    const { focus } = entryFilters;
+    const tags = focus?.kind === "tag" ? [focus.value] : splitFilter(entryFilters.tag);
+    const moods = focus?.kind === "mood" ? [focus.value] : splitFilter(entryFilters.mood);
     return {
+      entryUuid: focus?.kind === "entry" ? focus.value : undefined,
       text: entryFilters.text || undefined,
       location: entryFilters.location || undefined,
       tags: tags.length ? tags : undefined,
@@ -876,6 +891,8 @@ function App() {
       until: entryFilters.until || undefined,
       includeHidden: entryFilters.includeHidden,
       hasImages: entryFilters.hasImages ? true : null,
+      starred: entryFilters.starred ? true : undefined,
+      pinned: entryFilters.pinned ? true : undefined,
       limit: entryLimit,
       offset: 0,
       sort: entryFilters.sort,
@@ -933,10 +950,12 @@ function App() {
   );
 
   const loadEntryList = useCallback(async () => {
+    const loadId = ++entryListLoadIdRef.current;
     if (!status?.readable) {
       setEntryResponse(null);
       setSelectedEntry(null);
       setEntryListImages({});
+      setEntriesLoading(false);
       return;
     }
 
@@ -944,16 +963,19 @@ function App() {
     setError(null);
     try {
       const response = await listEntries(builtEntryFilters);
+      if (entryListLoadIdRef.current !== loadId) return;
       let imageMap: EntryImageMap = {};
       try {
         imageMap = await loadEntryImageMap(response.entries);
       } catch (imageError) {
+        if (entryListLoadIdRef.current !== loadId) return;
         setError(
           imageError instanceof Error
             ? imageError.message
             : "Unable to load entry image thumbnails",
         );
       }
+      if (entryListLoadIdRef.current !== loadId) return;
       setEntryResponse(response);
       setEntryListImages(imageMap);
       setSelectedEntry((current) => {
@@ -963,17 +985,20 @@ function App() {
         return response.entries.find((entry) => entry.uuid === current.uuid) ?? response.entries[0] ?? null;
       });
     } catch (listError) {
+      if (entryListLoadIdRef.current !== loadId) return;
       setEntryListImages({});
       setError(listError instanceof Error ? listError.message : "Unable to load entries");
     } finally {
-      setEntriesLoading(false);
+      if (entryListLoadIdRef.current === loadId) setEntriesLoading(false);
     }
   }, [builtEntryFilters, status?.readable]);
 
   const loadSearchResults = useCallback(async () => {
+    const loadId = ++searchLoadIdRef.current;
     if (!status?.readable) {
       setSearchResponse(null);
       setSearchResultImages({});
+      setSearchLoading(false);
       return;
     }
 
@@ -981,16 +1006,19 @@ function App() {
     setError(null);
     try {
       const response = await searchEntries(builtSearchRequest);
+      if (searchLoadIdRef.current !== loadId) return;
       let imageMap: EntryImageMap = {};
       try {
         imageMap = await loadEntryImageMap(response.entries);
       } catch (imageError) {
+        if (searchLoadIdRef.current !== loadId) return;
         setError(
           imageError instanceof Error
             ? imageError.message
             : "Unable to load search image thumbnails",
         );
       }
+      if (searchLoadIdRef.current !== loadId) return;
       setSearchResponse(response);
       setSearchResultImages(imageMap);
       setSelectedEntry((current) => {
@@ -1000,10 +1028,11 @@ function App() {
         return response.entries.find((entry) => entry.uuid === current.uuid) ?? response.entries[0] ?? null;
       });
     } catch (searchError) {
+      if (searchLoadIdRef.current !== loadId) return;
       setSearchResultImages({});
       setError(searchError instanceof Error ? searchError.message : "Unable to search entries");
     } finally {
-      setSearchLoading(false);
+      if (searchLoadIdRef.current === loadId) setSearchLoading(false);
     }
   }, [builtSearchRequest, status?.readable]);
 
@@ -1199,16 +1228,19 @@ function App() {
   }, [builtCoverRequest, status?.readable]);
 
   const loadThreads = useCallback(async () => {
+    const loadId = ++threadsLoadIdRef.current;
     if (!status?.readable) {
       setThreadResponse(null);
       setSelectedThreadRoot(null);
+      setThreadsLoading(false);
       return;
     }
 
     setThreadsLoading(true);
     setError(null);
     try {
-      const response = await listThreads(50, 0);
+      const response = await listThreads(50, 0, threadJumpRoot);
+      if (threadsLoadIdRef.current !== loadId) return;
       setThreadResponse(response);
       setSelectedThreadRoot((current) => {
         if (current && response.threads.some((thread) => thread.rootUuid === current)) {
@@ -1217,11 +1249,12 @@ function App() {
         return response.threads[0]?.rootUuid ?? null;
       });
     } catch (threadError) {
+      if (threadsLoadIdRef.current !== loadId) return;
       setError(threadError instanceof Error ? threadError.message : "Unable to load threads");
     } finally {
-      setThreadsLoading(false);
+      if (threadsLoadIdRef.current === loadId) setThreadsLoading(false);
     }
-  }, [status?.readable]);
+  }, [status?.readable, threadJumpRoot]);
 
   const loadDataTools = useCallback(async () => {
     setDataToolsLoading(true);
@@ -1477,6 +1510,13 @@ function App() {
       void loadEntryList();
     }
   }, [activeView, loadEntryList]);
+
+  useEffect(() => {
+    if (focusDrillDownRef.current) {
+      focusDrillDownRef.current = false;
+      drillDownHeadingRef.current?.focus();
+    }
+  }, [activeView, entryFilters, threadJumpRoot]);
 
   useEffect(() => {
     if (activeView === "search") {
@@ -1988,19 +2028,81 @@ function App() {
   }, []);
 
   const handleSelectEntry = useCallback(async (entry: Entry) => {
+    const loadId = ++entryDetailLoadIdRef.current;
     setSelectedEntry(entry);
     setDetailLoading(true);
     setError(null);
 
     try {
       const detail = await getEntry(entry.uuid);
-      setSelectedEntry(detail);
+      if (entryDetailLoadIdRef.current === loadId) setSelectedEntry(detail);
     } catch (detailError) {
-      setError(detailError instanceof Error ? detailError.message : "Unable to open entry");
+      if (entryDetailLoadIdRef.current === loadId) {
+        setError(detailError instanceof Error ? detailError.message : "Unable to open entry");
+      }
     } finally {
-      setDetailLoading(false);
+      if (entryDetailLoadIdRef.current === loadId) setDetailLoading(false);
     }
   }, []);
+
+  const applyEntryFilters = useCallback((filters: EntryFilterForm) => {
+    entryListLoadIdRef.current += 1;
+    entryDetailLoadIdRef.current += 1;
+    setDetailLoading(false);
+    setEntriesLoading(true);
+    setEntryLimit(40);
+    setEntryFilters(filters);
+  }, []);
+
+  const handleEntryFiltersChange = (filters: EntryFilterForm) => {
+    const { focus } = filters;
+    if (focus?.kind === "entry" ||
+        (focus?.kind === "tag" && filters.tag !== focus.value) ||
+        (focus?.kind === "mood" && filters.mood !== focus.value)) {
+      applyEntryFilters({ ...filters, focus: undefined });
+    } else {
+      applyEntryFilters(filters);
+    }
+  };
+
+  const handleJournalDrillDown = useCallback(({ kind, value }: JournalDrillDown) => {
+    focusDrillDownRef.current = true;
+    searchLoadIdRef.current += 1;
+    setEntryHistory(null);
+    if (kind === "thread") {
+      entryListLoadIdRef.current += 1;
+      entryDetailLoadIdRef.current += 1;
+      setDetailLoading(false);
+      threadsLoadIdRef.current += 1;
+      setThreadJumpRoot(value);
+      setSelectedThreadRoot(value);
+      setThreadResponse(null);
+      setThreadsLoading(true);
+      setActiveView("threads");
+      return;
+    }
+
+    const filters = { ...defaultEntryFilters };
+    if (kind === "day") {
+      filters.since = value;
+      filters.until = value;
+    } else if (kind === "month") {
+      const [year, month] = value.split("-").map(Number);
+      const lastDay = new Date(0);
+      lastDay.setUTCFullYear(year, month, 0);
+      filters.since = `${value}-01`;
+      filters.until = lastDay.toISOString().slice(0, 10);
+    } else {
+      filters.focus = { kind, value };
+      if (kind === "tag") filters.tag = value;
+      if (kind === "mood") filters.mood = value;
+    }
+    setSelectedEntry(null);
+    setEntryResponse(null);
+    setEntryListImages({});
+    applyEntryFilters(filters);
+    setActiveView("entries");
+  }, [applyEntryFilters]);
 
   const handleSelectCover = useCallback((cover: EntryCover) => {
     setSelectedCover(cover);
@@ -2068,9 +2170,12 @@ function App() {
   }, []);
 
   const applyMutationResponse = useCallback(
-    async (response: EntryMutationResponse) => {
+    async (response: EntryMutationResponse, navigationId = entryDetailLoadIdRef.current) => {
       setNotice(`Saved with backup: ${response.audit.backupPath}`);
-      setSelectedEntry(response.entry);
+      if (entryDetailLoadIdRef.current === navigationId) {
+        setSelectedEntry(response.entry);
+        setEntryHistory(null);
+      }
       setSelectedCoverEntry((current) =>
         current?.uuid === response.entry.uuid ? response.entry : current,
       );
@@ -2079,8 +2184,8 @@ function App() {
           ? { ...current, entry: coverEntrySummaryFromEntry(response.entry) }
           : current,
       );
-      setEntryHistory(null);
       await refresh();
+      if (entryDetailLoadIdRef.current !== navigationId) return;
       if (activeView === "entries") {
         await loadEntryList();
       } else if (activeView === "search") {
@@ -2430,6 +2535,11 @@ function App() {
       }
       setComposerImageDrafts([]);
       setComposerAiSuggestion(null);
+      setEntryFilters((current) =>
+        current.focus?.kind === "entry" && current.focus.value !== response.entry.uuid
+          ? { ...defaultEntryFilters }
+          : current,
+      );
       resetComposerToNewEntry();
       await applyMutationResponse(response);
       if (attachedCount > 0) {
@@ -2455,6 +2565,7 @@ function App() {
 
   const handleEntryAction = useCallback(
     async (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => {
+      const navigationId = entryDetailLoadIdRef.current;
       setMutatingEntryUuid(entry.uuid);
       setError(null);
       setNotice(null);
@@ -2471,7 +2582,7 @@ function App() {
               : action === "hide"
                 ? await hideEntry(entry.uuid)
                 : await unhideEntry(entry.uuid);
-        await applyMutationResponse(response);
+        await applyMutationResponse(response, navigationId);
       } catch (actionError) {
         setError(actionError instanceof Error ? actionError.message : "Entry action failed");
       } finally {
@@ -2948,6 +3059,7 @@ function App() {
             bestOf={dashboardBestOf}
             counts={dashboardCounts}
             loading={loading}
+            onDrillDown={handleJournalDrillDown}
             onRandomRefresh={handleRandomRefresh}
             pinnedEntries={pinnedEntries}
             randomEntry={randomEntry}
@@ -2959,9 +3071,10 @@ function App() {
 
         {activeView === "entries" && (
           <EntriesView
+            headingRef={drillDownHeadingRef}
             entryHistory={entryHistory}
             entryImagesByUuid={entryListImages}
-            detailLoading={detailLoading}
+            detailLoading={detailLoading || (entriesLoading && selectedEntry === null)}
             entryFilters={entryFilters}
             entryResponse={entryResponse}
             historyLoading={historyLoading}
@@ -2969,21 +3082,16 @@ function App() {
             mutatingEntryUuid={mutatingEntryUuid}
             onContinueEntry={openContinueEntry}
             onDeleteEntry={handleRequestDeleteEntry}
+            onDrillDown={handleJournalDrillDown}
             onEditEntry={openEditEntry}
             onEntryAction={handleEntryAction}
             onExportEntry={handleExportEntry}
             onLoadHistory={handleLoadHistory}
             onLoadMore={() => setEntryLimit((current) => current + 40)}
-            onResetFilters={() => {
-              setEntryLimit(40);
-              setEntryFilters(defaultEntryFilters);
-            }}
+            onResetFilters={() => applyEntryFilters({ ...defaultEntryFilters })}
             onSelectEntry={handleSelectEntry}
             selectedEntry={selectedEntry}
-            setEntryFilters={(next) => {
-              setEntryLimit(40);
-              setEntryFilters(next);
-            }}
+            setEntryFilters={handleEntryFiltersChange}
             status={status}
           />
         )}
@@ -2998,6 +3106,7 @@ function App() {
             mutatingEntryUuid={mutatingEntryUuid}
             onContinueEntry={openContinueEntry}
             onDeleteEntry={handleRequestDeleteEntry}
+            onDrillDown={handleJournalDrillDown}
             onEditEntry={openEditEntry}
             onEntryAction={handleEntryAction}
             onExportEntry={handleExportEntry}
@@ -3097,6 +3206,7 @@ function App() {
           <WritingCalendarView
             calendar={writingCalendar}
             loading={calendarLoading}
+            onDrillDown={handleJournalDrillDown}
             onRefresh={loadWritingCalendar}
             setYear={setWritingCalendarYear}
             status={status}
@@ -3116,6 +3226,7 @@ function App() {
             mutatingEntryUuid={mutatingEntryUuid}
             onContinueEntry={openContinueEntry}
             onDeleteEntry={handleRequestDeleteEntry}
+            onDrillDown={handleJournalDrillDown}
             onEditEntry={openEditEntry}
             onEntryAction={handleEntryAction}
             onExportEntry={handleExportEntry}
@@ -3146,6 +3257,7 @@ function App() {
 
         {activeView === "threads" && (
           <ThreadsView
+            headingRef={drillDownHeadingRef}
             draft={threadDraft}
             loading={threadsLoading}
             mutatingEntryUuid={mutatingEntryUuid}
@@ -3335,6 +3447,7 @@ type DashboardViewProps = {
   counts: DashboardCounts;
   loading: boolean;
   onRandomRefresh: () => void;
+  onDrillDown: (target: JournalDrillDown) => void;
 };
 
 function DashboardView({
@@ -3349,10 +3462,12 @@ function DashboardView({
   counts,
   loading,
   onRandomRefresh,
+  onDrillDown,
 }: DashboardViewProps) {
+  const openEntry = (uuid: string) => onDrillDown({ kind: "entry", value: uuid });
   return (
     <section className="dashboard" aria-label="Journal dashboard">
-      <DashboardBestOfSection bestOf={bestOf} loading={loading} />
+      <DashboardBestOfSection bestOf={bestOf} loading={loading} onDrillDown={onDrillDown} />
 
       <div className="metric-strip">
         <Metric label="Entries" value={status?.entryCount ?? "Unknown"} />
@@ -3403,18 +3518,18 @@ function DashboardView({
           title="Random Entry"
         >
           {randomEntry ? (
-            <EntryMini entry={randomEntry} fullText />
+            <EntryMini entry={randomEntry} fullText onOpenEntry={openEntry} />
           ) : (
             <div className="empty-state">No random entry available.</div>
           )}
         </Panel>
 
         <Panel icon={<Archive size={20} />} title="Pinned Entries">
-          <EntryStack entries={pinnedEntries} emptyText="No pinned entries found." loading={loading} />
+          <EntryStack entries={pinnedEntries} emptyText="No pinned entries found." loading={loading} onOpenEntry={openEntry} />
         </Panel>
 
         <Panel icon={<BookOpen size={20} />} title="Recent Entries">
-          <EntryStack entries={recentEntries} loading={loading} />
+          <EntryStack entries={recentEntries} loading={loading} onOpenEntry={openEntry} />
         </Panel>
 
         <Panel icon={<TriangleAlert size={20} />} title="Warnings">
@@ -3436,18 +3551,21 @@ function DashboardView({
 function DashboardBestOfSection({
   bestOf,
   loading,
+  onDrillDown,
 }: {
   bestOf: DashboardBestOf | null;
   loading: boolean;
+  onDrillDown: (target: JournalDrillDown) => void;
 }) {
   const loadingValue = loading && !bestOf ? "Loading…" : "No record yet";
   const emptyDetail =
     loading && !bestOf
       ? "Gathering your all-time records."
       : "Write a capsule to set this record.";
-  const records = [
+  const records: { label: string; value: string; detail: string; target: JournalDrillDown | null }[] = [
     {
       label: "Most capsules in a day",
+      target: bestOf?.mostEntriesDay ? { kind: "day", value: bestOf.mostEntriesDay.date } : null,
       value: bestOf?.mostEntriesDay
         ? `${formatDashboardNumber(bestOf.mostEntriesDay.entryCount)} ${pluralizeDashboard(bestOf.mostEntriesDay.entryCount, "capsule")}`
         : loadingValue,
@@ -3457,6 +3575,7 @@ function DashboardBestOfSection({
     },
     {
       label: "Most words in a day",
+      target: bestOf?.mostWordsDay ? { kind: "day", value: bestOf.mostWordsDay.date } : null,
       value: bestOf?.mostWordsDay
         ? `${formatDashboardNumber(bestOf.mostWordsDay.wordCount)} ${pluralizeDashboard(bestOf.mostWordsDay.wordCount, "word")}`
         : loadingValue,
@@ -3466,6 +3585,7 @@ function DashboardBestOfSection({
     },
     {
       label: "Most tags on one capsule",
+      target: bestOf?.mostTaggedEntry ? { kind: "entry", value: bestOf.mostTaggedEntry.uuid } : null,
       value: bestOf?.mostTaggedEntry
         ? `${formatDashboardNumber(bestOf.mostTaggedEntry.tagCount)} ${pluralizeDashboard(bestOf.mostTaggedEntry.tagCount, "tag")}`
         : loadingValue,
@@ -3475,6 +3595,7 @@ function DashboardBestOfSection({
     },
     {
       label: "Longest capsule",
+      target: bestOf?.longestEntry ? { kind: "entry", value: bestOf.longestEntry.uuid } : null,
       value: bestOf?.longestEntry
         ? `${formatDashboardNumber(bestOf.longestEntry.wordCount)} ${pluralizeDashboard(bestOf.longestEntry.wordCount, "word")}`
         : loadingValue,
@@ -3484,6 +3605,7 @@ function DashboardBestOfSection({
     },
     {
       label: "Biggest month by capsules",
+      target: bestOf?.mostEntriesMonth ? { kind: "month", value: bestOf.mostEntriesMonth.period } : null,
       value: bestOf?.mostEntriesMonth
         ? `${formatDashboardNumber(bestOf.mostEntriesMonth.entryCount)} ${pluralizeDashboard(bestOf.mostEntriesMonth.entryCount, "capsule")}`
         : loadingValue,
@@ -3493,6 +3615,7 @@ function DashboardBestOfSection({
     },
     {
       label: "Biggest month by words",
+      target: bestOf?.mostWordsMonth ? { kind: "month", value: bestOf.mostWordsMonth.period } : null,
       value: bestOf?.mostWordsMonth
         ? `${formatDashboardNumber(bestOf.mostWordsMonth.wordCount)} ${pluralizeDashboard(bestOf.mostWordsMonth.wordCount, "word")}`
         : loadingValue,
@@ -3509,13 +3632,27 @@ function DashboardBestOfSection({
         <p>Your all-time journal records, all in one place.</p>
       </header>
       <div className="dashboard-best-of__grid">
-        {records.map((record) => (
-          <article className="dashboard-best-of__card" key={record.label}>
-            <p className="dashboard-best-of__label">{record.label}</p>
-            <strong>{record.value}</strong>
-            <p className="dashboard-best-of__detail">{record.detail}</p>
-          </article>
-        ))}
+        {records.map(({ label, value, detail, target }) => {
+          const content = (
+            <>
+              <span className="dashboard-best-of__label">{label}</span>
+              <strong>{value}</strong>
+              <span className="dashboard-best-of__detail">{detail}</span>
+            </>
+          );
+          return target ? (
+            <button
+              className="dashboard-best-of__card"
+              key={label}
+              onClick={() => onDrillDown(target)}
+              type="button"
+            >
+              {content}
+            </button>
+          ) : (
+            <article className="dashboard-best-of__card" key={label}>{content}</article>
+          );
+        })}
       </div>
     </section>
   );
@@ -3568,11 +3705,13 @@ type EntriesViewProps = {
   onEditEntry: (entry: Entry) => void;
   onContinueEntry: (entry: Entry) => void;
   onDeleteEntry: (entry: Entry) => void;
+  onDrillDown: (target: JournalDrillDown) => void;
   onEntryAction: (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => void;
   onExportEntry: (entry: Entry, format: ExportFormat) => void;
   onLoadHistory: (entry: Entry) => void;
   onLoadMore: () => void;
   onResetFilters: () => void;
+  headingRef: RefObject<HTMLHeadingElement | null>;
 };
 
 function EntriesView({
@@ -3591,11 +3730,13 @@ function EntriesView({
   onEditEntry,
   onContinueEntry,
   onDeleteEntry,
+  onDrillDown,
   onEntryAction,
   onExportEntry,
   onLoadHistory,
   onLoadMore,
   onResetFilters,
+  headingRef,
 }: EntriesViewProps) {
   const [expandedImage, setExpandedImage] = useState<ImageAttachment | null>(null);
 
@@ -3687,6 +3828,22 @@ function EntriesView({
         </label>
         <label className="check-row">
           <input
+            checked={entryFilters.starred}
+            onChange={(event) => setEntryFilters({ ...entryFilters, starred: event.target.checked })}
+            type="checkbox"
+          />
+          <span>Starred only</span>
+        </label>
+        <label className="check-row">
+          <input
+            checked={entryFilters.pinned}
+            onChange={(event) => setEntryFilters({ ...entryFilters, pinned: event.target.checked })}
+            type="checkbox"
+          />
+          <span>Pinned only</span>
+        </label>
+        <label className="check-row">
+          <input
             checked={entryFilters.includeHidden}
             onChange={(event) =>
               setEntryFilters({ ...entryFilters, includeHidden: event.target.checked })
@@ -3714,7 +3871,9 @@ function EntriesView({
         <div className="section-heading">
           <div>
             <p className="eyebrow">Browse</p>
-            <h3>{entryResponse ? `${entryResponse.total} entries` : "Loading entries"}</h3>
+            <h3 ref={headingRef} tabIndex={-1}>
+              {entryResponse ? entryCountLabel(entryResponse.total) : "Loading entries"}
+            </h3>
           </div>
           <StatusPill tone="neutral">{loading ? "Loading" : "Write-safe"}</StatusPill>
         </div>
@@ -3749,6 +3908,11 @@ function EntriesView({
             ))}
         </div>
 
+        {entryFilters.focus?.kind === "entry" && (
+          <button className="secondary-button secondary-button--full" onClick={onResetFilters} type="button">
+            Show all entries
+          </button>
+        )}
         {entryResponse && entryResponse.entries.length < entryResponse.total && (
           <button className="secondary-button secondary-button--full" onClick={onLoadMore} type="button">
             Load more
@@ -3765,6 +3929,7 @@ function EntriesView({
         mutating={Boolean(selectedEntry && mutatingEntryUuid === selectedEntry.uuid)}
         onContinue={onContinueEntry}
         onDelete={onDeleteEntry}
+        onDrillDown={onDrillDown}
         onEdit={onEditEntry}
         onEntryAction={onEntryAction}
         onExport={onExportEntry}
@@ -3797,6 +3962,7 @@ type SearchViewProps = {
   onEditEntry: (entry: Entry) => void;
   onContinueEntry: (entry: Entry) => void;
   onDeleteEntry: (entry: Entry) => void;
+  onDrillDown: (target: JournalDrillDown) => void;
   onEntryAction: (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => void;
   onExportEntry: (entry: Entry, format: ExportFormat) => void;
   onExportSearch: (format: ExportFormat) => void;
@@ -3821,6 +3987,7 @@ function SearchView({
   onEditEntry,
   onContinueEntry,
   onDeleteEntry,
+  onDrillDown,
   onEntryAction,
   onExportEntry,
   onExportSearch,
@@ -4069,6 +4236,7 @@ function SearchView({
         mutating={Boolean(selectedEntry && mutatingEntryUuid === selectedEntry.uuid)}
         onContinue={onContinueEntry}
         onDelete={onDeleteEntry}
+        onDrillDown={onDrillDown}
         onEdit={onEditEntry}
         onEntryAction={onEntryAction}
         onExport={onExportEntry}
@@ -4441,6 +4609,7 @@ type WritingCalendarViewProps = {
   year: number;
   setYear: (year: number) => void;
   loading: boolean;
+  onDrillDown: (target: JournalDrillDown) => void;
   onRefresh: () => void;
 };
 
@@ -4451,6 +4620,7 @@ function WritingCalendarView({
   setYear,
   loading,
   onRefresh,
+  onDrillDown,
 }: WritingCalendarViewProps) {
   if (status && (!status.dbExists || !status.readable)) {
     return (
@@ -4527,12 +4697,21 @@ function WritingCalendarView({
                   {month.days.map((day) => {
                     const level = calendarLevel(day.data, calendar.maxEntryCount);
                     const sentimentClass = calendarSentimentClass(day.data);
-                    return (
-                      <span
-                        className={`calendar-day calendar-day--level-${level} ${sentimentClass}`}
+                    const className = `calendar-day calendar-day--level-${level} ${sentimentClass}`;
+                    const title = calendarDayTitle(day.date, day.data);
+                    return level > 0 ? (
+                      <button
+                        aria-label={`View entries for ${title}`}
+                        className={className}
                         key={day.date}
-                        title={calendarDayTitle(day.date, day.data)}
+                        onClick={() => onDrillDown({ kind: "day", value: day.date })}
+                        title={title}
+                        type="button"
                       >
+                        {day.day}
+                      </button>
+                    ) : (
+                      <span className={className} key={day.date} title={title}>
                         {day.day}
                       </span>
                     );
@@ -4565,6 +4744,7 @@ type CoverWallViewProps = {
   onEditEntry: (entry: Entry) => void;
   onContinueEntry: (entry: Entry) => void;
   onDeleteEntry: (entry: Entry) => void;
+  onDrillDown: (target: JournalDrillDown) => void;
   onEntryAction: (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => void;
   onExportEntry: (entry: Entry, format: ExportFormat) => void;
   onLoadHistory: (entry: Entry) => void;
@@ -4589,6 +4769,7 @@ function CoverWallView({
   onEditEntry,
   onContinueEntry,
   onDeleteEntry,
+  onDrillDown,
   onEntryAction,
   onExportEntry,
   onLoadHistory,
@@ -4753,6 +4934,7 @@ function CoverWallView({
                 mutating={Boolean(selectedCoverEntry && mutatingEntryUuid === selectedCoverEntry.uuid)}
                 onContinue={onContinueEntry}
                 onDelete={onDeleteEntry}
+                onDrillDown={onDrillDown}
                 onEdit={onEditEntry}
                 onEntryAction={onEntryAction}
                 onExport={onExportEntry}
@@ -4773,6 +4955,7 @@ function CoverWallView({
 }
 
 type ThreadsViewProps = {
+  headingRef: RefObject<HTMLHeadingElement | null>;
   status: DatabaseStatus | null;
   response: ThreadListResponse | null;
   selectedThread: ThreadGroup | null;
@@ -4791,6 +4974,7 @@ type ThreadsViewProps = {
 };
 
 function ThreadsView({
+  headingRef,
   status,
   response,
   selectedThread,
@@ -4827,7 +5011,9 @@ function ThreadsView({
         <div className="section-heading">
           <div>
             <p className="eyebrow">Continuation groups</p>
-            <h3>{response ? `${response.total} threads` : "Loading threads"}</h3>
+            <h3 ref={headingRef} tabIndex={-1}>
+              {response ? `${response.total} ${response.total === 1 ? "thread" : "threads"}` : "Loading threads"}
+            </h3>
           </div>
           <StatusPill tone="neutral">{loading ? "Loading" : "UUID identity"}</StatusPill>
         </div>

@@ -2696,7 +2696,7 @@ export async function listEntries(filters: EntryFilters = {}): Promise<EntryList
     }
 
     await pause(180);
-    const filtered = applyMockFilters(mockEntries, filters);
+    const filtered = applyMockFilters(mockEntries, filters, true);
     const offset = filters.offset ?? 0;
     const limit = filters.limit ?? 40;
     return {
@@ -2978,16 +2978,21 @@ export async function searchEntries(input: SearchRequest): Promise<SearchRespons
   }
 }
 
-export async function listThreads(limit = 30, offset = 0): Promise<ThreadListResponse> {
+export async function listThreads(limit = 30, offset = 0, includeRootUuid?: string): Promise<ThreadListResponse> {
   try {
     if (runningInTauri()) {
-      return await invoke<ThreadListResponse>("list_threads", { limit, offset });
+      return await invoke<ThreadListResponse>("list_threads", { limit, offset, includeRootUuid });
     }
 
     await pause(180);
     const threads = buildMockThreads();
+    const page = threads.slice(offset, offset + limit);
+    const requested = threads.find((thread) => thread.rootUuid === includeRootUuid);
+    if (requested && !page.includes(requested)) {
+      page.unshift(requested);
+    }
     return {
-      threads: threads.slice(offset, offset + limit),
+      threads: page,
       total: threads.length,
       limit,
       offset,
@@ -5389,7 +5394,10 @@ function operationToCommand(operation: string) {
   }[operation] ?? operation;
 }
 
-function applyMockFilters(entries: Entry[], filters: EntryFilters) {
+function applyMockFilters(entries: Entry[], filters: EntryFilters, calendarDates = false) {
+  const isCalendarDate = /^\d{4}-\d{2}-\d{2}$/;
+  const sinceDate = calendarDates && isCalendarDate.test(filters.since ?? "") ? filters.since : null;
+  const untilDate = calendarDates && isCalendarDate.test(filters.until ?? "") ? filters.until : null;
   const text = filters.text?.trim().toLowerCase();
   const location = filters.location?.trim().toLowerCase();
   const tagSet = new Set(filters.tags?.map((tag) => tag.trim().toLowerCase()).filter(Boolean));
@@ -5403,6 +5411,9 @@ function applyMockFilters(entries: Entry[], filters: EntryFilters) {
 
   return entries
     .filter((entry) => {
+      if (filters.entryUuid && entry.uuid !== filters.entryUuid) {
+        return false;
+      }
       if (!filters.includeHidden && !filters.hidden && entry.hidden) {
         return false;
       }
@@ -5466,10 +5477,14 @@ function applyMockFilters(entries: Entry[], filters: EntryFilters) {
       ) {
         return false;
       }
-      if (filters.since && new Date(entry.createdAt) < new Date(filters.since)) {
+      if (filters.since && (sinceDate
+        ? entry.createdAt.slice(0, 10) < sinceDate
+        : new Date(entry.createdAt) < new Date(filters.since))) {
         return false;
       }
-      if (filters.until && new Date(entry.createdAt) > new Date(filters.until)) {
+      if (filters.until && (untilDate
+        ? entry.createdAt.slice(0, 10) > untilDate
+        : new Date(entry.createdAt) > new Date(filters.until))) {
         return false;
       }
       return true;

@@ -13,6 +13,90 @@ function trackBrowserErrors(page: Page) {
   return errors;
 }
 
+test("opens Dashboard records and entries from their cards", async ({ page }) => {
+  await page.goto("/");
+  const nav = page.getByRole("navigation", { name: "Primary" });
+  const entries = page.getByRole("region", { name: "Entries" });
+  const records = page.getByRole("region", { name: "Simply the Best!" });
+  await expect(records.getByRole("button")).toHaveCount(6);
+
+  await records.getByRole("button", { name: /Biggest month by capsules/ }).click();
+  await expect(entries.getByLabel("Since")).toHaveValue("2026-06-01");
+  await expect(entries.getByLabel("Until")).toHaveValue("2026-06-30");
+  await expect(entries.locator(".entry-list").getByRole("button", { name: /Phase 1 shape/ })).toBeVisible();
+
+  await nav.getByRole("button", { name: "Dashboard" }).click();
+  await records.getByRole("button", { name: /Most capsules in a day/ }).click();
+  const day = await entries.getByLabel("Since").inputValue();
+  expect(day).toMatch(/^2026-06-\d{2}$/);
+  await expect(entries.getByLabel("Until")).toHaveValue(day);
+  await expect(entries.locator(".entry-card").first()).toBeVisible();
+
+  await nav.getByRole("button", { name: "Dashboard" }).click();
+  await records.getByRole("button", { name: /Longest capsule/ }).click();
+  await expect(entries.locator(".entry-card")).toHaveCount(1);
+  await expect(entries.locator(".detail-panel .entry-body")).toBeVisible();
+  await expect(entries.locator(".detail-panel").getByRole("button", { name: "Edit", exact: true })).toBeEnabled();
+  await entries.getByRole("button", { name: "Show all entries" }).click();
+  await expect(entries.locator(".entry-card")).toHaveCount(4);
+
+  await nav.getByRole("button", { name: "Dashboard" }).click();
+  await page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Recent Entries" }) })
+    .getByRole("button", { name: "Phase 1 shape" }).click();
+  await expect(entries.locator(".detail-panel").getByRole("heading", { name: "Phase 1 shape" })).toBeVisible();
+
+  await nav.getByRole("button", { name: "Dashboard" }).click();
+  await page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Random Entry", exact: true }) })
+    .locator(".entry-open-button").click();
+  await expect(entries.locator(".entry-card")).toHaveCount(1);
+});
+
+test("drills down from calendar dates and reader metadata and combines entry flags", async ({ page }) => {
+  await page.goto("/");
+  const nav = page.getByRole("navigation", { name: "Primary" });
+  await nav.getByRole("button", { name: "Calendar" }).click();
+  const calendar = page.getByRole("region", { name: "Writing calendar" });
+  await calendar.getByLabel("Year").fill("2026");
+  const day = calendar.getByRole("button", { name: /View entries for 2026-06-29/ });
+  await day.focus();
+  await page.keyboard.press("Enter");
+
+  const entries = page.getByRole("region", { name: "Entries" });
+  const reader = entries.locator(".detail-panel");
+  const list = entries.locator(".entry-list");
+  await expect(entries.getByLabel("Since")).toHaveValue("2026-06-29");
+  await expect(entries.getByLabel("Until")).toHaveValue("2026-06-29");
+  await expect(entries.getByRole("heading", { name: "1 entry", exact: true })).toBeFocused();
+  await reader.getByRole("button", { name: "tauri", exact: true }).click();
+  await expect(entries.getByLabel("Tag")).toHaveValue("tauri");
+  await expect(entries.getByLabel("Since")).toHaveValue("");
+  await reader.getByRole("button", { name: "Excited", exact: true }).click();
+  await expect(entries.getByLabel("Mood")).toHaveValue("excited");
+  await expect(entries.getByLabel("Tag")).toHaveValue("");
+
+  await reader.getByTitle("Star", { exact: true }).click();
+  await expect(reader.getByTitle("Unstar")).toBeEnabled();
+  await reader.getByTitle("Pin", { exact: true }).click();
+  await expect(reader.getByTitle("Unpin")).toBeEnabled();
+  await entries.getByRole("button", { name: "Reset filters" }).click();
+  await list.getByRole("button", { name: /Art note/ }).click();
+  await reader.getByTitle("Pin", { exact: true }).click();
+  await expect(reader.getByTitle("Unpin")).toBeEnabled();
+  await entries.getByLabel("Pinned only").check();
+  await expect(list.locator(".entry-card")).toHaveCount(2);
+  await entries.getByLabel("Starred only").check();
+  await expect(list.locator(".entry-card")).toHaveCount(1);
+  await expect(list.getByRole("button", { name: /Phase 1 shape/ })).toBeVisible();
+
+  await nav.getByRole("button", { name: "Dashboard" }).click();
+  await page.locator(".panel").filter({ has: page.getByRole("heading", { name: "Pinned Entries" }) })
+    .getByRole("button", { name: "Art note" }).click();
+  await expect(reader.getByRole("heading", { name: "Art note" })).toBeVisible();
+  await reader.getByRole("button", { name: "Desktop Capsule work", exact: true }).click();
+  const thread = page.getByRole("region", { name: "Threads" }).locator(".thread-detail-panel");
+  await expect(thread.getByRole("heading", { name: "Desktop Capsule work" })).toBeVisible();
+});
+
 test("loads the mock dashboard and navigates entries and search", async ({ page }) => {
   const browserErrors = trackBrowserErrors(page);
 
@@ -68,6 +152,9 @@ test("loads the mock dashboard and navigates entries and search", async ({ page 
   await expect(page.locator(".lightbox")).toBeVisible();
   await expect(page.locator(".lightbox-image")).toBeVisible();
   await page.keyboard.press("Escape");
+  await page.getByRole("region", { name: "Search" }).locator(".detail-panel")
+    .getByRole("button", { name: "codex", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Entries" }).getByLabel("Tag")).toHaveValue("codex");
 
   await page.getByRole("navigation", { name: "Primary" })
     .getByRole("button", { name: "Threads" }).click();
@@ -96,6 +183,8 @@ test("reads the linked entry from Cover Wall", async ({ page }) => {
   await expect(page.locator(".cover-detail-panel")).toContainText(
     "Read-only journal browsing starts to feel real.",
   );
+  await page.locator(".cover-linked-entry").getByRole("button", { name: "tauri", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Entries" }).getByLabel("Tag")).toHaveValue("tauri");
 
   expect(browserErrors).toEqual([]);
 });

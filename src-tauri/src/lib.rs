@@ -398,11 +398,14 @@ async fn get_cover_data_url(filename: String, variant: ImageVariant) -> Result<S
 async fn list_threads(
     limit: Option<i64>,
     offset: Option<i64>,
+    include_root_uuid: Option<String>,
 ) -> Result<ThreadListResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || threads::list_threads(limit, offset))
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        threads::list_threads(limit, offset, include_root_uuid.as_deref())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

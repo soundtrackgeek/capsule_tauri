@@ -1108,8 +1108,7 @@ button:active:not(:disabled) {
 }
 
 .dashboard-best-of__header h3,
-.dashboard-best-of__header p,
-.dashboard-best-of__card p {
+.dashboard-best-of__header p {
   margin: 0;
 }
 
@@ -1139,9 +1138,12 @@ button:active:not(:disabled) {
   background: rgba(255, 255, 255, 0.94);
   padding: 19px 20px;
   box-shadow: 0 18px 34px -30px rgba(24, 42, 32, 0.35);
+  color: inherit;
+  text-align: start;
 }
 
 .dashboard-best-of__label {
+  display: block;
   color: #66756d;
   font-size: 11px;
   font-weight: 850;
@@ -1159,7 +1161,8 @@ button:active:not(:disabled) {
 }
 
 .dashboard-best-of__detail {
-  margin-top: 9px !important;
+  display: block;
+  margin-top: 9px;
   color: #66756d;
   font-size: 13px;
   line-height: 1.35;
@@ -1334,6 +1337,56 @@ button:active:not(:disabled) {
 
 .entry-mini-heading {
   justify-content: space-between;
+}
+
+.entry-mini--clickable {
+  position: relative;
+}
+
+.entry-open-button {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.entry-open-button svg {
+  align-self: center;
+  flex: none;
+}
+
+.entry-open-button:hover,
+.drill-down-chip:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.entry-mini--clickable .entry-open-button::after {
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  content: "";
+}
+
+:is(button.dashboard-best-of__card, button.calendar-day):hover,
+.entry-mini--clickable:hover .entry-open-button::after {
+  outline: 1px solid currentColor;
+  outline-offset: -1px;
+}
+
+:is(button.dashboard-best-of__card, button.calendar-day, .entry-open-button, .drill-down-chip):focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.drill-down-chip {
+  border: 0;
 }
 
 .entry-mini-heading h4,
@@ -4246,6 +4299,11 @@ button.entry-card {
   color: #516158;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+button.calendar-day {
+  border: 0;
+  padding: 0;
 }
 
 .calendar-day--empty {

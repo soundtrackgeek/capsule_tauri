@@ -1,4 +1,5 @@
 import {
+  ChevronRight,
   Download,
   Edit3,
   Eye,
@@ -20,7 +21,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { listEntryImages } from "../backend";
 import { countWords, formatDateTime, formatEntryNumber, formatWordCount } from "../lib/format";
-import type { Entry, EntryHistoryResponse, ExportFormat, ImageAttachment } from "../types";
+import type { Entry, EntryHistoryResponse, ExportFormat, ImageAttachment, JournalDrillDown } from "../types";
 import { MarkdownContent } from "./markdown";
 import { DataUrlImage, ImageLightbox } from "./media";
 import { Detail, SkeletonList } from "./ui";
@@ -36,6 +37,7 @@ type EntryDetailProps = {
   onEdit: (entry: Entry) => void;
   onContinue: (entry: Entry) => void;
   onDelete: (entry: Entry) => void;
+  onDrillDown?: (target: JournalDrillDown) => void;
   onEntryAction: (entry: Entry, action: "star" | "pin" | "hide" | "unhide") => void;
   onExport: (entry: Entry, format: ExportFormat) => void;
   onLoadHistory: (entry: Entry) => void;
@@ -64,6 +66,7 @@ export function EntryDetail({
   onEdit,
   onContinue,
   onDelete,
+  onDrillDown,
   onEntryAction,
   onExport,
   onLoadHistory,
@@ -94,6 +97,8 @@ export function EntryDetail({
 
   const wordCount = countWords(entry.textPlain || entry.text);
   const weatherTemperature = entry.location ? formatWeatherTemperature(entry.location) : null;
+  const mood = entry.mood ?? entry.moodInfo.name;
+  const thread = entry.thread;
 
   return (
     <Wrapper className={panelClassName}>
@@ -157,11 +162,23 @@ export function EntryDetail({
       </div>
 
       <div className="tag-row">
-        {entry.moodInfo.label && <span className="mood-chip">{entry.moodInfo.label}</span>}
+        {entry.moodInfo.label && (
+          mood && onDrillDown ? (
+            <button className="mood-chip drill-down-chip" onClick={() => onDrillDown({ kind: "mood", value: mood })} title="Filter entries by mood" type="button">
+              {entry.moodInfo.label}
+            </button>
+          ) : (
+            <span className="mood-chip">{entry.moodInfo.label}</span>
+          )
+        )}
         {entry.tags.map((tag) => (
-          <span className="tag-chip" key={tag.id}>
-            {tag.name}
-          </span>
+          onDrillDown ? (
+            <button className="tag-chip drill-down-chip" key={tag.id} onClick={() => onDrillDown({ kind: "tag", value: tag.name })} title="Filter entries by tag" type="button">
+              {tag.name}
+            </button>
+          ) : (
+            <span className="tag-chip" key={tag.id}>{tag.name}</span>
+          )
         ))}
       </div>
 
@@ -215,13 +232,22 @@ export function EntryDetail({
         </div>
       )}
 
-      {entry.thread && (
+      {thread && (
         <div className="metadata-block">
           <h4>Thread</h4>
-          <p>{entry.thread.title ?? entry.thread.rootUuid}</p>
-          {entry.thread.summary && <p>{entry.thread.summary}</p>}
           <p>
-            {entry.thread.entryCount} entries / {entry.thread.isRoot ? "Root" : "Continuation"}
+            {onDrillDown ? (
+              <button className="entry-open-button" onClick={() => onDrillDown({ kind: "thread", value: thread.rootUuid })} title="Open thread" type="button">
+                {thread.title ?? thread.rootUuid}
+                <ChevronRight aria-hidden="true" size={14} />
+              </button>
+            ) : (
+              thread.title ?? thread.rootUuid
+            )}
+          </p>
+          {thread.summary && <p>{thread.summary}</p>}
+          <p>
+            {thread.entryCount} entries / {thread.isRoot ? "Root" : "Continuation"}
           </p>
         </div>
       )}
@@ -269,9 +295,10 @@ type EntryStackProps = {
   entries: Entry[];
   loading: boolean;
   emptyText?: string;
+  onOpenEntry?: (uuid: string) => void;
 };
 
-export function EntryStack({ entries, loading, emptyText = "No entries found." }: EntryStackProps) {
+export function EntryStack({ entries, loading, emptyText = "No entries found.", onOpenEntry }: EntryStackProps) {
   if (loading) {
     return <SkeletonList compact />;
   }
@@ -283,17 +310,33 @@ export function EntryStack({ entries, loading, emptyText = "No entries found." }
   return (
     <div className="entry-stack">
       {entries.map((entry) => (
-        <EntryMini entry={entry} key={entry.uuid} />
+        <EntryMini entry={entry} key={entry.uuid} onOpenEntry={onOpenEntry} />
       ))}
     </div>
   );
 }
 
-export function EntryMini({ entry, fullText = false }: { entry: Entry; fullText?: boolean }) {
+export function EntryMini({
+  entry,
+  fullText = false,
+  onOpenEntry,
+}: {
+  entry: Entry;
+  fullText?: boolean;
+  onOpenEntry?: (uuid: string) => void;
+}) {
+  const title = entry.title || entry.textPlain.slice(0, 82) || "Untitled entry";
   return (
-    <article className={fullText ? "entry-mini entry-mini--full" : "entry-mini"}>
+    <article className={onOpenEntry && !fullText ? "entry-mini entry-mini--clickable" : "entry-mini"}>
       <div className="entry-mini-heading">
-        <h4>{entry.title || entry.textPlain.slice(0, 82) || "Untitled entry"}</h4>
+        <h4>
+          {onOpenEntry ? (
+            <button className="entry-open-button" onClick={() => onOpenEntry(entry.uuid)} type="button">
+              {title}
+              <ChevronRight aria-hidden="true" size={14} />
+            </button>
+          ) : title}
+        </h4>
         <EntryNumber entry={entry} />
       </div>
       {fullText && (

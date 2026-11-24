@@ -885,6 +885,7 @@ export type EntryListResponse = {
 };
 
 export type EntryFilters = {
+  entryUuid?: string;
   text?: string;
   location?: string;
   since?: string;
@@ -902,6 +903,11 @@ export type EntryFilters = {
   limit?: number;
   offset?: number;
   sort?: "asc" | "desc";
+};
+
+export type JournalDrillDown = {
+  kind: "entry" | "tag" | "mood" | "thread" | "day" | "month";
+  value: string;
 };
 
 export type RandomEntryFilters = {

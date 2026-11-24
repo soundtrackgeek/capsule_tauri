@@ -25,22 +25,25 @@ explicit capability-gated AI/sync surfaces:
 - Read-only database status for the active Capsule database.
 - Dashboard “Simply the Best!” cards for six all-time records—most capsules and
   words in a day, most tags and words on one capsule, and biggest months by
-  capsules and words—plus counts for total entries, total tags, total words
-  across every entry, and current-month entries.
+  capsules and words. Click a record to open its entry, day, or month. The
+  Dashboard also shows counts for entries, tags, words, and current-month entries.
 - Recent entries, pinned entries, and a full-text random entry with its created
   timestamp above Recent Entries, with old-Capsule-style entry numbers,
-  per-entry word counts, Markdown formatting, and attached photos.
+  per-entry word counts, Markdown formatting, and attached photos. Click an
+  entry title to open its full reader and actions.
 - Entries list with chronological old-Capsule-style entry numbers and per-entry
   word counts, including
   automatic backup-guarded resequencing when an older entry arrives through
   sync, plus inline image thumbnails that open full-size previews and text,
-  tag, mood, location, date, image, hidden, and sort filters.
+  tag, mood, location, inclusive date, image, hidden, and sort filters.
+  **Starred only** and **Pinned only** can be used together or with any other filter.
 - Entry detail view in Entries, Search, and Cover Wall with formatted Markdown,
   a **Raw** view for the original Markdown, and attached photo thumbnails that
   open a larger view. Plain-text entries preserve authored line breaks. The
   reader also shows tags, mood, location, and thread metadata when available,
   including stored weather condition, Celsius-first temperature, humidity, wind,
-  icon, and fetched timestamp.
+  icon, and fetched timestamp. Click a tag or mood to filter Entries, or click the
+  thread title to open the continuation group.
 - Markdown web links open in the default browser. Markdown image syntax displays
   its alt text without fetching remote images. Journal photos come from local
   attachments.
@@ -122,7 +125,7 @@ explicit capability-gated AI/sync surfaces:
   insights and fun facts, lifetime-best callouts, activity charts, top tags,
   and mood distribution.
 - Writing Calendar heatmap for active days, words, images, mood metadata, and
-  mood sentiment markers.
+  mood sentiment markers. Click an active day to browse the entries written that day.
 - Cover Wall view backed by ignored local cover files under `local-assets/covers`
   with generated thumbnails cached under the local app settings directory and
   an inline reader for the linked entry behind a selected cover.

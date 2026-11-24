@@ -611,7 +611,7 @@ fn thread_context_entries(
         .unwrap_or_else(|| entry.uuid.clone());
     let mut offset = 0;
     loop {
-        let response = threads::list_threads_for_database(db_path, Some(200), Some(offset))?;
+        let response = threads::list_threads_for_database(db_path, Some(200), Some(offset), None)?;
         if let Some(thread) = response
             .threads
             .into_iter()

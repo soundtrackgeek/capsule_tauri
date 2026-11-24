@@ -1150,6 +1150,7 @@ pub struct EntryListResponse {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct EntryFilters {
+    pub entry_uuid: Option<String>,
     pub text: Option<String>,
     pub location: Option<String>,
     pub since: Option<String>,
