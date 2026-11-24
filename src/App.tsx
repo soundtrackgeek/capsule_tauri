@@ -6444,6 +6444,18 @@ function SettingsView({
     defaultUntil: "",
   });
   const [aiDraftDirty, setAiDraftDirty] = useState(false);
+  // Mirrors aiDraftDirty synchronously. A sync effect left over from an earlier
+  // commit can run after an edit's onChange but before the re-render; the ref lets
+  // it see the edit and skip, instead of overwriting the draft with saved settings.
+  const aiDraftDirtyRef = useRef(false);
+  const markAiDraftDirty = () => {
+    aiDraftDirtyRef.current = true;
+    setAiDraftDirty(true);
+  };
+  const clearAiDraftDirty = () => {
+    aiDraftDirtyRef.current = false;
+    setAiDraftDirty(false);
+  };
   const [aiKeyDraft, setAiKeyDraft] = useState<Record<AICloudProvider, string>>({
     gemini: "",
     openai: "",
@@ -6529,7 +6541,7 @@ function SettingsView({
   }, [config]);
 
   useEffect(() => {
-    if (!aiSettings || aiDraftDirty) {
+    if (!aiSettings || aiDraftDirty || aiDraftDirtyRef.current) {
       return;
     }
     setAiDraft({
@@ -6630,7 +6642,7 @@ function SettingsView({
       await onSetAiApiKey(provider, apiKey);
       clearAiKeyDraft(provider);
     }
-    setAiDraftDirty(false);
+    clearAiDraftDirty();
     return keyDrafts.length
       ? `${message}; saved ${keyDrafts.length} API ${keyDrafts.length === 1 ? "key" : "keys"}`
       : message;
@@ -6982,7 +6994,7 @@ function SettingsView({
             <select
               onChange={(event) =>
                 {
-                  setAiDraftDirty(true);
+                  markAiDraftDirty();
                   setAiDraft((draft) => ({
                     ...draft,
                     cloudProvider: event.target.value as AICloudProvider,
@@ -7001,7 +7013,7 @@ function SettingsView({
             <select
               onChange={(event) =>
                 {
-                  setAiDraftDirty(true);
+                  markAiDraftDirty();
                   setAiDraft((draft) => ({ ...draft, geminiModel: event.target.value }));
                 }
               }
@@ -7021,7 +7033,7 @@ function SettingsView({
             <select
               onChange={(event) =>
                 {
-                  setAiDraftDirty(true);
+                  markAiDraftDirty();
                   setAiDraft((draft) => ({ ...draft, openaiModel: event.target.value }));
                 }
               }
@@ -7039,7 +7051,7 @@ function SettingsView({
             <select
               onChange={(event) =>
                 {
-                  setAiDraftDirty(true);
+                  markAiDraftDirty();
                   setAiDraft((draft) => ({ ...draft, openrouterModel: event.target.value }));
                 }
               }
@@ -7062,7 +7074,7 @@ function SettingsView({
               aria-invalid={aiContextLimitInvalid}
               onChange={(event) =>
                 {
-                  setAiDraftDirty(true);
+                  markAiDraftDirty();
                   setAiDraft((draft) => ({ ...draft, defaultContextLimit: event.target.value }));
                 }
               }
@@ -7075,7 +7087,7 @@ function SettingsView({
             <input
               onChange={(event) =>
                 {
-                  setAiDraftDirty(true);
+                  markAiDraftDirty();
                   setAiDraft((draft) => ({ ...draft, defaultSince: event.target.value }));
                 }
               }
@@ -7088,7 +7100,7 @@ function SettingsView({
             <input
               onChange={(event) =>
                 {
-                  setAiDraftDirty(true);
+                  markAiDraftDirty();
                   setAiDraft((draft) => ({ ...draft, defaultUntil: event.target.value }));
                 }
               }

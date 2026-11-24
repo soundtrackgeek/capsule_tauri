@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.38.1 - 2026-11-24
+
+### Fixed
+
+- Fixed Cloud AI Settings sometimes discarding a provider or model change made
+  right after the Settings view opened. A pending settings sync could overwrite
+  the edit, so Save stored the previous values. This also made the Cloud AI
+  settings end-to-end test fail intermittently.
+
+### Changed
+
+- Bumped the app version to 0.38.1.
+
 ## 0.38.0 - 2026-11-24
 
 ### Changed
