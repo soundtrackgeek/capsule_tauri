@@ -160,7 +160,7 @@ test("initializes Cloud AI and confirms metadata generation in the composer", as
   await expect(generateButton).toBeEnabled();
   await expect(generateButton).toHaveAttribute(
     "title",
-    "Generate title and summary with Gemini / gemini-3.5-flash",
+    "Generate title and summary with Gemini / gemini-4-hydrogen",
   );
   await generateButton.click();
 
@@ -174,7 +174,7 @@ test("initializes Cloud AI and confirms metadata generation in the composer", as
   await expect(privacyDialog).not.toBeVisible();
   await expect(composer.getByRole("heading", { name: "AI Suggestion" })).toBeVisible();
   await expect(page.getByRole("status")).toContainText(
-    "Generated title and summary with Gemini / gemini-3.5-flash.",
+    "Generated title and summary with Gemini / gemini-4-hydrogen.",
   );
   await expect(generateButton).toBeEnabled();
 
@@ -255,7 +255,7 @@ test("configures Cloud AI settings without exposing API keys", async ({ page }) 
 
   await expect(page.getByRole("heading", { name: "Cloud AI" })).toBeVisible();
   await page.getByLabel("Provider").selectOption("openrouter");
-  await page.getByLabel("OpenRouter model").selectOption("deepseek/deepseek-v4-flash");
+  await page.getByLabel("OpenRouter model").selectOption("moonshotai/kimi-k3.1-pro");
   await page.getByLabel("Context limit").fill("12");
   const geminiKeyRow = page.locator(".ai-key-row").filter({ hasText: "Google Gemini" });
   await geminiKeyRow.getByLabel("Google Gemini API key").fill("mock-gemini-key");
@@ -265,7 +265,7 @@ test("configures Cloud AI settings without exposing API keys", async ({ page }) 
 
   await expect(page.getByRole("status")).toContainText("saved 1 API key");
   await expect(page.locator(".detail-list").filter({ hasText: "Active model" })).toContainText(
-    "deepseek/deepseek-v4-flash",
+    "moonshotai/kimi-k3.1-pro",
   );
 
   await expect(geminiKeyRow).toContainText("Configured");

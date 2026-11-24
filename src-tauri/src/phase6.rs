@@ -43,7 +43,7 @@ pub(crate) fn get_ai_overview_for_database(db_path: &Path) -> Result<AiOverviewR
     let tables = detected_tables(&connection)?;
     let (provider, model, active_provider_configured) =
         ai_config::active_provider_and_model_for_database(db_path)
-            .unwrap_or_else(|_| ("gemini".to_string(), "gemini-3.5-flash".to_string(), false));
+            .unwrap_or_else(|_| ("gemini".to_string(), "gemini-4-hydrogen".to_string(), false));
     let bridge_configured = python_bridge_configured();
 
     let conversation_count = count_if_table(&connection, &tables, "ai_conversations")?;

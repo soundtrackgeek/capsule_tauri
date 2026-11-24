@@ -149,16 +149,16 @@ const defaultMockBackupDirectory = "C:\\Users\\jtill\\.capsule";
 const defaultMockCoverWallRoot = "C:\\_code\\capsule_tauri\\local-assets\\covers";
 const mockImageMediaRoot = "C:\\Users\\jtill\\OneDrive\\_capsule\\images";
 const mockPathSettingsPath = "C:\\Users\\jtill\\AppData\\Roaming\\Capsule\\path_settings.json";
-const geminiModels = ["gemini-3.5-flash", "gemini-3.1-flash-lite-preview"];
-const openAIModels = ["gpt-5.6-luna", "gpt-5.4-nano"];
+const geminiModels = ["gemini-4-hydrogen", "gemini-3.8-flash", "gemini-3.5-flash-lite"];
+const openAIModels = ["gpt-6-luna", "gpt-6.1-terra"];
 const openRouterModels = [
-  "z-ai/glm-5.2",
-  "moonshotai/kimi-k2.5",
+  "deepseek/deepseek-v4.1-flash-1017",
+  "z-ai/glm-5.3",
+  "moonshotai/kimi-k3.1-pro",
   "~x-ai/grok-latest",
-  "qwen/qwen3.7-plus",
-  "deepseek/deepseek-v4-flash",
-  "xiaomi/mimo-v2.5",
-  "minimax/minimax-m3",
+  "qwen/qwen4-max",
+  "xiaomi/mimo-v2.6-pro",
+  "minimax/minimax-m3.1-flash",
 ];
 const aiContextStopWords = new Set([
   "about",
@@ -307,9 +307,9 @@ let mockConfig: CapsuleConfigResponse = {
   exists: true,
   values: [
     { key: "cloud_provider", value: "gemini" },
-    { key: "gemini_model", value: "gemini-3.5-flash" },
-    { key: "openai_model", value: "gpt-5.6-luna" },
-    { key: "openrouter_model", value: "moonshotai/kimi-k2.5" },
+    { key: "gemini_model", value: "gemini-4-hydrogen" },
+    { key: "openai_model", value: "gpt-6-luna" },
+    { key: "openrouter_model", value: "deepseek/deepseek-v4.1-flash-1017" },
     { key: "ai_chat_context_limit", value: "all" },
     { key: "images.media_root", value: "C:\\Users\\jtill\\OneDrive\\_capsule\\images" },
     { key: "backup_count", value: "5" },
@@ -4315,17 +4315,17 @@ function mockAiSettings(): AISettings {
   const geminiModel = normalizeMockModel(
     mockConfig.values.find((item) => item.key === "gemini_model")?.value,
     geminiModels,
-    "gemini-3.5-flash",
+    "gemini-4-hydrogen",
   );
   const openaiModel = normalizeMockModel(
     mockConfig.values.find((item) => item.key === "openai_model")?.value,
     openAIModels,
-    "gpt-5.6-luna",
+    "gpt-6-luna",
   );
   const openrouterModel = normalizeMockModel(
     mockConfig.values.find((item) => item.key === "openrouter_model")?.value,
     openRouterModels,
-    "moonshotai/kimi-k2.5",
+    "deepseek/deepseek-v4.1-flash-1017",
   );
   return {
     cloudProvider,
@@ -4396,13 +4396,27 @@ function normalizeMockModel(
 }
 
 function normalizeLegacyModel(value: string) {
-  return {
-    "gemini-3-flash-preview": "gemini-3.5-flash",
-    "gpt-5.4-mini": "gpt-5.6-luna",
-    "z-ai/glm-5.1": "z-ai/glm-5.2",
+  const replacements: Record<string, string> = {
+    "gemini-3-flash-preview": "gemini-4-hydrogen",
+    "gemini-3.5-flash": "gemini-4-hydrogen",
+    "gemini-3.6-flash": "gemini-3.8-flash",
+    "gemini-3.7-flash": "gemini-3.8-flash",
+    "gemini-3.1-flash-lite-preview": "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite": "gemini-3.5-flash-lite",
+    "gpt-5.4-mini": "gpt-6-luna",
+    "gpt-5.4-nano": "gpt-6-luna",
+    "gpt-5.6-luna": "gpt-6-luna",
+    "z-ai/glm-5.1": "z-ai/glm-5.3",
+    "z-ai/glm-5.2": "z-ai/glm-5.3",
+    "moonshotai/kimi-k2.5": "moonshotai/kimi-k3.1-pro",
     "x-ai/grok-4.5": "~x-ai/grok-latest",
-    "qwen/qwen3.5-397b-a17b": "qwen/qwen3.7-plus",
-  }[value.trim()] ?? value.trim();
+    "qwen/qwen3.5-397b-a17b": "qwen/qwen4-max",
+    "qwen/qwen3.7-plus": "qwen/qwen4-max",
+    "deepseek/deepseek-v4-flash": "deepseek/deepseek-v4.1-flash-1017",
+    "xiaomi/mimo-v2.5": "xiaomi/mimo-v2.6-pro",
+    "minimax/minimax-m3": "minimax/minimax-m3.1-flash",
+  };
+  return replacements[value.trim()] ?? value.trim();
 }
 
 function parseMockContextLimit(value: string | null | undefined) {

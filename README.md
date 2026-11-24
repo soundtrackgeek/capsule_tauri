@@ -125,9 +125,12 @@ explicit capability-gated AI/sync surfaces:
   context preview/removal, provider/model selection, streamed cloud responses,
   stop/cancel, retry, and delete actions, plus secondary local metadata
   suggestions.
-- Cloud AI Settings for Gemini, OpenAI, and OpenRouter provider/model defaults,
-  including OpenAI GPT-5.6 Luna with low reasoning and OpenRouter Grok Latest,
-  chat context defaults, and redacted API key status without exposing stored
+- Cloud AI Settings for Gemini, OpenAI, and OpenRouter provider/model defaults:
+  Gemini 4 Hydrogen (default), Gemini 3.8 Flash, and Gemini 3.5 Flash-Lite;
+  OpenAI GPT-6 Luna (default, low reasoning) and GPT-6.1 Terra; and OpenRouter
+  DeepSeek V4.1 Flash (default), GLM-5.3, Kimi K3.1 Pro, Grok Latest, Qwen4-Max,
+  MiMo-V2.6-Pro, and MiniMax M3.1 Flash. Saved retired models migrate to their
+  successors automatically. Also includes chat context defaults, and redacted API key status without exposing stored
   secrets to the frontend.
 - Hidden Debug menu, off by default and enabled from Settings, with database
   health checks, image thumbnail/add-image smoke testing, synthetic AI provider

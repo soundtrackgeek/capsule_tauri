@@ -93,9 +93,9 @@ describe("mock word target settings", () => {
 async function resetAiSettings() {
   await updateAiSettings({
     cloudProvider: "gemini",
-    geminiModel: "gemini-3.5-flash",
-    openaiModel: "gpt-5.6-luna",
-    openrouterModel: "moonshotai/kimi-k2.5",
+    geminiModel: "gemini-4-hydrogen",
+    openaiModel: "gpt-6-luna",
+    openrouterModel: "deepseek/deepseek-v4.1-flash-1017",
     defaultContextLimit: null,
     defaultSince: null,
     defaultUntil: null,
@@ -135,27 +135,28 @@ describe("mock Cloud AI settings", () => {
     const openrouter = statuses.find((status) => status.provider === "openrouter");
 
     expect(settings.cloudProvider).toBe("gemini");
-    expect(settings.geminiModel).toBe("gemini-3.5-flash");
-    expect(settings.openaiModel).toBe("gpt-5.6-luna");
-    expect(settings.openrouterModel).toBe("moonshotai/kimi-k2.5");
+    expect(settings.geminiModel).toBe("gemini-4-hydrogen");
+    expect(settings.openaiModel).toBe("gpt-6-luna");
+    expect(settings.openrouterModel).toBe("deepseek/deepseek-v4.1-flash-1017");
     expect(gemini?.availableModels).toEqual([
-      "gemini-3.5-flash",
-      "gemini-3.1-flash-lite-preview",
+      "gemini-4-hydrogen",
+      "gemini-3.8-flash",
+      "gemini-3.5-flash-lite",
     ]);
-    expect(openai?.availableModels).toEqual(["gpt-5.6-luna", "gpt-5.4-nano"]);
-    expect(openai?.availableModels).not.toContain("gpt-5.4-mini");
+    expect(gemini?.availableModels).not.toContain("gemini-3.1-flash-lite-preview");
+    expect(openai?.availableModels).toEqual(["gpt-6-luna", "gpt-6.1-terra"]);
+    expect(openai?.availableModels).not.toContain("gpt-5.4-nano");
     expect(openrouter?.availableModels).toEqual([
-      "z-ai/glm-5.2",
-      "moonshotai/kimi-k2.5",
+      "deepseek/deepseek-v4.1-flash-1017",
+      "z-ai/glm-5.3",
+      "moonshotai/kimi-k3.1-pro",
       "~x-ai/grok-latest",
-      "qwen/qwen3.7-plus",
-      "deepseek/deepseek-v4-flash",
-      "xiaomi/mimo-v2.5",
-      "minimax/minimax-m3",
+      "qwen/qwen4-max",
+      "xiaomi/mimo-v2.6-pro",
+      "minimax/minimax-m3.1-flash",
     ]);
-    expect(openrouter?.availableModels).not.toContain("z-ai/glm-5.1");
+    expect(openrouter?.availableModels).not.toContain("moonshotai/kimi-k2.5");
     expect(openrouter?.availableModels).not.toContain("x-ai/grok-4.5");
-    expect(openrouter?.availableModels).not.toContain("qwen/qwen3.5-397b-a17b");
   });
 
   test("shows legacy model replacements and saves the replacements", async () => {
@@ -166,9 +167,9 @@ describe("mock Cloud AI settings", () => {
     await setCapsuleConfigValue("ai_chat_context_limit", "all");
 
     const migrated = await getAiSettings();
-    expect(migrated.geminiModel).toBe("gemini-3.5-flash");
-    expect(migrated.openaiModel).toBe("gpt-5.6-luna");
-    expect(migrated.openrouterModel).toBe("qwen/qwen3.7-plus");
+    expect(migrated.geminiModel).toBe("gemini-4-hydrogen");
+    expect(migrated.openaiModel).toBe("gpt-6-luna");
+    expect(migrated.openrouterModel).toBe("qwen/qwen4-max");
     expect(migrated.defaultContextLimit).toBeNull();
 
     await updateAiSettings({
@@ -180,13 +181,24 @@ describe("mock Cloud AI settings", () => {
     const savedConfig = await getCapsuleConfig();
     expect(savedConfig.values).toEqual(
       expect.arrayContaining([
-        { key: "gemini_model", value: "gemini-3.5-flash" },
-        { key: "openrouter_model", value: "qwen/qwen3.7-plus" },
+        { key: "gemini_model", value: "gemini-4-hydrogen" },
+        { key: "openrouter_model", value: "qwen/qwen4-max" },
         { key: "ai_chat_context_limit", value: "all" },
         { key: "ai_chat_context_since", value: "2026-01-01" },
         { key: "ai_chat_context_until", value: "2026-12-31" },
       ]),
     );
+  });
+
+  test("migrates retired November 2026 models to their successors", async () => {
+    await setCapsuleConfigValue("gemini_model", "gemini-3.1-flash-lite-preview");
+    await setCapsuleConfigValue("openai_model", "gpt-5.4-nano");
+    await setCapsuleConfigValue("openrouter_model", "moonshotai/kimi-k2.5");
+
+    const migrated = await getAiSettings();
+    expect(migrated.geminiModel).toBe("gemini-3.5-flash-lite");
+    expect(migrated.openaiModel).toBe("gpt-6-luna");
+    expect(migrated.openrouterModel).toBe("moonshotai/kimi-k3.1-pro");
   });
 
   test("migrates the direct Grok 4.5 slug to the OpenRouter Grok Latest alias", async () => {
@@ -251,7 +263,7 @@ describe("mock AI chat", () => {
     const start = await startAiChatStream({
       message: "What stands out about Capsule Tauri?",
       cloudProvider: "gemini",
-      model: "gemini-3.5-flash",
+      model: "gemini-4-hydrogen",
       scope: "search",
       scopeIdentifiers: [],
       contextFilters: null,
@@ -265,7 +277,7 @@ describe("mock AI chat", () => {
     unsubscribe();
     const detail = await getAiConversation(start.conversationId);
     expect(streamedContent).toContain("mock streamer");
-    expect(detail.model).toBe("gemini-3.5-flash");
+    expect(detail.model).toBe("gemini-4-hydrogen");
     expect(detail.messages.at(-1)?.status).toBe("complete");
     expect(JSON.stringify(detail)).not.toContain("mock-gemini-secret");
   });
@@ -285,7 +297,7 @@ describe("mock AI chat", () => {
     const start = await startAiChatStream({
       message: "Summarize the Codex workflow note",
       cloudProvider: "openrouter",
-      model: "qwen/qwen3.7-plus",
+      model: "qwen/qwen4-max",
       scope: "search",
       scopeIdentifiers: [],
       contextFilters: null,
@@ -302,13 +314,13 @@ describe("mock AI chat", () => {
     await retryAiChatStream({
       conversationId: start.conversationId,
       cloudProvider: "openrouter",
-      model: "qwen/qwen3.7-plus",
+      model: "qwen/qwen4-max",
       contextEntryUuids: cancelled.scopeIdentifiers,
     });
     await waitUntil(() => completed);
     unsubscribe();
     const retried = await getAiConversation(start.conversationId);
     expect(retried.messages.at(-1)?.status).toBe("complete");
-    expect(retried.model).toBe("qwen/qwen3.7-plus");
+    expect(retried.model).toBe("qwen/qwen4-max");
   });
 });

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.38.0 - 2026-11-24
+
+### Changed
+
+- Updated the Gemini models to Gemini 4 Hydrogen (new default), Gemini 3.8
+  Flash, and Gemini 3.5 Flash-Lite.
+- Updated the OpenAI models to GPT-6 Luna (new default, low reasoning) and
+  GPT-6.1 Terra.
+- Updated the OpenRouter models to DeepSeek V4.1 Flash (new default), GLM-5.3,
+  Kimi K3.1 Pro, Grok Latest, Qwen4-Max, MiMo-V2.6-Pro, and MiniMax M3.1 Flash.
+- Saved settings that reference retired models now migrate to their successors,
+  including `gemini-3.5-flash`, `gpt-5.6-luna`, `gpt-5.4-nano`, and every
+  previous OpenRouter option.
+- Bumped the app version to 0.38.0.
+
+### Fixed
+
+- Replaced `gemini-3.1-flash-lite-preview`, which Google shut down on
+  2026-05-25, and `gemini-3.5-flash`, which Google now silently reroutes to
+  `gemini-3.6-flash`.
+
 ## 0.37.0 - 2026-08-28
 
 ### Added

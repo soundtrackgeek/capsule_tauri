@@ -6436,9 +6436,9 @@ function SettingsView({
   });
   const [aiDraft, setAiDraft] = useState({
     cloudProvider: "gemini" as AICloudProvider,
-    geminiModel: "gemini-3.5-flash",
-    openaiModel: "gpt-5.6-luna",
-    openrouterModel: "moonshotai/kimi-k2.5",
+    geminiModel: "gemini-4-hydrogen",
+    openaiModel: "gpt-6-luna",
+    openrouterModel: "deepseek/deepseek-v4.1-flash-1017",
     defaultContextLimit: "",
     defaultSince: "",
     defaultUntil: "",
@@ -7007,7 +7007,7 @@ function SettingsView({
               }
               value={aiDraft.geminiModel}
             >
-              {modelsForProvider(aiProviderStatuses, "gemini", ["gemini-3.5-flash"]).map(
+              {modelsForProvider(aiProviderStatuses, "gemini", ["gemini-4-hydrogen"]).map(
                 (model) => (
                   <option key={model} value={model}>
                     {model}
@@ -7027,7 +7027,7 @@ function SettingsView({
               }
               value={aiDraft.openaiModel}
             >
-              {modelsForProvider(aiProviderStatuses, "openai", ["gpt-5.6-luna"]).map((model) => (
+              {modelsForProvider(aiProviderStatuses, "openai", ["gpt-6-luna"]).map((model) => (
                 <option key={model} value={model}>
                   {model}
                 </option>
@@ -7045,7 +7045,9 @@ function SettingsView({
               }
               value={aiDraft.openrouterModel}
             >
-              {modelsForProvider(aiProviderStatuses, "openrouter", ["moonshotai/kimi-k2.5"]).map(
+              {modelsForProvider(aiProviderStatuses, "openrouter", [
+                "deepseek/deepseek-v4.1-flash-1017",
+              ]).map(
                 (model) => (
                   <option key={model} value={model}>
                     {model}
