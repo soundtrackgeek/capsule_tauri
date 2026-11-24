@@ -170,8 +170,10 @@ import {
   EntryDetail,
   EntryMeta,
   EntryMini,
+  ThreadEntryReading,
   EntryStack,
 } from "./components/entries";
+import { MarkdownContent } from "./components/markdown";
 import { CoverImage, DataUrlImage, ImageLightbox, LocalImagePreview } from "./components/media";
 import { StatusPill } from "./components/StatusPill";
 import { Detail, Metric, Panel, SkeletonList, UnavailableState, WarningList } from "./components/ui";
@@ -3755,6 +3757,7 @@ function EntriesView({
       </div>
 
       <EntryDetail
+        attachments={selectedEntry ? entryImagesByUuid[selectedEntry.uuid] : undefined}
         entry={selectedEntry}
         entryHistory={entryHistory}
         historyLoading={historyLoading}
@@ -4058,6 +4061,7 @@ function SearchView({
       </div>
 
       <EntryDetail
+        attachments={selectedEntry ? entryImagesByUuid[selectedEntry.uuid] : undefined}
         entry={selectedEntry}
         entryHistory={entryHistory}
         historyLoading={historyLoading}
@@ -4958,7 +4962,7 @@ function ThreadsView({
                     <div className="thread-entry-index">{index + 1}</div>
                     <div className="thread-entry-main">
                       <h4>{entry.title || entry.textPlain.slice(0, 86) || "Untitled entry"}</h4>
-                      <p>{entry.textPlain.slice(0, 180)}</p>
+                      <ThreadEntryReading entry={entry} />
                       <EntryMeta entry={entry} />
                     </div>
                     <div className="thread-entry-actions">
@@ -5105,6 +5109,8 @@ function ComposerView({
   wordTarget,
   gauntletModeEnabled,
 }: ComposerViewProps) {
+  const [previewing, setPreviewing] = useState(false);
+  const entryInputId = useId();
   const [composerTagCatalog, setComposerTagCatalog] = useState<TagCatalogResponse | null>(tagCatalog);
   const [composerMoodCatalog, setComposerMoodCatalog] = useState<MoodCatalogResponse | null>(moodCatalog);
 
@@ -5230,15 +5236,38 @@ function ComposerView({
           />
         </label>
 
-        <label className="field composer-text-field">
-          <span>Entry</span>
+        <div className="field composer-text-field">
+          <div className="composer-text-heading">
+            {previewing ? <span>Entry preview</span> : (
+              <label htmlFor={entryInputId}><span>Entry</span></label>
+            )}
+            <button
+              aria-pressed={previewing}
+              className="secondary-button secondary-button--small"
+              onClick={() => setPreviewing(!previewing)}
+              type="button"
+            >
+              Preview
+            </button>
+          </div>
           <textarea
             autoFocus
+            hidden={previewing}
+            id={entryInputId}
             onChange={(event) => onChange({ ...draft, text: event.target.value })}
             placeholder="Write the entry"
             value={draft.text}
           />
-        </label>
+          {previewing && (
+            <div className="composer-markdown-preview">
+              {draft.text.trim() ? (
+                <MarkdownContent text={draft.text} />
+              ) : (
+                <div className="empty-state">Write an entry to preview it.</div>
+              )}
+            </div>
+          )}
+        </div>
         {wordTargetEnabled && (
           <WordTargetProgress
             gauntletModeEnabled={gauntletModeEnabled}

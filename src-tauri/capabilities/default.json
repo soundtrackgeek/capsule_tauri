@@ -3,5 +3,13 @@
   "identifier": "default",
   "description": "Default permissions for the Capsule desktop window",
   "windows": ["main"],
-  "permissions": ["core:default", "updater:default", "window-state:default"]
+  "permissions": [
+    "core:default",
+    "updater:default",
+    "window-state:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://*" }, { "url": "http://*" }, { "url": "mailto:*" }]
+    }
+  ]
 }

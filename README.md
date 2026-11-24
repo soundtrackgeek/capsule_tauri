@@ -28,24 +28,28 @@ explicit capability-gated AI/sync surfaces:
   capsules and words—plus counts for total entries, total tags, total words
   across every entry, and current-month entries.
 - Recent entries, pinned entries, and a full-text random entry with its created
-  timestamp above Recent Entries, with old-Capsule-style entry numbers and
-  per-entry word counts.
+  timestamp above Recent Entries, with old-Capsule-style entry numbers,
+  per-entry word counts, Markdown formatting, and attached photos.
 - Entries list with chronological old-Capsule-style entry numbers and per-entry
   word counts, including
   automatic backup-guarded resequencing when an older entry arrives through
   sync, plus inline image thumbnails that open full-size previews and text,
   tag, mood, location, date, image, hidden, and sort filters.
-- Entry detail view with entry number, full text that preserves authored line
-  breaks, tags, mood, location, attachment count, and thread metadata when those
-  tables are available,
+- Entry detail view in Entries, Search, and Cover Wall with formatted Markdown,
+  a **Raw** view for the original Markdown, and attached photo thumbnails that
+  open a larger view. Plain-text entries preserve authored line breaks. The
+  reader also shows tags, mood, location, and thread metadata when available,
   including stored weather condition, Celsius-first temperature, humidity, wind,
   icon, and fetched timestamp.
+- Markdown web links open in the default browser. Markdown image syntax displays
+  its alt text without fetching remote images. Journal photos come from local
+  attachments.
 - Backup-guarded entry creation and editing, with Capsule-compatible location
   and weather auto-capture for new entries.
 - Backup-guarded star, unstar, pin, unpin, hide, unhide, and confirmed delete
   entry actions.
-- Full-page markdown composer with metadata fields, mood autocomplete,
-  chip-style tag entry with autocomplete and Tab/Enter pill creation, save-time
+- Full-page Markdown composer with a **Preview** toggle, metadata fields, mood
+  autocomplete, chip-style tag entry with autocomplete and Tab/Enter pill creation, save-time
   entry dating, continuation UUID support that is cleared by an explicit New
   action, multi-select queued local image attachments with thumbnail previews,
   writing stats, local draft recovery, and apply-before-save AI title/summary
@@ -69,7 +73,8 @@ explicit capability-gated AI/sync surfaces:
   breaks in the selected entry, and the same star, pin, edit, continue, delete,
   and hide/unhide actions used by the Entries view.
 - Thread groups built from Capsule continuation links with ordered entries,
-  per-entry and per-thread word counts, latest activity, titles, summaries, a
+  expandable Markdown and photo readers, per-entry and per-thread word counts,
+  latest activity, titles, summaries, a
   direct action for adding a new entry, and a searchable picker for attaching
   an existing standalone entry after the end of the selected thread.
 - Backup-guarded thread title/summary updates, bulk link commands, leaf detach,

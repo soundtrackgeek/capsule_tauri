@@ -8,6 +8,7 @@ import {
   EntryCardContent,
   EntryDetail,
   EntryMini,
+  EntryReadingContent,
   EntryStack,
 } from "./entries";
 import { makeEntry } from "../test/fixtures";
@@ -126,6 +127,8 @@ describe("entry components", () => {
   test("renders entry detail with authored line breaks", () => {
     const text = "First paragraph.\n\nSecond paragraph.\nThird line.";
     const entry = makeEntry({
+      attachmentCount: 0,
+      contentFormat: "plain",
       text,
       textPlain: "First paragraph. Second paragraph. Third line.",
     });
@@ -147,9 +150,43 @@ describe("entry components", () => {
     );
 
     expect(container.querySelector(".entry-body")?.textContent).toBe(text);
+    expect(screen.queryByRole("button", { name: "Raw" })).not.toBeInTheDocument();
   });
 
-  test("renders entry detail as an embedded reader", () => {
+  test("formats Markdown while preserving the original text and blocking unsafe content", async () => {
+    const user = userEvent.setup();
+    const text = [
+      "## A day outside",
+      "",
+      "First **line**\nSecond line with a [map](https://example.com/map).",
+      "",
+      "- A list item",
+      "",
+      "[Blocked link](javascript:alert%281%29)",
+      "![Remote photo](https://example.com/photo.jpg)",
+      "",
+      "<iframe src='https://example.com/tracker'></iframe>",
+    ].join("\n");
+    const { container } = render(
+      <EntryReadingContent entry={makeEntry({ attachmentCount: 0, text })} />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "A day outside" })).toBeInTheDocument();
+    expect(screen.getByText("line", { selector: "strong" })).toBeInTheDocument();
+    expect(container.querySelector(".markdown-content br")).toBeInTheDocument();
+    expect(screen.getByRole("listitem")).toHaveTextContent("A list item");
+    expect(screen.getByRole("link", { name: "map" })).toHaveAttribute("href", "https://example.com/map");
+    expect(screen.queryByRole("link", { name: "Blocked link" })).not.toBeInTheDocument();
+    expect(screen.getByText(/Remote photo/)).toBeInTheDocument();
+    expect(container.querySelector("iframe, img")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Raw" }));
+    expect(container.querySelector(".entry-body")?.textContent).toBe(text);
+    await user.click(screen.getByRole("button", { name: "Formatted" }));
+    expect(screen.getByRole("heading", { name: "A day outside" })).toBeInTheDocument();
+  });
+
+  test("renders entry detail as an embedded reader", async () => {
     const entry = makeEntry();
     const { container } = render(
       <EntryDetail
@@ -171,7 +208,7 @@ describe("entry components", () => {
     expect(container.querySelector(".entry-reader")).toBeInTheDocument();
     expect(container.querySelector(".detail-panel")).not.toBeInTheDocument();
     expect(
-      screen.getByText("A focused test entry with enough body text to render useful previews."),
+      await screen.findByText("A focused test entry with enough body text to render useful previews."),
     ).toBeInTheDocument();
   });
 

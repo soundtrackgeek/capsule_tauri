@@ -1,7 +1,7 @@
 {
   "name": "capsule-tauri",
   "private": true,
-  "version": "0.38.1",
+  "version": "0.39.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1430 --strictPort",
@@ -18,11 +18,15 @@
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.1",
+    "@tauri-apps/plugin-opener": "2.5.4",
     "@tauri-apps/plugin-updater": "2.10.1",
     "@tauri-apps/plugin-window-state": "2.4.1",
     "lucide-react": "0.562.0",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "react-markdown": "10.1.0",
+    "remark-breaks": "4.0.0",
+    "remark-gfm": "4.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

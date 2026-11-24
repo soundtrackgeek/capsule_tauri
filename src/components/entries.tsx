@@ -16,13 +16,18 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { listEntryImages } from "../backend";
 import { countWords, formatDateTime, formatEntryNumber, formatWordCount } from "../lib/format";
 import type { Entry, EntryHistoryResponse, ExportFormat, ImageAttachment } from "../types";
-import { DataUrlImage } from "./media";
+import { MarkdownContent } from "./markdown";
+import { DataUrlImage, ImageLightbox } from "./media";
 import { Detail, SkeletonList } from "./ui";
 
 type EntryDetailProps = {
   entry: Entry | null;
+  attachments?: ImageAttachment[];
   entryHistory: EntryHistoryResponse | null;
   embedded?: boolean;
   historyLoading: boolean;
@@ -50,6 +55,7 @@ function formatWeatherTemperature(location: NonNullable<Entry["location"]>) {
 
 export function EntryDetail({
   entry,
+  attachments,
   entryHistory,
   embedded = false,
   historyLoading,
@@ -86,7 +92,6 @@ export function EntryDetail({
     );
   }
 
-  const displayText = entry.text || entry.textPlain;
   const wordCount = countWords(entry.textPlain || entry.text);
   const weatherTemperature = entry.location ? formatWeatherTemperature(entry.location) : null;
 
@@ -160,7 +165,7 @@ export function EntryDetail({
         ))}
       </div>
 
-      <article className="entry-body">{displayText}</article>
+      <EntryReadingContent attachments={attachments} entry={entry} key={entry.uuid} />
 
       <dl className="detail-list detail-list--compact">
         <Detail label="Number" value={formatEntryNumber(entry.id)} />
@@ -285,8 +290,6 @@ export function EntryStack({ entries, loading, emptyText = "No entries found." }
 }
 
 export function EntryMini({ entry, fullText = false }: { entry: Entry; fullText?: boolean }) {
-  const body = fullText ? entry.text || entry.textPlain : entry.textPlain.slice(0, 140);
-
   return (
     <article className={fullText ? "entry-mini entry-mini--full" : "entry-mini"}>
       <div className="entry-mini-heading">
@@ -298,9 +301,138 @@ export function EntryMini({ entry, fullText = false }: { entry: Entry; fullText?
           {formatDateTime(entry.createdAt)}
         </time>
       )}
-      <p>{body}</p>
+      {fullText ? (
+        <EntryReadingContent entry={entry} key={entry.uuid} />
+      ) : (
+        <p>{entry.textPlain.slice(0, 140)}</p>
+      )}
       <EntryMeta entry={entry} />
     </article>
+  );
+}
+
+export function EntryReadingContent({
+  attachments,
+  entry,
+}: {
+  attachments?: ImageAttachment[];
+  entry: Entry;
+}) {
+  const [raw, setRaw] = useState(false);
+  const hasMarkdown = entry.contentFormat === "markdown" && Boolean(entry.text);
+
+  return (
+    <>
+      {hasMarkdown && (
+        <div aria-label="Entry text view" className="entry-reading-controls" role="group">
+          <button
+            aria-pressed={!raw}
+            className="secondary-button secondary-button--small"
+            onClick={() => setRaw(false)}
+            type="button"
+          >
+            Formatted
+          </button>
+          <button
+            aria-pressed={raw}
+            className="secondary-button secondary-button--small"
+            onClick={() => setRaw(true)}
+            type="button"
+          >
+            Raw
+          </button>
+        </div>
+      )}
+      <div className="entry-body">
+        {hasMarkdown && !raw ? (
+          <MarkdownContent text={entry.text} />
+        ) : (
+          entry.text || entry.textPlain
+        )}
+      </div>
+      {entry.attachmentCount > 0 && (
+        <EntryReaderPhotos
+          attachments={attachments}
+          entryUuid={entry.uuid}
+          key={entry.attachmentCount}
+        />
+      )}
+    </>
+  );
+}
+
+export function ThreadEntryReading({ entry }: { entry: Entry }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <>
+      {!expanded && <p>{entry.textPlain.slice(0, 180)}</p>}
+      <button
+        aria-expanded={expanded}
+        className="secondary-button secondary-button--small thread-read-button"
+        onClick={() => setExpanded(!expanded)}
+        type="button"
+      >
+        {expanded ? "Close entry" : "Read entry"}
+      </button>
+      {expanded && <EntryReadingContent entry={entry} />}
+    </>
+  );
+}
+
+function EntryReaderPhotos({
+  attachments,
+  entryUuid,
+}: {
+  attachments?: ImageAttachment[];
+  entryUuid: string;
+}) {
+  const [loadedImages, setLoadedImages] = useState<ImageAttachment[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [expandedImage, setExpandedImage] = useState<ImageAttachment | null>(null);
+  const needsImages = attachments === undefined;
+
+  useEffect(() => {
+    if (!needsImages) {
+      return;
+    }
+
+    let current = true;
+    listEntryImages(entryUuid)
+      .then(({ images }) => {
+        if (current) {
+          setLoadedImages(images);
+          setFailed(false);
+        }
+      })
+      .catch(() => {
+        if (current) {
+          setFailed(true);
+        }
+      });
+
+    return () => {
+      current = false;
+    };
+  }, [entryUuid, needsImages]);
+
+  const images = attachments ?? loadedImages;
+
+  return (
+    <section aria-label="Attached photos" className="entry-reader-photos">
+      <h4>Photos</h4>
+      {images?.length ? (
+        <EntryAttachmentStrip attachments={images} onOpen={setExpandedImage} />
+      ) : (
+        <div className="entry-photo-status" role="status">
+          {failed || images ? "Attached photos are unavailable." : "Loading attached photos…"}
+        </div>
+      )}
+      {expandedImage && createPortal(
+        <ImageLightbox attachment={expandedImage} onClose={() => setExpandedImage(null)} />,
+        document.body,
+      )}
+    </section>
   );
 }
 

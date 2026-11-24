@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { FileImage, Images, X } from "lucide-react";
 import {
   getCoverDataUrl,
@@ -151,18 +151,48 @@ export function ImageLightbox({
   attachment: ImageAttachment;
   onClose: () => void;
 }) {
+  const titleId = useId();
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useLayoutEffect(() => {
+    const trigger = document.activeElement;
+    closeButtonRef.current?.focus();
+    return () => {
+      if (trigger instanceof HTMLElement && trigger.isConnected) {
+        trigger.focus();
+      }
+    };
+  }, []);
+
   return (
-    <div className="lightbox" role="dialog" aria-modal="true">
+    <div
+      aria-labelledby={titleId}
+      aria-modal="true"
+      className="lightbox"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          onClose();
+        } else if (event.key === "Tab") {
+          event.preventDefault();
+        }
+      }}
+      role="dialog"
+    >
       <div className="lightbox-toolbar">
         <div>
           <p className="eyebrow">{attachment.mimeType}</p>
-          <h3>{attachment.caption || attachment.altText || attachment.hash}</h3>
+          <h3 id={titleId}>{attachment.caption || attachment.altText || attachment.hash}</h3>
         </div>
-        <button className="icon-button" onClick={onClose} title="Close" type="button">
+        <button className="icon-button" onClick={onClose} ref={closeButtonRef} title="Close" type="button">
           <X size={18} />
         </button>
       </div>
-      <DataUrlImage attachment={attachment} className="lightbox-image" variant="full" />
+      <DataUrlImage
+        attachment={attachment}
+        className="lightbox-image"
+        variant={attachment.originalAvailable ? "full" : "thumb"}
+      />
     </div>
   );
 }

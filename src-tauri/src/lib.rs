@@ -945,6 +945,11 @@ pub fn run() {
     }));
 
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    let builder = builder.plugin(
+        tauri_plugin_opener::Builder::new()
+            .open_js_links_on_click(false)
+            .build(),
+    );
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     let builder = builder.plugin(

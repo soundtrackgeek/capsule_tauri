@@ -42,6 +42,16 @@ test("loads the mock dashboard and navigates entries and search", async ({ page 
   await expect(page.locator(".detail-panel")).toContainText(
     "Read-only journal browsing starts to feel real.",
   );
+  await page.getByRole("button", { name: /A small note about the Codex workflow/ }).click();
+  const readerThumbnail = page
+    .getByRole("region", { name: "Attached photos" })
+    .getByRole("button", { name: "View image 1" });
+  await expect(readerThumbnail.getByRole("img")).toBeVisible();
+  await readerThumbnail.click();
+  await expect(page.getByRole("dialog", { name: "Desk reference" }).getByRole("img")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Desk reference" })).toBeHidden();
+  await expect(readerThumbnail).toBeFocused();
 
   await page
     .getByRole("navigation", { name: "Primary" })
@@ -57,6 +67,17 @@ test("loads the mock dashboard and navigates entries and search", async ({ page 
   await firstSearchThumbnail.click();
   await expect(page.locator(".lightbox")).toBeVisible();
   await expect(page.locator(".lightbox-image")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await page.getByRole("navigation", { name: "Primary" })
+    .getByRole("button", { name: "Threads" }).click();
+  const threadEntry = page.getByRole("region", { name: "Threads" })
+    .locator(".thread-entry-row").filter({ hasText: "A small note about the Codex workflow" });
+  await threadEntry.getByRole("button", { name: "Read entry" }).click();
+  await expect(threadEntry.locator(".entry-body")).toContainText(
+    "how much easier the desktop version should make database safety feel",
+  );
+  await expect(threadEntry.getByRole("img", { name: "A quiet desktop reference image" })).toBeVisible();
 
   expect(browserErrors).toEqual([]);
 });
@@ -90,14 +111,23 @@ test("creates a journal entry through the composer", async ({ page }) => {
 
   await expect(composer).toBeVisible();
   await composer.getByRole("textbox", { name: "Title" }).fill(title);
-  await composer
-    .getByRole("textbox", { name: "Entry" })
-    .fill("This entry was created by Playwright to protect the main writing path.");
+  const markdown = "## A small milestone\n\nThis entry has **formatted text**.";
+  const entryInput = composer.getByRole("textbox", { name: "Entry" });
+  const preview = composer.getByRole("button", { name: "Preview" });
+  await entryInput.fill(markdown);
+  await preview.click();
+  await expect(composer.getByRole("heading", { name: "A small milestone" })).toBeVisible();
+  await preview.click();
+  await expect(entryInput).toHaveValue(markdown);
   await page.getByRole("button", { name: "Save" }).click();
 
   await expect(page.getByRole("heading", { name: "Entries", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: new RegExp(title) })).toBeVisible();
-  await expect(page.locator(".detail-panel")).toContainText(title);
+  const reader = page.locator(".detail-panel");
+  await expect(reader.getByRole("heading", { name: title })).toBeVisible();
+  await expect(reader.getByRole("heading", { name: "A small milestone" })).toBeVisible();
+  await reader.getByRole("button", { name: "Raw" }).click();
+  await expect(reader.locator(".entry-body")).toHaveText(markdown);
 
   expect(browserErrors).toEqual([]);
 });

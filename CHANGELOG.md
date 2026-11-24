@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.39.0 - 2026-11-24
+
+### Added
+
+- Added a Markdown preview to the composer and expandable readers to Threads.
+- Added local photo galleries to entry readers, with larger previews on click.
+
+### Fixed
+
+- Markdown entries now display formatted text in Entries, Search, Cover Wall,
+  Threads, and the Dashboard's full random entry. The Raw view shows the original
+  Markdown and plain-text entries retain their authored line breaks.
+
+### Changed
+
+- Bumped the app version to 0.39.0.
+
 ## 0.38.1 - 2026-11-24
 
 ### Fixed
